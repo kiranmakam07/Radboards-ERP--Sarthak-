@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api-demo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "demo", "-w", "@radcore/api"],
+      "port": 4000
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "-w", "@radcore/web"],
+      "port": 3000
+    }
+  ]
+}

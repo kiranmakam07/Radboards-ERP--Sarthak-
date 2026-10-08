@@ -1,0 +1,51 @@
+'use client';
+
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { LineEditor, toApiLines, type ItemLite, type Line } from '@/components/lines';
+import { Card, ErrorBox, Page } from '@/components/ui';
+import { post, useGet } from '@/lib/api';
+
+export default function NewPurchaseOrderPage() {
+  const router = useRouter();
+  const suppliers = useGet<{ data: any[] }>('/parties?type=supplier&limit=2000');
+  const items = useGet<{ data: ItemLite[] }>('/items?limit=2000');
+  const [supplierId, setSupplierId] = useState('');
+  const [expected, setExpected] = useState('');
+  const [notes, setNotes] = useState('');
+  const [lines, setLines] = useState<Line[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    setError(null);
+    try {
+      const res = await post('/purchasing/orders', { supplier_id: supplierId, expected_date: expected, notes, lines: toApiLines(lines, false) });
+      router.push(`/purchasing/orders/${res.data.id}`);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  return (
+    <Page title="New purchase order">
+      <Card>
+        <div className="form">
+          <label><span>Supplier *</span>
+            <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+              <option value="">—</option>{(suppliers.data?.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </label>
+          <label><span>Expected date</span><input type="date" value={expected} onChange={(e) => setExpected(e.target.value)} /></label>
+          <label className="wide"><span>Notes</span><textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+        </div>
+      </Card>
+      <Card title="Items">
+        <p className="muted small">Rates default to the item's last purchase cost (before GST). Accepted goods are valued at this PO rate.</p>
+        <LineEditor items={items.data?.data ?? []} lines={lines} onChange={setLines} priceKey="purchase_cost" showDiscount={false}
+          filter={(i) => i.is_stock_item} />
+      </Card>
+      <ErrorBox error={error} />
+      <p style={{ marginTop: 12 }}><button type="button" className="primary" disabled={!supplierId || lines.length === 0} onClick={save}>Save PO</button></p>
+    </Page>
+  );
+}
