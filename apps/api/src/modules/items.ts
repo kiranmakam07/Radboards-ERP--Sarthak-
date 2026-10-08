@@ -7,7 +7,7 @@ import { requirePerm } from '../core/auth';
 import { rows, type DB } from '../db/client';
 import { channelItemMap, itemImages, items, priceListItems, priceLists } from '../db/schema';
 import { badRequest, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zGstRate, zId, zListQuery, zMoney, zQtyNonNeg, zText } from '../lib/http';
+import { emptyToNull, inTx, sendList, zGstRate, zHttpUrl, zId, zListQuery, zMoney, zQtyNonNeg, zText } from '../lib/http';
 
 export type PriceList = typeof priceLists.$inferSelect;
 export type Item = typeof items.$inferSelect;
@@ -78,12 +78,15 @@ export function itemsRouter(db: DB) {
     const like = q.q ? `%${q.q}%` : null;
     const data = await rows(db, sql`
       select i.*, c.name as category_name,
-             coalesce(s.sellable, 0) as on_hand, coalesce(s.rejected, 0) as rejected_qty
+             coalesce(s.sellable, 0) as on_hand, coalesce(s.showroom, 0) as showroom_qty,
+             coalesce(s.stores, 0) as stores_qty, coalesce(s.rejected, 0) as rejected_qty
         from items i
         left join item_categories c on c.id = i.category_id
         left join (
           select m.item_id,
                  sum(m.qty) filter (where l.type <> 'rejected') as sellable,
+                 sum(m.qty) filter (where l.type = 'showroom') as showroom,
+                 sum(m.qty) filter (where l.type = 'stores') as stores,
                  sum(m.qty) filter (where l.type = 'rejected') as rejected
             from stock_movements m join locations l on l.id = m.location_id
            group by m.item_id
@@ -156,7 +159,7 @@ export function itemsRouter(db: DB) {
 
   r.post('/:id/images', requirePerm('items:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const body = z.object({ url: z.string().url().max(1000), sort: z.number().int().default(0) }).parse(req.body);
+    const body = z.object({ url: zHttpUrl, sort: z.number().int().default(0) }).parse(req.body);
     const [row] = await db.insert(itemImages).values({ itemId: id, url: body.url, sort: body.sort, createdBy: req.user!.id }).returning();
     res.status(201).json({ data: row });
   });

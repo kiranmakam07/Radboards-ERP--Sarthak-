@@ -82,6 +82,8 @@ export const zAddress = z.object({
 export const emptyToNull = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => (v === '' || v === undefined ? null : v), schema.nullable());
 export const zText = (max = 500) => z.string().trim().min(1).max(max);
+/** Links shown in the UI must be plain web links - never javascript: or data: URLs. */
+export const zHttpUrl = z.string().trim().max(1000).url().refine((u) => /^https?:\/\//i.test(u), 'must start with http:// or https://');
 
 export const zListQuery = z.object({
   q: z.string().trim().max(100).optional(),
