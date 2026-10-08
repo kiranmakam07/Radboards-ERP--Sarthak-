@@ -1,0 +1,17 @@
+# Optional: real PostgreSQL for local development (the API also runs without it, on PGlite).
+#   docker compose up -d
+#   then set DATABASE_URL=postgres://radcore:radcore@localhost:5433/radcore in .env
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: radcore
+      POSTGRES_PASSWORD: radcore
+      POSTGRES_DB: radcore
+    ports:
+      - '5433:5432'
+    volumes:
+      - radcore_pg:/var/lib/postgresql/data
+
+volumes:
+  radcore_pg:
