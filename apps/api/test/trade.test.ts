@@ -47,7 +47,7 @@ beforeAll(async () => {
     party_type: 'dealer', name: 'Bangalore Boards', phone: '9700000002', gstin: gstin('29', 'DEALR1234B'), credit_limit: 60000, payment_terms_days: 15,
   }).expect(201);
   id.supplier = supplier.body.data.id; id.dealer = dealer.body.data.id;
-  expect(dealer.body.data.stateCode).toBe('29'); // read from the GSTIN
+  expect(dealer.body.data.state_code).toBe('29'); // read from the GSTIN
 });
 afterAll(() => w.close());
 
@@ -58,7 +58,7 @@ describe('purchase to stock (QC splits every receipt)', () => {
       supplier_id: id.supplier, lines: [{ item_id: id.board, qty: 20, rate: 2500 }, { item_id: id.wheels, qty: 50, rate: 500 }],
     }).expect(201);
     id.po = po.body.data.id;
-    expect(po.body.data.poNo).toMatch(/^PO\/\d\d-\d\d\/00001$/);
+    expect(po.body.data.po_no).toMatch(/^PO\/\d\d-\d\d\/00001$/);
     // Goods cannot be received against a draft PO.
     const detail = await stores.get(`/api/purchasing/orders/${id.po}`).expect(200);
     id.polBoard = detail.body.data.lines.find((l: { sku: string }) => l.sku === 'BRD-1').id;
@@ -75,10 +75,10 @@ describe('purchase to stock (QC splits every receipt)', () => {
       lines: [{ po_line_id: id.polBoard, qty: 20, rate: 2500 }, { po_line_id: id.polWheels, qty: 50, rate: 500 }],
     }).expect(201);
     id.bill = bill.body.data.id;
-    expect(bill.body.data.grandTotal).toBe('87000.00');
-    expect(bill.body.data.cgstTotal).toBe('6000.00');
-    expect(bill.body.data.sgstTotal).toBe('6000.00');
-    expect(bill.body.data.igstTotal).toBe('0.00');
+    expect(bill.body.data.grand_total).toBe('87000.00');
+    expect(bill.body.data.cgst_total).toBe('6000.00');
+    expect(bill.body.data.sgst_total).toBe('6000.00');
+    expect(bill.body.data.igst_total).toBe('0.00');
     expect(await accountBalance('creditors')).toBe(-87000);
     expect(await accountBalance('grni')).toBe(75000);
     // The same supplier invoice cannot be entered twice.
@@ -146,10 +146,10 @@ describe('purchase to stock (QC splits every receipt)', () => {
     const res = await stores.post(`/api/purchasing/receipts/${id.grn}/return`).send({}).expect(201);
     const dn = res.body.data.debit_note;
     // 2 x 2500 = 5,000 + 18% = 5,900
-    expect(dn.docType).toBe('debit_note');
-    expect(dn.billNo).toMatch(/^DN\//);
-    expect(dn.grandTotal).toBe('5900.00');
-    expect(dn.againstBillId).toBe(id.bill);
+    expect(dn.doc_type).toBe('debit_note');
+    expect(dn.bill_no).toMatch(/^DN\//);
+    expect(dn.grand_total).toBe('5900.00');
+    expect(dn.against_bill_id).toBe(id.bill);
     expect(await onHand(w.db, id.board!, m.rejected)).toBe(0);
     expect(await accountBalance('stock')).toBe(70000);
     expect(await accountBalance('creditors')).toBe(-81100);
@@ -175,7 +175,7 @@ describe('purchase to stock (QC splits every receipt)', () => {
       direction: 'out', party_id: id.supplier, mode: 'bank_transfer', amount: 50000, reference: 'UTR123',
       allocations: [{ purchase_bill_id: id.bill, amount: 50000 }],
     }).expect(201);
-    expect(pay.body.data.paymentNo).toMatch(/^PAY\//);
+    expect(pay.body.data.payment_no).toMatch(/^PAY\//);
     const payables = await accounts.get('/api/purchasing/payables').expect(200);
     expect(Number(payables.body.data[0].outstanding)).toBe(31100);
     const bill = await accounts.get(`/api/purchasing/bills/${id.bill}`).expect(200);
@@ -259,14 +259,14 @@ describe('store quick bill (one transaction)', () => {
     const inv = res.body.data.invoice;
     id.inv1 = inv.id;
     // 5900 + 2240 + 236 = 8376 ; taxable 5000 + 2000 + 200 = 7200 ; CGST = SGST = 450 + 120 + 18 = 588
-    expect(inv.invoiceNo).toMatch(/^INV\/\d\d-\d\d\/00001$/);
-    expect(inv.invoiceNo.length).toBeLessThanOrEqual(16);
+    expect(inv.invoice_no).toMatch(/^INV\/\d\d-\d\d\/00001$/);
+    expect(inv.invoice_no.length).toBeLessThanOrEqual(16);
     expect(inv.status).toBe('issued');
-    expect(inv.grandTotal).toBe('8376.00');
-    expect(inv.taxableTotal).toBe('7200.00');
-    expect(inv.cgstTotal).toBe('588.00');
-    expect(inv.sgstTotal).toBe('588.00');
-    expect(inv.igstTotal).toBe('0.00');
+    expect(inv.grand_total).toBe('8376.00');
+    expect(inv.taxable_total).toBe('7200.00');
+    expect(inv.cgst_total).toBe('588.00');
+    expect(inv.sgst_total).toBe('588.00');
+    expect(inv.igst_total).toBe('0.00');
     expect(res.body.data.balance_due).toBe('0.00');
     expect(res.body.data.payments).toHaveLength(2);
 
@@ -311,8 +311,8 @@ describe('store quick bill (one transaction)', () => {
 
     // The next real bill gets the very next number: the series has no gap.
     const ok = await store.post('/api/sales/quick-bill').send({ lines: [{ item_id: id.wheels, qty: 1 }], payments: [{ mode: 'cash', amount: 1120 }] }).expect(201);
-    expect(ok.body.data.invoice.invoiceNo).toMatch(/00002$/);
-    expect(ok.body.data.invoice.partyName).toBe('Cash Sale');
+    expect(ok.body.data.invoice.invoice_no).toMatch(/00002$/);
+    expect(ok.body.data.invoice.party_name).toBe('Cash Sale');
     id.inv2 = ok.body.data.invoice.id;
   });
 
@@ -333,7 +333,7 @@ describe('store quick bill (one transaction)', () => {
       party_id: id.rahul, lines: [{ item_id: id.wheels, qty: 1, discount: 120 }], payments: [{ mode: 'card', amount: 600 }],
     }).expect(201);
     id.inv3 = res.body.data.invoice.id;
-    expect(res.body.data.invoice.grandTotal).toBe('1000.00'); // 1120 - 120 discount
+    expect(res.body.data.invoice.grand_total).toBe('1000.00'); // 1120 - 120 discount
     expect(res.body.data.balance_due).toBe('400.00');
     const doc = await store.get(`/api/sales/invoices/${id.inv3}`).expect(200);
     expect(doc.body.data.payment.payment_status).toBe('partly_paid');
@@ -358,7 +358,7 @@ describe('dealer flow: quote -> order -> partial delivery -> invoice (inter-stat
     }).expect(201);
     id.so = res.body.data.id;
     expect(res.body.data.status).toBe('draft');
-    expect(res.body.data.placeOfSupply).toBe('29');
+    expect(res.body.data.place_of_supply).toBe('29');
     const detail = await sales.get(`/api/sales/orders/${id.so}`).expect(200);
     // 6 x 4000 = 24,000 @18% = 4,320 ; 10 x 800 - 500 = 7,500 @12% = 900 ; total 36,720
     expect(detail.body.data.totals).toMatchObject({ taxable_total: '31500.00', igst_total: '5220.00', cgst_total: '0.00', grand_total: '36720.00' });
@@ -393,14 +393,14 @@ describe('dealer flow: quote -> order -> partial delivery -> invoice (inter-stat
     const i1 = await sales.post(`/api/sales/orders/${id.so}/invoice`).send({}).expect(201);
     id.dealerInv1 = i1.body.data.id;
     // 4 x 4000 = 16,000 @18% = 2,880 ; wheels 7,500 @12% = 900 ; total 27,280
-    expect(i1.body.data).toMatchObject({ taxableTotal: '23500.00', igstTotal: '3780.00', cgstTotal: '0.00', grandTotal: '27280.00', partyGstin: gstin('29', 'DEALR1234B') });
+    expect(i1.body.data).toMatchObject({ taxable_total: '23500.00', igst_total: '3780.00', cgst_total: '0.00', grand_total: '27280.00', party_gstin: gstin('29', 'DEALR1234B') });
     await sales.post(`/api/sales/orders/${id.so}/invoice`).send({}).expect(409); // nothing more delivered yet
 
     const d2 = await sales.post(`/api/sales/orders/${id.so}/deliver`).send({}).expect(201); // the rest
     expect(d2.body.data.order.status).toBe('delivered');
     const i2 = await sales.post(`/api/sales/orders/${id.so}/invoice`).send({}).expect(201);
     id.dealerInv2 = i2.body.data.id;
-    expect(i2.body.data.grandTotal).toBe('9440.00'); // 2 x 4000 + 18%
+    expect(i2.body.data.grand_total).toBe('9440.00'); // 2 x 4000 + 18%
     const order = await sales.get(`/api/sales/orders/${id.so}`).expect(200);
     expect(order.body.data.status).toBe('invoiced');
     expect(order.body.data.invoices).toHaveLength(2);
@@ -442,8 +442,8 @@ describe('returns and corrections', () => {
       lines: [{ invoice_line_id: boardLine.id, qty: 1 }], restock: true, reason: 'Transit damage',
     }).expect(201);
     id.cn = cn.body.data.id;
-    expect(cn.body.data.invoiceNo).toMatch(/^CN\/\d\d-\d\d\/00001$/);
-    expect(cn.body.data).toMatchObject({ docType: 'credit_note', taxableTotal: '4000.00', igstTotal: '720.00', grandTotal: '4720.00' });
+    expect(cn.body.data.invoice_no).toMatch(/^CN\/\d\d-\d\d\/00001$/);
+    expect(cn.body.data).toMatchObject({ doc_type: 'credit_note', taxable_total: '4000.00', igst_total: '720.00', grand_total: '4720.00' });
     expect(await onHand(w.db, id.board!, m.showroom)).toBe(before + 1);
     // Cannot return more than was sold.
     await accounts.post(`/api/sales/invoices/${id.dealerInv1}/credit-note`).send({
@@ -461,7 +461,7 @@ describe('returns and corrections', () => {
     await accounts.post(`/api/sales/invoices/${id.inv2}/cancel`).send({ reason: 'Wrong item billed' }).expect(409);
     const res = await accounts.post(`/api/sales/invoices/${id.inv2}/cancel`).send({ reason: 'Wrong item billed', restock: true, cancel_payments: true }).expect(200);
     expect(res.body.data.status).toBe('cancelled');
-    expect(res.body.data.invoiceNo).toMatch(/00002$/);
+    expect(res.body.data.invoice_no).toMatch(/00002$/);
     expect(await onHand(w.db, id.wheels!, m.showroom)).toBe(wheelsBefore + 1);
     await accounts.post(`/api/sales/invoices/${id.inv2}/cancel`).send({ reason: 'again' }).expect(409);
     // store staff cannot cancel invoices

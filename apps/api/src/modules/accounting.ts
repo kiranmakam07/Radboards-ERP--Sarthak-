@@ -9,7 +9,7 @@ import { nextNumber } from '../core/numbering';
 import { rows, type DB } from '../db/client';
 import { accounts, expenseCategories, expenses, journalEntries } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zMoneyPos, zText, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zDate, zHttpUrl, zId, zListQuery, zMoney, zMoneyPos, zText, type Ctx } from '../lib/http';
 
 /**
  * Expense (PRD 7.8): Dr expense account - Dr Input GST (when claimable) - Cr the cash/bank
@@ -145,7 +145,7 @@ export function accountingRouter(db: DB) {
       paid_from_account_id: zId,
       vendor_name: emptyToNull(z.string().trim().max(200)).optional(),
       vendor_gstin: emptyToNull(z.string().trim().max(15)).optional(),
-      attachment_url: emptyToNull(z.string().url().max(1000)).optional(),
+      attachment_url: emptyToNull(zHttpUrl).optional(),
       notes: emptyToNull(z.string().trim().max(1000)).optional(),
     }).parse(req.body);
     if (b.vendor_gstin && !isValidGstin(b.vendor_gstin)) throw badRequest('Vendor GSTIN is not valid');

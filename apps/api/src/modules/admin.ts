@@ -17,7 +17,7 @@ import {
   priceLists, users,
 } from '../db/schema';
 import { badRequest, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zAddress, zGstin, zId, zMoney, zPhone, zStateCode, zText } from '../lib/http';
+import { emptyToNull, inTx, sendList, zAddress, zGstin, zHttpUrl, zId, zMoney, zPhone, zStateCode, zText } from '../lib/http';
 
 const zPassword = z.string().min(8, 'must be at least 8 characters').max(200);
 
@@ -146,7 +146,7 @@ export function settingsRouter(db: DB) {
     address: zAddress,
     phone: z.string().max(20).optional(),
     email: z.string().max(200).optional(),
-    logo_url: z.string().max(1000).optional(),
+    logo_url: emptyToNull(zHttpUrl).optional(),
     bank: z.object({
       account_name: z.string().max(200).optional(), account_no: z.string().max(40).optional(),
       ifsc: z.string().max(20).optional(), bank_name: z.string().max(200).optional(), upi_id: z.string().max(100).optional(),

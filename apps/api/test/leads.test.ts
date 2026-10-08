@@ -73,11 +73,11 @@ describe('lead capture', () => {
       name: 'Asha Rao', phone: '98200 11111', source_id: m.source('Meta Ads'), source_detail: 'Diwali campaign', interested_item_ids: [itemId],
     }).expect(201);
     const lead = res.body.data;
-    expect(lead.leadNo).toMatch(/^L\d+$/);
+    expect(lead.lead_no).toMatch(/^L\d+$/);
     expect(lead.phone).toBe('+919820011111');
     expect(lead.stage).toBe('new');
-    expect(lead.ownerId).toBeTruthy();
-    expect(lead.nextFollowUpAt).toBeTruthy();
+    expect(lead.owner_id).toBeTruthy();
+    expect(lead.next_follow_up_at).toBeTruthy();
   });
 
   it('dedupes on phone: a repeat enquiry becomes an activity, not a second lead', async () => {
@@ -134,44 +134,46 @@ describe('lead capture', () => {
 });
 
 describe('lead pipeline (fixed stage machine)', () => {
-  let leadId: string;
+  let lead_id: string;
   beforeAll(async () => {
     const sales = await w.as('sales');
     const res = await sales.post('/api/leads').send({ name: 'Pipeline Person', phone: '9850000001', source_id: m.source('Instagram Collab') }).expect(201);
-    leadId = res.body.data.id;
+    lead_id = res.body.data.id;
   });
 
   it('moves through stages and logs every change', async () => {
     const sales = await w.as('sales');
-    await sales.post(`/api/leads/${leadId}/stage`).send({ stage: 'contacted' }).expect(200);
-    const r = await sales.post(`/api/leads/${leadId}/stage`).send({ stage: 'interested', note: 'Quote shared' }).expect(200);
-    expect(r.body.data.firstContactedAt).toBeTruthy();
-    const detail = await sales.get(`/api/leads/${leadId}`).expect(200);
+    await sales.post(`/api/leads/${lead_id}/stage`).send({ stage: 'contacted' }).expect(200);
+    const r = await sales.post(`/api/leads/${lead_id}/stage`).send({ stage: 'interested', note: 'Quote shared' }).expect(200);
+    expect(r.body.data.first_contacted_at).toBeTruthy();
+    const detail = await sales.get(`/api/leads/${lead_id}`).expect(200);
     expect(detail.body.data.activities.filter((a: { type: string }) => a.type === 'stage_change')).toHaveLength(2);
   });
 
   it('refuses an illegal transition and plain "converted"', async () => {
     const sales = await w.as('sales');
-    await sales.post(`/api/leads/${leadId}/stage`).send({ stage: 'new' }).expect(409);
-    await sales.post(`/api/leads/${leadId}/stage`).send({ stage: 'converted' }).expect(400);
-    await sales.post(`/api/leads/${leadId}/stage`).send({ stage: 'banana' }).expect(400);
+    await sales.post(`/api/leads/${lead_id}/stage`).send({ stage: 'new' }).expect(409);
+    await sales.post(`/api/leads/${lead_id}/stage`).send({ stage: 'converted' }).expect(400);
+    await sales.post(`/api/leads/${lead_id}/stage`).send({ stage: 'banana' }).expect(400);
   });
 
   it('requires a lost reason, and lets a lost lead reopen to Contacted only', async () => {
     const sales = await w.as('sales');
-    await sales.post(`/api/leads/${leadId}/stage`).send({ stage: 'lost' }).expect(400);
-    const lost = await sales.post(`/api/leads/${leadId}/stage`).send({ stage: 'lost', lost_reason_id: m.lostReason('Price') }).expect(200);
-    expect(lost.body.data.nextFollowUpAt).toBeNull();
-    await sales.post(`/api/leads/${leadId}/stage`).send({ stage: 'interested' }).expect(409);
+    await sales.post(`/api/leads/${lead_id}/stage`).send({ stage: 'lost' }).expect(400);
+    const lost = await sales.post(`/api/leads/${lead_id}/stage`).send({ stage: 'lost', lost_reason_id: m.lostReason('Price') }).expect(200);
+    expect(lost.body.data.next_follow_up_at).toBeNull();
+    await sales.post(`/api/leads/${lead_id}/stage`).send({ stage: 'interested' }).expect(409);
     // Reopening needs a follow-up date, because Contacted requires one.
-    await sales.post(`/api/leads/${leadId}/stage`).send({ stage: 'contacted' }).expect(400);
-    await sales.post(`/api/leads/${leadId}/stage`).send({ stage: 'contacted', next_follow_up_at: new Date(Date.now() - 3600_000).toISOString() }).expect(200);
+    await sales.post(`/api/leads/${lead_id}/stage`).send({ stage: 'contacted' }).expect(400);
+    await sales.post(`/api/leads/${lead_id}/stage`).send({ stage: 'contacted', next_follow_up_at: new Date(Date.now() - 3600_000).toISOString() }).expect(200);
   });
 
   it('answers "whose follow-up is overdue?" and "lost by reason" as saved views', async () => {
     const sales = await w.as('sales');
     const overdue = await sales.get('/api/leads?view=overdue').expect(200);
-    expect(overdue.body.data.map((l: { id: string }) => l.id)).toContain(leadId);
+    expect(overdue.body.data.map((l: { id: string }) => l.id)).toContain(lead_id);
+    // Timestamps go out as ISO-8601, whichever query produced them.
+    expect(overdue.body.data[0].next_follow_up_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     const csv = await sales.get('/api/leads?view=open&format=csv').expect(200);
     expect(csv.headers['content-type']).toContain('text/csv');
     expect(csv.text).toContain('lead_no');
@@ -179,16 +181,16 @@ describe('lead pipeline (fixed stage machine)', () => {
 
   it('converts to a party in one click, links both ways, and is terminal', async () => {
     const sales = await w.as('sales');
-    const res = await sales.post(`/api/leads/${leadId}/convert`).send({ party_type: 'customer' }).expect(200);
+    const res = await sales.post(`/api/leads/${lead_id}/convert`).send({ party_type: 'customer' }).expect(200);
     const { lead, party } = res.body.data;
     expect(lead.stage).toBe('converted');
-    expect(lead.partyId).toBe(party.id);
-    expect(party.leadId).toBe(leadId);
+    expect(lead.party_id).toBe(party.id);
+    expect(party.lead_id).toBe(lead_id);
     expect(party.phone).toBe('+919850000001');
-    expect(party.stateCode).toBe('27');
-    await sales.post(`/api/leads/${leadId}/stage`).send({ stage: 'contacted', next_follow_up_at: new Date().toISOString() }).expect(409);
+    expect(party.state_code).toBe('27');
+    await sales.post(`/api/leads/${lead_id}/stage`).send({ stage: 'contacted', next_follow_up_at: new Date().toISOString() }).expect(409);
     // Converting again returns the same party rather than making another.
-    const again = await sales.post(`/api/leads/${leadId}/convert`).send({}).expect(200);
+    const again = await sales.post(`/api/leads/${lead_id}/convert`).send({}).expect(200);
     expect(again.body.data.party.id).toBe(party.id);
   });
 });
@@ -199,7 +201,7 @@ describe('walk-in capture', () => {
     const res = await store.post('/api/leads/walk-in').send({ phone: '9860000001', name: 'Walk In One', interested_item_ids: [itemId], outcome: 'enquiry' }).expect(201);
     const lead = res.body.data.lead;
     expect(lead.stage).toBe('new');
-    expect(lead.attendedBy).toBeTruthy();
+    expect(lead.attended_by).toBeTruthy();
     expect(res.body.data.party).toBeNull();
     const detail = await store.get(`/api/leads/${lead.id}`).expect(200);
     expect(detail.body.data.source_name).toBe('Walk-in');
@@ -209,7 +211,7 @@ describe('walk-in capture', () => {
     const store = await w.as('store');
     const res = await store.post('/api/leads/walk-in').send({ phone: '9860000002', name: 'Walk In Buyer', outcome: 'buying_now' }).expect(201);
     expect(res.body.data.lead.stage).toBe('converted');
-    expect(res.body.data.party.partyType).toBe('customer');
+    expect(res.body.data.party.party_type).toBe('customer');
   });
 
   it('recognises a repeat customer by phone', async () => {

@@ -33,12 +33,42 @@ function sameOriginOnly(req: Request, _res: Response, next: NextFunction) {
   throw forbidden('Cross-site request blocked');
 }
 
+const toSnake = (key: string) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+
+/**
+ * The API speaks snake_case everywhere (same names as the database columns in the PRD),
+ * for requests and responses alike, and every timestamp goes out as ISO-8601 UTC. Rows
+ * come back from the ORM in camelCase and from raw SQL in PostgreSQL's own formats; both
+ * are normalised here, in one place.
+ */
+// PostgreSQL prints timestamptz as "2026-10-08 03:32:08.575+00"; browsers need ISO-8601.
+const PG_TIMESTAMP = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}(?:\.\d+)?)([+-]\d{2})(?::?(\d{2}))?$/;
+
+function snakeKeys(value: unknown): unknown {
+  if (typeof value === 'string') {
+    const m = value.length <= 35 ? PG_TIMESTAMP.exec(value) : null;
+    return m ? new Date(`${m[1]}T${m[2]}${m[3]}:${m[4] ?? '00'}`).toISOString() : value;
+  }
+  if (Array.isArray(value)) return value.map(snakeKeys);
+  if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[toSnake(k)] = snakeKeys(v);
+    return out;
+  }
+  return value;
+}
+
 export function createApp(db: DB) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
   // PGlite returns int8 as BigInt; JSON cannot carry that.
   app.set('json replacer', (_k: string, v: unknown) => (typeof v === 'bigint' ? Number(v) : v));
+  app.use((_req, res, next) => {
+    const send = res.json.bind(res);
+    res.json = (body: unknown) => send(snakeKeys(body));
+    next();
+  });
   app.use(helmet());
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
