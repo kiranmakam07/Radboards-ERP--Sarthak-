@@ -18,3 +18,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
+# local Claude Code settings (launch.json is shared on purpose)
+.claude/settings.local.json
