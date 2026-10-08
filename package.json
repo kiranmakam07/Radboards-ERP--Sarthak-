@@ -1,0 +1,24 @@
+{
+  "name": "radcore",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RadCore - Radboards ERP (leads, sales, inventory, purchasing, accounts, GST)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w @radcore/api\" \"npm run dev -w @radcore/web\"",
+    "dev:api": "npm run dev -w @radcore/api",
+    "dev:web": "npm run dev -w @radcore/web",
+    "db:generate": "npm run db:generate -w @radcore/api",
+    "db:migrate": "npm run db:migrate -w @radcore/api",
+    "db:seed": "npm run db:seed -w @radcore/api",
+    "test": "npm run test -w @radcore/shared && npm run test -w @radcore/api",
+    "typecheck": "npm run typecheck -w @radcore/shared && npm run typecheck -w @radcore/api && npm run typecheck -w @radcore/web",
+    "build:web": "npm run build -w @radcore/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
