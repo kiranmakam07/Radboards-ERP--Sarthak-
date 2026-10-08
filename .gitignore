@@ -21,3 +21,6 @@ Thumbs.db
 
 # local Claude Code settings (launch.json is shared on purpose)
 .claude/settings.local.json
+
+# documents exported for sharing (not source)
+exports/
