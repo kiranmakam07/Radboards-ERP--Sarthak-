@@ -184,3 +184,4 @@ These were open in the PRD or not specified. Each is easy to revisit now, harder
 | 2026-10-08 | API responses unified to snake_case and ISO-8601 timestamps; stored links restricted to http/https. |
 | 2026-10-08 | Web app: 36 simple screens covering every built flow; demo mode (`npm run demo`). |
 | 2026-10-08 | Dependencies: drizzle-orm 0.45.3 (SQL-identifier advisory), vitest 5, concurrently 10; CI workflow added. |
+| 2026-10-08 | Founder approval document prepared from the two founder calls of 7 Oct: https://claude.ai/code/artifact/8780229e-2f57-4cd3-896c-ac4a301b15db. Five decisions are with the founder: accounts in the ERP or stay on Vyapar (on the second call he asked whether the ERP could sit on top of Vyapar; Vyapar offers no public API), own build vs a full open-source ERP, phase 1 scope, walk-in invoice on the spot, hosting. Section 3 above stays provisional until he answers. |
