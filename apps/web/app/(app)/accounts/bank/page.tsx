@@ -94,7 +94,7 @@ export default function BankPage() {
               { key: 'out', title: 'Out', align: 'right', render: (l) => (Number(l.amount) < 0 ? inr(Math.abs(Number(l.amount))) : '') },
               { key: 'status', title: 'Status', render: (l) => (
                 <span style={{ whiteSpace: 'normal' }}>
-                  <Badge value={l.status === 'unmatched' ? 'pending' : l.status === 'matched' ? 'approved' : 'closed'} />
+                  <Badge value={l.status} />
                   {l.status === 'matched' && l.matches.length === 1 && <span className="small muted"> {label(l.matches[0].ref_type)} · {date(l.matches[0].entry_date)} · {l.matches[0].narration}</span>}
                   {l.status === 'matched' && l.matches.length > 1 && (
                     <span className="small muted"> {l.matches.length} entries: {l.matches.map((x: any) => `${label(x.ref_type)} ${Number(x.amount) < 0 ? '−' : ''}₹${inr(Math.abs(Number(x.amount)))}`).join(', ')}</span>

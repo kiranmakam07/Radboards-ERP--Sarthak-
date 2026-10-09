@@ -25,7 +25,7 @@ export default function UsersPage() {
       <Table rows={data?.data} columns={[
         { key: 'name', title: 'Name' }, { key: 'phone', title: 'Phone' }, { key: 'email', title: 'Email' },
         { key: 'role', title: 'Role', render: (r) => label(r.role) },
-        { key: 'active', title: 'Status', render: (r) => <Badge value={r.active ? 'approved' : 'closed'} /> },
+        { key: 'active', title: 'Status', render: (r) => <Badge value={r.active ? 'active' : 'switched_off'} /> },
         { key: 'x', title: '', render: (r) => (r.id === user.id ? <span className="muted small">you</span> : (
           <ActionButton confirm={r.active ? `Deactivate ${r.name}? They will be signed out.` : undefined}
             onClick={() => patch(`/users/${r.id}`, { active: !r.active })} onDone={reload}>{r.active ? 'Deactivate' : 'Reactivate'}</ActionButton>

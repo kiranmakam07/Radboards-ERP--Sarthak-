@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { ROLES, addDays, addMonths, gstinCheckChar, istDate, type Role } from '@radcore/shared';
 import { hashPassword } from '../core/auth';
 import { setSetting } from '../core/settings';
@@ -8,7 +9,7 @@ import { captureLead, sourceIdByName } from '../modules/leads';
 import { createParty } from '../modules/parties';
 import { rows, sql, type DB } from './client';
 import {
-  adSpends, allocations, assets, channelEvents, items, jobOpenings, maintenanceSchedules, projects, taskTemplates, tasks, users,
+  adSpends, allocations, assets, campaigns, channelEvents, items, jobOpenings, maintenanceSchedules, projects, taskTemplates, tasks, users,
 } from './schema';
 
 /**
@@ -79,6 +80,14 @@ export async function seedDemo(db: DB, password: string = DEMO_PASSWORD): Promis
 
     // Ad spend, so the marketing dashboard shows what a lead costs.
     const sourceId = async (name: string) => sourceIdByName(ctx.tx, name);
+    // Campaign links, each with its own enquiry form and QR code.
+    const link = async (name: string, source: string) =>
+      ({ name, sourceId: await sourceId(source), token: crypto.randomBytes(12).toString('base64url'), createdBy: admin!.id });
+    await ctx.tx.insert(campaigns).values([
+      await link('Diwali pamphlets, Pune', 'Offline Campaign'),
+      await link('Website enquiry form', 'Website'),
+      await link('Longboard search ads', 'Google Ads'),
+    ]);
     await ctx.tx.insert(adSpends).values([
       { sourceId: await sourceId('Meta Ads'), detail: 'Diwali campaign', spendDate: istDate(), amount: '1800.00', createdBy: admin!.id },
       { sourceId: await sourceId('Google Ads'), detail: 'Longboard search', spendDate: istDate(), amount: '1250.00', createdBy: admin!.id },
