@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
-  bigserial, boolean, char, check, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp,
+  bigint, bigserial, boolean, char, check, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp,
   unique, uniqueIndex, uuid, type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import {
@@ -718,6 +718,42 @@ export const journalLines = pgTable('journal_lines', {
   index('journal_lines_party_idx').on(t.partyId),
   check('journal_lines_nonneg', sql`${t.debit} >= 0 and ${t.credit} >= 0`),
   check('journal_lines_one_side', sql`(${t.debit} = 0) <> (${t.credit} = 0)`),
+]);
+
+// ----------------------------------------------------------------------------
+// Bank reconciliation: statement lines imported from the bank, matched one-to-one to the
+// journal line that recorded the same movement on that bank account.
+// ----------------------------------------------------------------------------
+export const bankLineStatusEnum = pgEnum('bank_line_status', ['unmatched', 'matched', 'ignored']);
+
+export const bankStatementLines = pgTable('bank_statement_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  accountId: uuid('account_id').notNull().references(() => accounts.id),
+  txnDate: date('txn_date').notNull(),
+  description: text('description').notNull().default(''),
+  reference: text('reference'),
+  /** Signed, from our side: positive = money into the account, negative = money out. */
+  amount: money('amount').notNull(),
+  /** Running balance printed on the statement, when the bank gives one. */
+  balance: numeric('balance', { precision: 14, scale: 2 }),
+  importId: uuid('import_id').notNull(),
+  /** Position within its import, oldest first, so the last row of a day (and its balance) is known. */
+  seq: integer('seq').notNull().default(0),
+  /** Identifies the statement row, so importing the same or an overlapping file adds nothing twice. */
+  lineHash: text('line_hash').notNull(),
+  status: bankLineStatusEnum('status').notNull().default('unmatched'),
+  matchedJournalLineId: bigint('matched_journal_line_id', { mode: 'number' }).references(() => journalLines.id),
+  matchedAt: ts('matched_at'),
+  matchedBy: uuid('matched_by').references(() => users.id),
+  ignoreReason: text('ignore_reason'),
+  ...stamps,
+}, (t) => [
+  unique('bank_statement_lines_hash_uq').on(t.accountId, t.lineHash),
+  // A book entry explains at most one statement line.
+  uniqueIndex('bank_statement_lines_match_uq').on(t.matchedJournalLineId).where(sql`${t.matchedJournalLineId} is not null`),
+  index('bank_statement_lines_account_date_idx').on(t.accountId, t.txnDate),
+  check('bank_statement_lines_amount_nonzero', sql`${t.amount} <> 0`),
+  check('bank_statement_lines_match_chk', sql`(${t.status} = 'matched') = (${t.matchedJournalLineId} is not null)`),
 ]);
 
 // ----------------------------------------------------------------------------

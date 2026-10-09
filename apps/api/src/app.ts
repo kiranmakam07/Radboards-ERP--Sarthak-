@@ -8,6 +8,7 @@ import type { DB } from './db/client';
 import { AppError, errorHandler, forbidden } from './lib/errors';
 import { accountingRouter } from './modules/accounting';
 import { authRouter, mastersRouter, settingsRouter, usersRouter } from './modules/admin';
+import { bankRouter } from './modules/bank';
 import { dashboardsRouter } from './modules/dashboards';
 import { gstRouter } from './modules/gst';
 import { inventoryRouter } from './modules/inventory';
@@ -98,6 +99,7 @@ export function createApp(db: DB) {
   app.use('/api/purchasing', purchasingRouter(db));
   app.use('/api/stock', inventoryRouter(db));
   app.use('/api/accounting', accountingRouter(db));
+  app.use('/api/bank', bankRouter(db));
   app.use('/api/gst', gstRouter(db));
   app.use('/api/dashboards', dashboardsRouter(db));
 
