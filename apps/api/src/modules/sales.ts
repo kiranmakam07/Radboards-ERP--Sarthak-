@@ -21,6 +21,7 @@ import {
 } from '../lib/http';
 import { priceFor, priceListFor } from './items';
 import { captureLead, convertLead, sourceIdByName } from './leads';
+import { applyCredit, assertCreditsCovered, creditsFor, unapplyAllOn, unapplyCredit } from './credits';
 import { cancelPayment, createPayment } from './payments';
 import { partyBalance, type Party } from './parties';
 
@@ -547,6 +548,8 @@ export async function cancelInvoice(
     const [cn] = await rows(tx, sql`
       select 1 as x from invoices where against_invoice_id = ${id} and doc_type = 'credit_note' and status = 'issued' limit 1`);
     if (cn) throw conflict('This invoice has a credit note against it and cannot be cancelled');
+    // Credit from other invoices' returns that was set against this one goes back to being available.
+    await unapplyAllOn(ctx, id, `Invoice ${inv!.invoiceNo} cancelled`);
 
     const paid = await rows<{ payment_id: string; payment_no: string; amount: string; allocated_here: string; allocated_all: string }>(tx, sql`
       select p.id as payment_id, p.payment_no, p.amount::text,
@@ -571,11 +574,20 @@ export async function cancelInvoice(
     }
   }
 
+  if (inv!.docType === 'credit_note') {
+    const [used] = await rows<{ invoice_no: string }>(tx, sql`
+      select i.invoice_no from credit_applications ca join invoices i on i.id = ca.invoice_id
+       where ca.credit_note_id = ${id} and ca.status = 'posted' limit 1`);
+    if (used) throw conflict(`This credit note's credit has been used against ${used.invoice_no}. Take it back there first.`);
+  }
+
   const [cancelled] = await tx
     .update(invoices)
     .set({ status: 'cancelled', cancelledAt: new Date(), cancelReason: input.reason, updatedAt: new Date() })
     .where(eq(invoices.id, id))
     .returning();
+  // Cancelling one credit note shrinks the credit its invoice gave rise to; a sibling note's credit may already be spent.
+  if (inv!.docType === 'credit_note' && inv!.againstInvoiceId) await assertCreditsCovered(tx, [inv!.againstInvoiceId]);
   await reverseJournals(ctx, inv!.docType === 'tax_invoice' ? 'invoice' : 'credit_note', id, today, `Cancelled ${inv!.invoiceNo}: ${input.reason}`);
 
   const lines = await tx.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
@@ -924,6 +936,23 @@ export function salesRouter(db: DB) {
         locationId: b.location_id, reason: b.reason, date: b.date,
       }));
     res.status(201).json({ data: cn });
+  });
+
+  /** Credit notes and this invoice: what has been set against it, what could be, and where a credit note's credit went. */
+  r.get('/invoices/:id/credits', requirePerm('invoices:read'), async (req, res) => {
+    res.json({ data: await creditsFor(db, zId.parse(req.params.id)) });
+  });
+
+  r.post('/invoices/:id/apply-credit', requirePerm('invoices:adjust', 'payments:write'), async (req, res) => {
+    const id = zId.parse(req.params.id);
+    const b = z.object({ credit_note_id: zId, amount: emptyToNull(zMoneyPos).optional() }).parse(req.body);
+    res.status(201).json({ data: await inTx(db, req, (ctx) => applyCredit(ctx, id, b.credit_note_id, b.amount)) });
+  });
+
+  r.post('/credit-applications/:id/take-back', requirePerm('invoices:adjust', 'payments:write'), async (req, res) => {
+    const id = zId.parse(req.params.id);
+    await inTx(db, req, (ctx) => unapplyCredit(ctx, id, 'Taken back by hand'));
+    res.json({ ok: true });
   });
 
   r.post('/invoices/:id/cancel', requirePerm('invoices:adjust'), async (req, res) => {

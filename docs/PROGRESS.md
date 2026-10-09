@@ -64,7 +64,7 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.8 | Balanced double entry for every document | ✅ | Posting service + deferred DB trigger |
 | 7.8 | Payments in/out with allocation, advances, part-payments | ✅ | |
 | 7.8 | Expenses with input GST | 🟡 | Bill photo is a link (URL); no file upload yet |
-| 7.8 | Credit notes (stock back in) and debit notes (stock out) | ✅ | |
+| 7.8 | Credit notes (stock back in) and debit notes (stock out) | ✅ | A credit note on an already-paid invoice leaves the customer in credit; that credit can be set against another of their invoices (on the invoice page), in full or in part, and taken back. It cannot be used twice, on another customer, or after it was refunded in cash; the receipt and credit note behind used credit cannot be cancelled |
 | 7.8 | Multiple cash/bank accounts | ✅ | |
 | 7.8 | Bank statement import (CSV) and reconciliation | ✅ | Reads the usual Indian bank CSV layouts, skips rows already imported, matches automatically only when unambiguous, and can book the missing entry (expense, party receipt or payment, other account) from a statement line. One statement line matches one book entry: a single card-machine payout covering several receipts cannot be matched to all of them yet |
 | 7.8 | Immutable issued documents, period lock | ✅ | |
@@ -213,7 +213,6 @@ Items 6 and 7 below are covered by the approval above.
 Vyapar data and the user list only when deployment is close.** Do not ask for those before then.
 
 Still to build in the app, in rough order:
-4. A credit note's credit set against another invoice.
 5. Portal-format GSTR-1 file; Excel export of lists.
 6. Matching one bank line to several book entries (card-machine payouts).
 7. Shopify orders coming in automatically, then Amazon and Flipkart.
@@ -267,6 +266,7 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |
 | 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. |
 | 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
+| 2026-10-10 | Credit note credit against another invoice: `credit_applications` (migration `0008`, which also extends `v_invoice_outstanding`), `credits.ts`, invoice page, 6 tests. No journal entry is involved: it only changes which invoice is open. |
 | 2026-10-10 | Stores dashboard and owner's summary (`/api/dashboards/stores`, `/owner`); ad spend with cost per lead (`ad_spends`, migration `0007_ad_spend`, CRM → Ad spend). |
 | 2026-10-10 | Year-end close: `fiscal_closes` table (migration `0006_year_end_close`), `closeYear` / `reopenYear` in `accounting.ts`, Financial years tab, 5 tests. |
 | 2026-10-09 | **CRM lead capture** (Sarthak: a connected CRM like Privyr, which the team uses today; basic structure first). Webhooks for Meta lead ads, Google Ads lead forms, WhatsApp and website forms, all ending in the same `captureLead`; event log with reasons and retry; quick replies with one-tap WhatsApp contact; Lead sources and Quick replies screens; CRM section in the menu. Migration `0005_crm_integrations`, module `crm.ts`, 17 new API tests, README section. Tested with the documented payloads and a live run in the demo; not yet connected to real Meta / Google / WhatsApp accounts. |
