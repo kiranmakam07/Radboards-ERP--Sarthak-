@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ATTENDANCE_STATUSES, istDate, type AttendanceStatus } from '@radcore/shared';
-import { Card, ErrorBox, Loading, Notice, Page, Table, label, num } from '@/components/ui';
+import { Card, ErrorBox, Form, Loading, Notice, Page, Table, label, num } from '@/components/ui';
 import { ApiError, api, post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -18,6 +18,7 @@ export default function AttendancePage() {
   const [month, setMonth] = useState(today.slice(0, 7));
   const register = useGet<{ data: any[] }>(`/hr/attendance?date=${day}`);
   const summary = useGet<{ data: any[] }>(`/hr/attendance/summary?month=${month}`);
+  const leave = useGet<{ data: any[]; fy: string; annual_leave_days: number }>('/hr/leave-balances');
   const [rows, setRows] = useState<Record<string, Row>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +52,7 @@ export default function AttendancePage() {
       setNotice(`Saved attendance for ${res.data.marked} people.`);
       register.reload();
       summary.reload();
+      leave.reload();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -163,6 +165,25 @@ export default function AttendancePage() {
           { key: 'leave', title: 'Leave', align: 'right' }, { key: 'weekly_off', title: 'Weekly off', align: 'right' },
           { key: 'holiday', title: 'Holidays', align: 'right' },
           { key: 'not_marked', title: 'Not marked', align: 'right', render: (r) => (r.not_marked ? <span className="error small">{r.not_marked}</span> : 0) },
+        ]} />
+      </Card>
+      <Card title={`Leave in ${leave.data?.fy ?? 'this year'}`} actions={<a className="button" href="/api/hr/leave-balances?format=xlsx">Excel</a>}>
+        <p className="muted small">
+          Everyone gets {leave.data ? num(leave.data.annual_leave_days) : '…'} days of leave in a year (April to March) unless they have their own figure;
+          someone who joins part-way gets it in proportion. Leave taken is every day marked as Leave in the register.
+        </p>
+        {write && leave.data && (
+          <Form inline submit="Change" key={leave.data.annual_leave_days}
+            initial={{ annual_leave_days: leave.data.annual_leave_days }}
+            fields={[{ name: 'annual_leave_days', label: 'Leave days a year', type: 'number', step: '0.5', required: true }]}
+            onSubmit={(v) => api('/hr/leave-policy', { method: 'PUT', body: v })} onDone={leave.reload} />
+        )}
+        <Loading loading={leave.loading} error={leave.error} />
+        <Table rows={leave.data?.data} empty="Nobody on the rolls this year." rowHref={(r) => `/hr/employees/${r.employee_id}`} columns={[
+          { key: 'name', title: 'Employee' }, { key: 'department', title: 'Department' },
+          { key: 'entitled', title: 'Entitled', align: 'right', render: (r) => <>{num(r.entitled)}{r.own_rule ? <span className="muted small"> own figure</span> : null}</> },
+          { key: 'taken', title: 'Taken', align: 'right' },
+          { key: 'balance', title: 'Left', align: 'right', render: (r) => (r.balance < 0 ? <span className="error small">{num(-r.balance)} over</span> : num(r.balance)) },
         ]} />
       </Card>
     </Page>

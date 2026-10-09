@@ -4,11 +4,12 @@ import { z } from 'zod';
 import {
   APPLICANT_SOURCES, APPLICANT_STAGES, APPLICANT_STAGE_LABELS, ATTENDANCE_STATUSES, EMPLOYMENT_TYPES, INTERVIEW_MODES,
   INTERVIEW_RESULTS, OPENING_STATUSES, OPEN_APPLICANT_STAGES, REJECT_REASONS, can, canMoveApplicant, formatDate, istDate,
-  lastDayOfMonth, normalisePhone, type ApplicantStage, type AttendanceStatus, type RejectReason,
+  fyOf, fyRange, lastDayOfMonth, leaveEntitlement, normalisePhone, type ApplicantStage, type AttendanceStatus, type RejectReason,
 } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requireAuth, requirePerm } from '../core/auth';
 import { nextNumber } from '../core/numbering';
+import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { applicantActivities, applicants, attendance, employees, interviews, jobOpenings, users } from '../db/schema';
 import { parseBankDate, parseCsv } from '../lib/bank-csv';
@@ -22,6 +23,7 @@ type Interview = typeof interviews.$inferSelect;
 const words = (v: string) => v.replace(/_/g, ' ');
 const zWhen = z.coerce.date();
 const zYears = z.coerce.number().min(0).max(60).transform((n) => n.toFixed(1));
+const zLeaveDays = z.coerce.number().min(0).max(365).transform((n) => n.toFixed(1));
 const when = (d: Date) =>
   d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -35,7 +37,7 @@ function note(ctx: Ctx, applicantId: string, type: 'note' | 'call' | 'stage_chan
 export type EmployeeInput = {
   name: string; phone: string; email?: string | null; department: string; designation: string;
   employmentType?: (typeof EMPLOYMENT_TYPES)[number]; joinDate: string; monthlySalary?: string | null;
-  userId?: string | null; notes?: string | null;
+  userId?: string | null; notes?: string | null; annualLeaveDays?: string | null;
 };
 
 async function checkSignIn(tx: DB, userId: string, exceptEmployeeId: string | null): Promise<void> {
@@ -64,7 +66,7 @@ export async function createEmployee(ctx: Ctx, input: EmployeeInput): Promise<Em
       employeeNo: number, name: input.name, phone: input.phone, email: input.email ?? null, department: input.department,
       designation: input.designation, employmentType: input.employmentType ?? 'full_time', joinDate: input.joinDate,
       monthlySalary: input.monthlySalary ?? null, userId: input.userId ?? null, notes: input.notes ?? null,
-      createdBy: ctx.user?.id ?? null,
+      annualLeaveDays: input.annualLeaveDays ?? null, createdBy: ctx.user?.id ?? null,
     })
     .returning();
   await audit(ctx, 'employee', row!.id, 'create', null, {
@@ -431,6 +433,7 @@ const zEmployee = z.object({
   monthly_salary: emptyToNull(zMoney).optional(),
   user_id: emptyToNull(zId).optional(),
   notes: emptyToNull(z.string().trim().max(2000)).optional(),
+  annual_leave_days: emptyToNull(zLeaveDays).optional(),
 });
 
 const INTERVIEW_SELECT = sql`
@@ -779,6 +782,7 @@ export function hrRouter(db: DB) {
       createEmployee(ctx, {
         name: b.name, phone: b.phone, email: b.email, department: b.department, designation: b.designation,
         employmentType: b.employment_type, joinDate: b.join_date, monthlySalary: b.monthly_salary, userId: b.user_id, notes: b.notes,
+        annualLeaveDays: b.annual_leave_days,
       }));
     res.status(201).json({ data: row });
   });
@@ -810,6 +814,7 @@ export function hrRouter(db: DB) {
       if (b.designation !== undefined) patch.designation = b.designation;
       if (b.employment_type !== undefined && req.body.employment_type !== undefined) patch.employmentType = b.employment_type;
       if (b.monthly_salary !== undefined) patch.monthlySalary = b.monthly_salary;
+      if (b.annual_leave_days !== undefined) patch.annualLeaveDays = b.annual_leave_days;
       if (b.notes !== undefined) patch.notes = b.notes;
       const [updated] = await ctx.tx.update(employees).set(patch).where(eq(employees.id, id)).returning();
       await audit(ctx, 'employee', id, 'update',
@@ -904,6 +909,43 @@ export function hrRouter(db: DB) {
        order by e.department, e.name`);
     if (wantsFile(req)) return sendList(req, res, data, `attendance-${month}`);
     res.json({ data, month, from, to });
+  });
+
+  // ---- leave --------------------------------------------------------------
+  /**
+   * Leave for a leave year (the financial year): what each person is entitled to, what they
+   * have taken (days marked as Leave in the register) and what is left. A negative balance is
+   * leave taken beyond the entitlement.
+   */
+  r.get('/leave-balances', requirePerm('hr:read'), async (req, res) => {
+    const q = z.object({ fy: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(req.query);
+    const fy = q.fy ?? fyOf(istDate());
+    const year = fyRange(fy);
+    const policy = await getSetting(db, 'annual_leave_days');
+    const staff = await rows<{ employee_id: string; join_date: string; annual_leave_days: string | null; taken: number }>(db, sql`
+      select e.id as employee_id, e.employee_no, e.name, e.department, e.join_date, e.status, e.annual_leave_days,
+             (select count(*)::int from attendance a where a.employee_id = e.id and a.status = 'leave'
+                 and a.date between ${year.from}::date and ${year.to}::date) as taken
+        from employees e
+       where e.join_date <= ${year.to}::date and (e.left_on is null or e.left_on >= ${year.from}::date)
+       order by e.department, e.name`);
+    const data = staff.map((e) => {
+      const entitled = leaveEntitlement(e.annual_leave_days === null ? policy : Number(e.annual_leave_days), e.join_date, year);
+      return { ...e, own_rule: e.annual_leave_days !== null, entitled, balance: entitled - e.taken };
+    });
+    if (wantsFile(req)) return sendList(req, res, data, `leave-${fy}`);
+    res.json({ data, fy, from: year.from, to: year.to, annual_leave_days: policy });
+  });
+
+  /** The number of leave days a year for everyone who has no figure of their own. */
+  r.put('/leave-policy', requirePerm('hr:write'), async (req, res) => {
+    const b = z.object({ annual_leave_days: z.coerce.number().min(0).max(365) }).parse(req.body);
+    await inTx(db, req, async (ctx) => {
+      const before = await getSetting(ctx.tx, 'annual_leave_days');
+      await setSetting(ctx.tx, 'annual_leave_days', b.annual_leave_days, ctx.user!.id);
+      await audit(ctx, 'settings', 'annual_leave_days', 'update', { value: before }, { value: b.annual_leave_days });
+    });
+    res.json({ data: { annual_leave_days: b.annual_leave_days } });
   });
 
   // ---- dashboard -----------------------------------------------------------

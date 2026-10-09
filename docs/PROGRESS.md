@@ -39,7 +39,7 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.1 | Source list, source_detail, manual capture | ✅ | |
 | 7.1 | Dedupe on normalised phone | ✅ | Repeat enquiry becomes an activity on the existing lead |
 | 7.1 | Owner + first follow-up on every lead | ✅ | Explicit → source rule → the sales/store user who took it → round-robin over sales users |
-| 7.1 | Public form per campaign (QR / short link / website) | 🟡 | Token link + rate limit + honeypot. **No captcha yet.** QR image not generated (print the link with any QR tool) |
+| 7.1 | Public form per campaign (QR / short link / website) | ✅ | Token link + rate limit + hidden trap field. The QR code is drawn on the Campaign links screen, to print or save. An "I am a person" check (Cloudflare Turnstile) switches on when its two keys are set on the server; without them the form runs as before |
 | 7.1 | Meta lead ads / Google Ads webhooks | 🟡 | Built: `POST /api/hooks/meta` (signature checked, lead read from the Graph API), `POST /api/hooks/google-ads` (key = a campaign link's key; test leads create nothing). Each delivery is stored first, repeats are recognised, and what cannot become a lead is kept with the reason and a retry. **Not yet tried against the real services** |
 | 7.1 | WhatsApp enquiries | 🟡 | Built: `POST /api/hooks/whatsapp` (Cloud API). First message from a new number starts a lead; later messages go on its timeline; a Click-to-WhatsApp ad's name is kept. Receiving only: replies are sent by opening WhatsApp with a quick reply. Needs the business number on the Cloud API. Numbers outside India are set aside |
 | 7.1 | Website / any form tool | ✅ | `POST /api/hooks/form/<campaign key>` takes JSON or an ordinary form post |
@@ -220,7 +220,7 @@ Still to build in the app, in rough order:
 For go-live, the CRM connections also need (not before then): a Meta developer app with the Page and
 `leads_retrieval`, the WhatsApp Business number moved to the Cloud API, and the webhook set on each
 Google Ads lead form. The steps are in the README under "Connecting lead sources".
-8. HR and operations follow-ups, if wanted: resume and bill file upload, leave balances,
+8. HR and operations follow-ups, if wanted: resume and bill file upload,
    WhatsApp reminders for tasks and maintenance.
 
 HR and operations were built on 9 Oct 2026 (Sarthak: they are part of the app, not a later phase).
@@ -264,6 +264,7 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |
 | 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. |
 | 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
+| 2026-10-10 | Smaller gaps: QR code for campaign links; optional person-check on the public enquiry form (`TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET`); leave balances (company figure + per-person figure, pro-rated for joiners, counted from days marked Leave; migration `0010_leave_days`). |
 | 2026-10-10 | Review copy for "go live for review" (Sarthak, 10 Oct): `SEED_DEMO_DATA=true` + `DEMO_PASSWORD` loads the sample data once into an empty database on a real server, with a sign-in per role and a banner saying it is sample data. The sample data seed is now covered by a test. Waiting on Sarthak for where to host it. |
 | 2026-10-10 | Bank reconciliation: one statement line to several book entries, with the bank's fee booked in the same step (`bank_line_matches`, migration `0009`, which carries existing matches over; upgrade checked on PostgreSQL 18). |
 | 2026-10-10 | Excel export on every list and report (`lib/xlsx.ts`, no library); GSTR-1 file for the GST portal (`/api/gst/gstr1/portal-file`). |

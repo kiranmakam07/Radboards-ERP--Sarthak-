@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { captureLead } from '../src/modules/leads';
+import { config } from '../src/config';
+import { captcha, captureLead } from '../src/modules/leads';
 import type { DB } from '../src/db/client';
 import { rows, sql } from '../src/db/client';
 import { PASSWORD, masters, phoneOf, setup, type World } from './helpers';
@@ -130,6 +131,34 @@ describe('lead capture', () => {
     const [lead] = await rows<{ source_detail: string; owner_id: string | null }>(w.db, sql`select source_detail, owner_id from leads where phone = '+919840000001'`);
     expect(lead!.source_detail).toBe('Skate park pamphlets');
     expect(lead!.owner_id).toBeTruthy();
+  });
+
+  it('can ask the public form for an "I am a person" check, once its keys are set', async () => {
+    const marketing = await w.as('marketing');
+    const token = (await marketing.post('/api/masters/campaigns').send({ name: 'Website banner', source_id: m.source('Website') }).expect(201)).body.data.token;
+    // No keys: no check, and the form says so by sending no site key.
+    expect((await request(w.app).get(`/api/public/campaign/${token}`).expect(200)).body.data.captcha_site_key).toBeNull();
+
+    const real = captcha.verify;
+    const asked: string[] = [];
+    captcha.verify = async (answer) => { asked.push(answer); return answer === 'a-real-person'; };
+    Object.assign(config, { turnstileSiteKey: 'site-key-123', turnstileSecret: 'secret-456' });
+    try {
+      expect((await request(w.app).get(`/api/public/campaign/${token}`).expect(200)).body.data.captcha_site_key).toBe('site-key-123');
+      const body = { name: 'Checked Person', phone: '9840000009' };
+      const none = await request(w.app).post(`/api/public/enquiry/${token}`).send(body).expect(400);
+      expect(none.body.error.message).toContain('I am a person');
+      await request(w.app).post(`/api/public/enquiry/${token}`).send({ ...body, captcha_token: 'a-bot' }).expect(400);
+      const [before] = await rows<{ n: number }>(w.db, sql`select count(*)::int as n from leads where phone = '+919840000009'`);
+      expect(before!.n).toBe(0);
+      await request(w.app).post(`/api/public/enquiry/${token}`).send({ ...body, captcha_token: 'a-real-person' }).expect(201);
+      expect(asked).toEqual(['a-bot', 'a-real-person']); // a missing answer is refused without asking Cloudflare
+      const [after] = await rows<{ n: number }>(w.db, sql`select count(*)::int as n from leads where phone = '+919840000009'`);
+      expect(after!.n).toBe(1);
+    } finally {
+      captcha.verify = real;
+      Object.assign(config, { turnstileSiteKey: '', turnstileSecret: '' });
+    }
   });
 });
 

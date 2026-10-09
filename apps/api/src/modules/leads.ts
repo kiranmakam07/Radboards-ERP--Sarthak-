@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   FOLLOW_UP_REQUIRED_STAGES, LEAD_STAGES, LEAD_STAGE_LABELS, canMoveLead, istDate, type LeadStage,
 } from '@radcore/shared';
+import { config } from '../config';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { nextNumber } from '../core/numbering';
@@ -500,6 +501,24 @@ export function leadsRouter(db: DB) {
 }
 
 /**
+ * Ask Cloudflare whether the "are you a person" check on the form was really passed. Held in an
+ * object so tests can stand in for the network call.
+ */
+export const captcha = {
+  async verify(token: string, ip: string | undefined): Promise<boolean> {
+    try {
+      const body = new URLSearchParams({ secret: config.turnstileSecret, response: token });
+      if (ip) body.set('remoteip', ip);
+      const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body, signal: AbortSignal.timeout(8000) });
+      const out = (await res.json()) as { success?: boolean };
+      return out.success === true;
+    } catch {
+      return false; // if the check cannot be made, the form is not let through
+    }
+  },
+};
+
+/**
  * Public enquiry endpoint for the website form and campaign QR codes / short links
  * (PRD 7.1). No login: the campaign token identifies the source, and the route is
  * rate-limited in app.ts. Returns the same response for new and repeat enquiries so it
@@ -514,7 +533,7 @@ export function publicLeadsRouter(db: DB) {
     if (!c || !c.active) throw must(null, 'Campaign');
     const products = await rows(db, sql`
       select id, name from items where active and item_type = 'finished_good' order by name limit 200`);
-    res.json({ data: { campaign: c.name, products } });
+    res.json({ data: { campaign: c.name, products, captcha_site_key: config.turnstileSecret ? config.turnstileSiteKey || null : null } });
   });
 
   r.post('/enquiry/:token', async (req, res) => {
@@ -526,9 +545,13 @@ export function publicLeadsRouter(db: DB) {
       message: emptyToNull(z.string().trim().max(1000)).optional(),
       // Honeypot: real people never fill this hidden field, bots do.
       website: z.string().max(0).optional(),
+      captcha_token: z.string().max(4000).optional(),
     }).parse(req.body);
     const [c] = await db.select().from(campaigns).where(eq(campaigns.token, String(req.params.token)));
     if (!c || !c.active) throw must(null, 'Campaign');
+    if (config.turnstileSecret && !(b.captcha_token && await captcha.verify(b.captcha_token, req.ip))) {
+      throw badRequest('Please tick the "I am a person" check and send the form again');
+    }
     await db.transaction(async (tx) => {
       await captureLead({ tx: tx as unknown as DB, user: null }, {
         name: b.name, phone: b.phone, email: b.email, sourceId: c.sourceId, sourceDetail: c.name, campaignId: c.id,

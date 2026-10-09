@@ -365,3 +365,33 @@ describe('HR: dashboard', () => {
     expect(d.attendance_today).toMatchObject({ on_rolls: 2, present: 0, not_marked: 2 });
   });
 });
+
+describe('HR: leave balances', () => {
+  it('works out what each person is entitled to, has taken and has left in a leave year', async () => {
+    const hr = await w.as('hr');
+    await (await w.as('sales')).get('/api/hr/leave-balances').expect(403);
+    await (await w.as('owner')).put('/api/hr/leave-policy').send({ annual_leave_days: 20 }).expect(403);
+
+    // January 2026 falls in the leave year 2025-26. Both joined that January, so they get January to March: 3 of the 12 days.
+    let res = (await hr.get('/api/hr/leave-balances?fy=2025-26').expect(200)).body;
+    expect(res).toMatchObject({ fy: '2025-26', from: '2025-04-01', to: '2026-03-31', annual_leave_days: 12 });
+    const of = (id: string) => res.data.find((e: { employee_id: string }) => e.employee_id === id);
+    expect(res.data).toHaveLength(2); // the Arjun who rejoined today is not part of that year
+    expect(of(ids.priyaEmp!)).toMatchObject({ entitled: 3, taken: 0, balance: 3, own_rule: false });
+    expect(of(ids.arjun!)).toMatchObject({ entitled: 3, taken: 1, balance: 2 }); // one day of leave on the 10th
+
+    // A person can have their own figure; the company's figure covers everyone else.
+    await hr.patch(`/api/hr/employees/${ids.priyaEmp}`).send({ annual_leave_days: 18 }).expect(200);
+    await hr.put('/api/hr/leave-policy').send({ annual_leave_days: 15 }).expect(200);
+    res = (await hr.get('/api/hr/leave-balances?fy=2025-26').expect(200)).body;
+    expect(of(ids.priyaEmp!)).toMatchObject({ entitled: 4.5, own_rule: true });
+    expect(of(ids.arjun!)).toMatchObject({ entitled: 4, balance: 3 }); // 15 x 3/12 = 3.75, to the nearest half
+
+    // This year: Priya has been here throughout, so she gets her full 18.
+    res = (await hr.get('/api/hr/leave-balances').expect(200)).body;
+    expect(of(ids.priyaEmp!)).toMatchObject({ entitled: 18, taken: 0, balance: 18 });
+    await hr.patch(`/api/hr/employees/${ids.priyaEmp}`).send({ annual_leave_days: '' }).expect(200); // back to the company's figure
+    res = (await hr.get('/api/hr/leave-balances').expect(200)).body;
+    expect(of(ids.priyaEmp!)).toMatchObject({ entitled: 15, own_rule: false });
+  });
+});
