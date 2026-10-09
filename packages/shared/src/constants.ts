@@ -170,6 +170,8 @@ export const PERMISSIONS = {
 
   'leads:read': ['owner', 'marketing', 'store', 'sales', 'admin'],
   'leads:write': ['marketing', 'store', 'sales', 'admin'],
+  // Lead sources, their connections (Meta, Google, WhatsApp, website) and the quick-reply messages.
+  'crm:manage': ['marketing', 'admin'],
 
   'sales:read': ['owner', 'store', 'sales', 'accounts', 'admin'],
   'sales:write': ['store', 'sales', 'accounts', 'admin'],

@@ -9,6 +9,7 @@ import { AppError, errorHandler, forbidden } from './lib/errors';
 import { accountingRouter } from './modules/accounting';
 import { authRouter, mastersRouter, settingsRouter, usersRouter } from './modules/admin';
 import { bankRouter } from './modules/bank';
+import { crmRouter, defaultDeps, hooksRouter, type CrmDeps } from './modules/crm';
 import { dashboardsRouter } from './modules/dashboards';
 import { gstRouter } from './modules/gst';
 import { hrRouter } from './modules/hr';
@@ -62,7 +63,7 @@ function snakeKeys(value: unknown): unknown {
   return value;
 }
 
-export function createApp(db: DB) {
+export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
@@ -74,7 +75,13 @@ export function createApp(db: DB) {
     next();
   });
   app.use(helmet());
-  app.use(express.json({ limit: '1mb' }));
+  // The exact bytes are kept as well as the parsed body: Meta's webhook signature is computed over them.
+  app.use(express.json({
+    limit: '1mb',
+    verify: (req, _res, buf) => {
+      (req as Request & { rawBody?: Buffer }).rawBody = buf;
+    },
+  }));
   app.use(cookieParser());
 
   app.get('/api/health', (_req, res) => {
@@ -85,6 +92,13 @@ export function createApp(db: DB) {
   const publicLimiter = rateLimit({ windowMs: 10 * 60_000, limit: 30, standardHeaders: true, legacyHeaders: false,
     skip: () => config.env === 'test' });
   app.use('/api/public', publicLimiter, publicLeadsRouter(db));
+
+  // Lead capture from Meta, Google, WhatsApp and website forms: no login, each request proves itself
+  // with a signature or a key. Their servers send in bursts, so the limit is far looser than for people.
+  const hookLimiter = rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: true, legacyHeaders: false,
+    skip: () => config.env === 'test' });
+  app.use('/api/hooks/form', express.urlencoded({ extended: false, limit: '100kb' }));
+  app.use('/api/hooks', hookLimiter, hooksRouter(db, crmDeps));
 
   app.use('/api', sameOriginOnly, authenticate(db));
   app.use('/api/auth', authRouter(db));
@@ -97,6 +111,7 @@ export function createApp(db: DB) {
   app.use('/api/items', itemsRouter(db));
   app.use('/api/parties', partiesRouter(db));
   app.use('/api/leads', leadsRouter(db));
+  app.use('/api/crm', crmRouter(db, crmDeps));
   app.use('/api/sales', salesRouter(db));
   app.use('/api/payments', paymentsRouter(db));
   app.use('/api/purchasing', purchasingRouter(db));

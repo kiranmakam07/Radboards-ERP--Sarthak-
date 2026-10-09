@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import request from 'supertest';
 import { ROLES, gstinCheckChar, type Role } from '@radcore/shared';
 import { createApp } from '../src/app';
+import type { CrmDeps } from '../src/modules/crm';
 import { config } from '../src/config';
 import { hashPassword } from '../src/core/auth';
 import { setSetting } from '../src/core/settings';
@@ -48,8 +49,12 @@ async function freshDatabase(): Promise<{ url: string; drop: () => Promise<void>
   return { url: url.toString(), drop: () => run(`drop database if exists ${name} with (force)`) };
 }
 
-/** Fresh database with defaults, one user per role, and the company set to Maharashtra (27). */
-export async function setup() {
+/**
+ * Fresh database with defaults, one user per role, and the company set to Maharashtra (27).
+ * Tests never reach the internet: `getJson` stands in for Meta's Graph API, and webhooks answer
+ * only after the lead has been created so a test can check for it straight away.
+ */
+export async function setup(getJson: CrmDeps['getJson'] = async () => { throw new Error('no network in tests'); }) {
   const database = await freshDatabase();
   const handle = await createDb(database.url, config.migrationsFolder);
   const db = handle.db;
@@ -61,7 +66,7 @@ export async function setup() {
     address: { line1: '1 Test Road', city: 'Pune', state: 'Maharashtra', pincode: '411001' },
   }, null);
 
-  const app = createApp(db);
+  const app = createApp(db, { getJson, awaitProcessing: true });
   const agents = new Map<Role, Agent>();
   const as = async (role: Role): Promise<Agent> => {
     const cached = agents.get(role);

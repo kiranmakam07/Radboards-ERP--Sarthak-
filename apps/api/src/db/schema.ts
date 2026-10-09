@@ -769,9 +769,30 @@ export const channelEvents = pgTable('channel_events', {
   payload: jsonb('payload').notNull(),
   status: eventStatusEnum('status').notNull().default('received'),
   error: text('error'),
+  /** One line a person can read: who it was and where it came from. */
+  summary: text('summary'),
+  /** The lead this event created or was added to. */
+  leadId: uuid('lead_id').references(() => leads.id),
+  attempts: integer('attempts').notNull().default(0),
   processedAt: ts('processed_at'),
   createdAt: ts('created_at').notNull().defaultNow(),
-}, (t) => [unique('channel_events_uq').on(t.channel, t.eventType, t.externalId)]);
+}, (t) => [
+  unique('channel_events_uq').on(t.channel, t.eventType, t.externalId),
+  index('channel_events_status_idx').on(t.status, t.createdAt),
+]);
+
+/**
+ * Quick replies (CRM): ready-made messages a salesperson sends to a lead in one tap, with the
+ * lead's own details filled in. Placeholders: {name}, {first_name}, {my_name}, {company}, {products}.
+ */
+export const messageTemplates = pgTable('message_templates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull().unique(),
+  body: text('body').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  active: boolean('active').notNull().default(true),
+  ...stamps,
+});
 
 // ----------------------------------------------------------------------------
 // HR (PRD 7.14, Tier 2): openings, applicants and their interviews, employees, attendance

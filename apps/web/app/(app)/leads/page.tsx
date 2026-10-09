@@ -16,7 +16,7 @@ const VIEWS: [string, string][] = [
 function Leads() {
   const params = useSearchParams();
   const can = useCan();
-  const [f, setF] = useState({ view: params.get('view') ?? '', q: '', stage: params.get('stage') ?? '', source_id: '', owner_id: '', mine: '' });
+  const [f, setF] = useState({ view: params.get('view') ?? '', q: '', stage: params.get('stage') ?? '', source_id: '', owner_id: '', mine: params.get('mine') ?? '' });
   const sources = useGet<{ data: any[] }>('/masters/lead-sources');
   const users = useGet<{ data: any[] }>('/masters/users-lite');
   const items = useGet<{ data: any[] }>('/items?limit=1000');

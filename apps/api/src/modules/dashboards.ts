@@ -112,6 +112,13 @@ export function dashboardsRouter(db: DB) {
                (select count(*) from maintenance_schedules
                  where active and next_due_on <= ${today}::date + remind_days_before)::int as maintenance_due`);
     }
+    if (can(role, 'leads:write')) {
+      data.my_leads = await one(sql`
+        select count(*) filter (where stage = 'new')::int as fresh,
+               count(*) filter (where stage in ('contacted','interested','meeting_booked')
+                                  and (next_follow_up_at at time zone ${IST})::date <= ${today}::date)::int as follow_ups_due
+          from leads where owner_id = ${req.user!.id}`);
+    }
     // For everyone, whatever their role: what is sitting with me.
     data.mine = await one(sql`
       select (select count(*) from tasks t where t.assignee_id = ${req.user!.id} and t.status = 'open' and t.due_date = ${today}::date and not ${LATE})::int as tasks_today,

@@ -8,6 +8,7 @@ import { InterviewResult } from '@/components/hr';
 import { MaintenanceDone, TaskCard, Due, everyText } from '@/components/ops';
 import { Card, Loading, Page, Stat, Table, dateTime, label, num } from '@/components/ui';
 import { useGet } from '@/lib/api';
+import { useCan } from '@/lib/session';
 
 /**
  * Everything that is sitting with the person signed in, whatever their role: the tasks given
@@ -16,6 +17,12 @@ import { useGet } from '@/lib/api';
 export default function MyWorkPage() {
   const work = useGet<{ data: { today: string; tasks: any[]; maintenance: any[] } }>('/ops/my-tasks');
   const interviews = useGet<{ data: any[] }>('/hr/interviews/mine');
+  const can = useCan();
+  const sells = can('leads:write');
+  const fresh = useGet<{ data: any[] }>(sells ? '/leads?mine=true&stage=new&limit=50' : null);
+  const followUps = useGet<{ data: any[] }>(sells ? '/leads?mine=true&view=followups_due&limit=50' : null);
+  // A lead can be in both lists; show it once, new ones first.
+  const myLeads = [...(fresh.data?.data ?? []), ...(followUps.data?.data ?? []).filter((l) => l.stage !== 'new')];
   const [doneFor, setDoneFor] = useState<string | null>(null);
   const [resultFor, setResultFor] = useState<string | null>(null);
   const d = work.data?.data;
@@ -38,6 +45,7 @@ export default function MyWorkPage() {
             <Stat label="Coming up this week" value={ahead.length} hint={later.length ? `${later.length} more after that` : undefined} />
             <Stat label="Maintenance due" value={d.maintenance.length} />
             <Stat label="Interviews to take" value={interviews.data?.data.length ?? 0} />
+            {sells ? <Stat label="Leads waiting for me" value={myLeads.length} hint="new, or follow-up due" /> : null}
           </div>
 
           {open.length === 0 && closed.length === 0 && d.maintenance.length === 0 ? <p className="muted">Nothing is waiting for you.</p> : null}
@@ -66,6 +74,18 @@ export default function MyWorkPage() {
             </Card>
           )}
         </>
+      )}
+
+      {myLeads.length > 0 && (
+        <Card title="Leads waiting for me" actions={<Link href="/leads?mine=true">All my leads</Link>}>
+          <Table rows={myLeads} rowHref={(r) => `/leads/${r.id}`} columns={[
+            { key: 'name', title: 'Lead', render: (r) => <>{r.name} <span className="muted small">{r.lead_no}</span></> },
+            { key: 'phone', title: 'Phone' },
+            { key: 'source_name', title: 'From', render: (r) => <>{r.source_name}{r.source_detail ? <span className="muted small"> · {r.source_detail}</span> : null}</> },
+            { key: 'stage', title: 'Stage', render: (r) => label(r.stage) },
+            { key: 'next_follow_up_at', title: 'Follow up by', render: (r) => <span className={r.overdue ? 'error small' : undefined}>{dateTime(r.next_follow_up_at)}</span> },
+          ]} />
+        </Card>
       )}
 
       {(interviews.data?.data.length ?? 0) > 0 && (

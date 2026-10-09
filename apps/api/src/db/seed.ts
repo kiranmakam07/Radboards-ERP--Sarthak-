@@ -7,7 +7,7 @@ import { hashPassword } from '../core/auth';
 import { SETTING_DEFAULTS } from '../core/settings';
 import { createDb, type DB } from './client';
 import {
-  accounts, expenseCategories, leadSources, locations, lostReasons, priceLists, settings, users,
+  accounts, expenseCategories, leadSources, locations, lostReasons, messageTemplates, priceLists, settings, users,
 } from './schema';
 
 type Coa = { code: string; name: string; type: AccountType; key?: string; group?: boolean; subtype?: 'cash' | 'bank'; parent?: string };
@@ -64,7 +64,14 @@ const EXPENSE_CATEGORIES: [string, string][] = [
 
 const LEAD_SOURCES = [
   'Meta Ads', 'Google Ads', 'Instagram Collab', 'YouTube Collab', 'Offline Campaign', 'Walk-in', 'Dealer Referral',
-  'Website', 'Other',
+  'Website', 'WhatsApp', 'Other',
+];
+
+/** Starter quick replies; the team edits these to its own words. */
+const QUICK_REPLIES: [string, string][] = [
+  ['First hello', 'Hi {first_name}, this is {my_name} from {company}. Thanks for your enquiry about {products}. When is a good time for a quick call?'],
+  ['Follow-up', 'Hi {first_name}, {my_name} from {company} here. Just checking in on {products}. Do you have any questions I can help with?'],
+  ['Visit the showroom', 'Hi {first_name}, you are welcome to visit our showroom to try {products} yourself. Shall I book a time for you?'],
 ];
 const LOST_REASONS = ['Price', 'Bought elsewhere', 'Not reachable', 'Just browsing', 'Other'];
 
@@ -121,6 +128,7 @@ export async function seedDefaults(db: DB): Promise<void> {
 
     await tx.insert(leadSources).values(LEAD_SOURCES.map((name) => ({ name }))).onConflictDoNothing();
     await tx.insert(lostReasons).values(LOST_REASONS.map((name) => ({ name }))).onConflictDoNothing();
+    await tx.insert(messageTemplates).values(QUICK_REPLIES.map(([name, body], i) => ({ name, body, sortOrder: i }))).onConflictDoNothing();
   });
 }
 
