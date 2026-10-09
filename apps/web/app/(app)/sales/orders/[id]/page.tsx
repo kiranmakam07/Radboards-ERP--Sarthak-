@@ -80,7 +80,7 @@ export default function OrderPage() {
 
       <div className="grid no-print">
         <Card title="Deliveries">
-          <Table rows={o.deliveries} empty="Nothing delivered yet." columns={[
+          <Table rows={o.deliveries} empty="Nothing delivered yet." rowHref={(r) => `/sales/deliveries/${r.id}`} columns={[
             { key: 'delivery_no', title: 'Challan' }, { key: 'delivered_at', title: 'When', render: (r) => dateTime(r.delivered_at) }, { key: 'location', title: 'From' },
           ]} />
         </Card>

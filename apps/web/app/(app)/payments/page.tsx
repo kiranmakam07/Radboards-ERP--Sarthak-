@@ -24,7 +24,7 @@ function Payments() {
         {f.party_id && <button type="button" onClick={() => setF({ ...f, party_id: '' })}>Showing one party × clear</button>}
       </div>
       <Loading loading={loading} error={error} />
-      <Table rows={data?.data} empty="No payments yet." columns={[
+      <Table rows={data?.data} empty="No payments yet." rowHref={(r) => `/payments/${r.id}`} columns={[
         { key: 'payment_no', title: 'Number' }, { key: 'paid_on', title: 'Date', render: (r) => date(r.paid_on) },
         { key: 'direction', title: '', render: (r) => (r.direction === 'in' ? 'Received' : 'Paid') },
         { key: 'party_name', title: 'Party', render: (r) => r.party_name ?? 'Cash sale' },
