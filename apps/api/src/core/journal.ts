@@ -136,11 +136,18 @@ export async function reverseJournals(
       reversesEntryId: e.id,
       lines: lines.map((l) => ({ account: { id: l.accountId }, partyId: l.partyId, debit: l.credit, credit: l.debit, memo: l.memo ?? undefined })),
     });
-    // A cancelled entry no longer explains the bank statement line it was reconciled with.
-    await tx.execute(sql`
-      update bank_statement_lines
-         set status = 'unmatched', matched_journal_line_id = null, matched_at = null, matched_by = null, updated_at = now()
-       where matched_journal_line_id in (select id from journal_lines where entry_id = ${e.id})`);
+    // A cancelled entry no longer explains the bank statement line it was reconciled with. If that line was
+    // matched to several entries, the whole match goes: the ones that are left no longer add up to it.
+    const hit = await rows<{ id: string }>(tx, sql`
+      select distinct m.statement_line_id as id from bank_line_matches m
+       where m.journal_line_id in (select id from journal_lines where entry_id = ${e.id})`);
+    if (hit.length > 0) {
+      const lineIds = hit.map((h) => h.id);
+      await tx.execute(sql`delete from bank_line_matches where statement_line_id in ${lineIds}`);
+      await tx.execute(sql`
+        update bank_statement_lines set status = 'unmatched', matched_at = null, matched_by = null, updated_at = now()
+         where id in ${lineIds}`);
+    }
   }
   return live.length;
 }

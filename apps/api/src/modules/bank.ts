@@ -7,7 +7,7 @@ import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { postJournal } from '../core/journal';
 import { rows, type DB } from '../db/client';
-import { accounts, bankStatementLines } from '../db/schema';
+import { accounts, bankLineMatches, bankStatementLines } from '../db/schema';
 import { parseStatement, StatementFormatError } from '../lib/bank-csv';
 import { badRequest, conflict, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zDate, zId, zText, wantsFile, type Ctx } from '../lib/http';
@@ -45,17 +45,19 @@ function unmatchedBookEntries(tx: DB, accountId: string, upTo: string | null = n
      where jl.account_id = ${accountId}
        and e.reverses_entry_id is null
        and not exists (select 1 from journal_entries r where r.reverses_entry_id = e.id)
-       and not exists (select 1 from bank_statement_lines b where b.matched_journal_line_id = jl.id)
+       and not exists (select 1 from bank_line_matches b where b.journal_line_id = jl.id)
        and (${upTo}::date is null or e.entry_date <= ${upTo}::date)
      order by e.entry_date, e.entry_no`);
 }
 
 const daysApart = (a: string, b: string) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400_000;
 
-async function setMatch(ctx: Ctx, lineId: string, journalLineId: number): Promise<void> {
+/** Record which book entries explain a statement line. The caller has already checked that they add up to it. */
+async function setMatch(ctx: Ctx, lineId: string, journalLineIds: number[]): Promise<void> {
+  await ctx.tx.insert(bankLineMatches).values(journalLineIds.map((journalLineId) => ({ statementLineId: lineId, journalLineId })));
   await ctx.tx
     .update(bankStatementLines)
-    .set({ status: 'matched', matchedJournalLineId: journalLineId, matchedAt: new Date(), matchedBy: ctx.user?.id ?? null, ignoreReason: null, updatedAt: new Date() })
+    .set({ status: 'matched', matchedAt: new Date(), matchedBy: ctx.user?.id ?? null, ignoreReason: null, updatedAt: new Date() })
     .where(eq(bankStatementLines.id, lineId));
 }
 
@@ -78,7 +80,7 @@ export async function autoMatch(ctx: Ctx, accountId: string): Promise<number> {
     const byReference = candidates.filter((b) => b.payment_reference && b.payment_reference.length >= 4 && haystack.includes(b.payment_reference.toLowerCase()));
     const pick = byReference.length === 1 ? byReference[0] : candidates.length === 1 ? candidates[0] : undefined;
     if (!pick) continue;
-    await setMatch(ctx, line.id, pick.journal_line_id);
+    await setMatch(ctx, line.id, [pick.journal_line_id]);
     pool.splice(pool.indexOf(pick), 1);
     matched++;
   }
@@ -138,17 +140,43 @@ async function lockLine(tx: DB, id: string): Promise<Line> {
   return must(line, 'Statement line');
 }
 
-export async function matchLine(ctx: Ctx, lineId: string, journalLineId: number): Promise<void> {
+/**
+ * Match a statement line by hand to one book entry, or to several that together make it up
+ * (a card-machine payout covering a day's receipts). The entries must add up to the line
+ * exactly. If the bank kept a fee, so the line is short of the entries, name the expense
+ * category for it: the fee is booked on the statement's date and becomes part of the match.
+ */
+export async function matchLine(ctx: Ctx, lineId: string, journalLineIds: number[], feeCategoryId?: string | null): Promise<void> {
   const { tx } = ctx;
   const line = await lockLine(tx, lineId);
   if (line.status === 'matched') throw conflict('This statement line is already matched');
-  const entry = (await unmatchedBookEntries(tx, line.accountId)).find((b) => b.journal_line_id === journalLineId);
-  if (!entry) throw conflict('That book entry is not available: it is on another account, cancelled, or already matched');
-  if (!D(entry.amount).eq(line.amount)) {
-    throw conflict(`Amounts differ: the statement says ${money(line.amount)}, the book entry is ${money(entry.amount)}`);
+  const ids = [...new Set(journalLineIds)];
+  if (ids.length === 0) throw badRequest('Pick at least one book entry');
+  const available = await unmatchedBookEntries(tx, line.accountId);
+  const picked = ids.map((id) => available.find((b) => b.journal_line_id === id));
+  if (picked.some((p) => !p)) throw conflict('That book entry is not available: it is on another account, cancelled, or already matched');
+  const total = picked.reduce((sum, p) => sum.plus(p!.amount), D(0));
+  // More in the books than reached the bank (or less paid out in the books than left the bank): the bank's charge.
+  const short = total.minus(line.amount);
+  if (!short.isZero()) {
+    const what = ids.length === 1 ? `the book entry is ${money(total)}` : `the ${ids.length} entries add up to ${money(total)}`;
+    if (!feeCategoryId || short.lt(0)) {
+      throw conflict(`Amounts differ: the statement says ${money(line.amount)}, ${what}`, {
+        statementAmount: money(line.amount), entriesTotal: money(total), difference: money(short), couldBeBankCharge: short.gt(0),
+      });
+    }
+    const note = [line.description, line.reference].filter(Boolean).join(' / ');
+    const fee = await createExpense(ctx, {
+      expenseDate: line.txnDate, categoryId: feeCategoryId, amount: money(short), gstType: 'none', paidFromAccountId: line.accountId,
+      notes: `Kept by the bank from: ${note}`,
+    });
+    const [jl] = await rows<{ id: number }>(tx, sql`
+      select jl.id::int as id from journal_lines jl join journal_entries e on e.id = jl.entry_id
+       where e.ref_type = 'expense' and e.ref_id = ${fee.id} and jl.account_id = ${line.accountId} and e.reverses_entry_id is null`);
+    ids.push(jl!.id);
   }
-  await setMatch(ctx, lineId, journalLineId);
-  await audit(ctx, 'bank_statement_line', lineId, 'match', { status: line.status }, { status: 'matched', journalLineId });
+  await setMatch(ctx, lineId, ids);
+  await audit(ctx, 'bank_statement_line', lineId, 'match', { status: line.status }, { status: 'matched', journalLineIds: ids, bankCharge: short.gt(0) ? money(short) : null });
 }
 
 /**
@@ -201,7 +229,7 @@ export async function createEntryForLine(
     });
     const [jl] = await rows<{ id: number }>(tx, sql`
       select id::int as id from journal_lines where entry_id = ${entryId} and account_id = ${line.accountId}`);
-    await setMatch(ctx, lineId, jl!.id);
+    await setMatch(ctx, lineId, [jl!.id]);
     await audit(ctx, 'bank_statement_line', lineId, 'create_entry', { status: line.status }, { status: 'matched', kind: 'journal', entryId });
     return;
   }
@@ -209,7 +237,7 @@ export async function createEntryForLine(
   const [jl] = await rows<{ id: number }>(tx, sql`
     select jl.id::int as id from journal_lines jl join journal_entries e on e.id = jl.entry_id
      where e.ref_type = ${refType} and e.ref_id = ${refId} and jl.account_id = ${line.accountId} and e.reverses_entry_id is null`);
-  await setMatch(ctx, lineId, jl!.id);
+  await setMatch(ctx, lineId, [jl!.id]);
   await audit(ctx, 'bank_statement_line', lineId, 'create_entry', { status: line.status }, { status: 'matched', kind: input.kind, refId });
 }
 
@@ -239,12 +267,15 @@ export function bankRouter(db: DB) {
     }).parse(req.query);
     const account = await bankAccount(db, q.account_id);
     const lines = await rows(db, sql`
-      select b.id, b.txn_date, b.description, b.reference, b.amount, b.balance, b.status, b.ignore_reason, b.matched_journal_line_id,
-             e.entry_date as matched_entry_date, e.entry_no::int as matched_entry_no, e.ref_type as matched_ref_type,
-             e.ref_id as matched_ref_id, e.narration as matched_narration
+      select b.id, b.txn_date, b.description, b.reference, b.amount, b.balance, b.status, b.ignore_reason,
+             -- the book entries that explain this line: usually one, several for a combined payout
+             (select coalesce(json_agg(json_build_object(
+                       'journal_line_id', jl.id, 'entry_date', e.entry_date, 'entry_no', e.entry_no, 'ref_type', e.ref_type,
+                       'ref_id', e.ref_id, 'narration', e.narration, 'amount', (jl.debit - jl.credit)::numeric(14,2)::text)
+                     order by e.entry_date, e.entry_no), '[]'::json)
+                from bank_line_matches m join journal_lines jl on jl.id = m.journal_line_id join journal_entries e on e.id = jl.entry_id
+               where m.statement_line_id = b.id) as matches
         from bank_statement_lines b
-        left join journal_lines jl on jl.id = b.matched_journal_line_id
-        left join journal_entries e on e.id = jl.entry_id
        where b.account_id = ${q.account_id}
          and (${q.from ?? null}::date is null or b.txn_date >= ${q.from ?? null}::date)
          and (${q.to ?? null}::date is null or b.txn_date <= ${q.to ?? null}::date)
@@ -289,8 +320,13 @@ export function bankRouter(db: DB) {
 
   r.post('/lines/:id/match', requirePerm('accounts:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ journal_line_id: z.coerce.number().int().positive() }).parse(req.body);
-    await inTx(db, req, (ctx) => matchLine(ctx, id, b.journal_line_id));
+    const b = z.object({
+      journal_line_id: z.coerce.number().int().positive().optional(),
+      journal_line_ids: z.array(z.coerce.number().int().positive()).max(200).optional(),
+      fee_category_id: emptyToNull(zId).optional(),
+    }).parse(req.body);
+    const ids = b.journal_line_ids ?? (b.journal_line_id ? [b.journal_line_id] : []);
+    await inTx(db, req, (ctx) => matchLine(ctx, id, ids, b.fee_category_id));
     res.json({ ok: true });
   });
 
@@ -299,10 +335,11 @@ export function bankRouter(db: DB) {
     await inTx(db, req, async (ctx) => {
       const line = await lockLine(ctx.tx, id);
       if (line.status !== 'matched') throw conflict('This statement line is not matched');
+      const freed = await ctx.tx.delete(bankLineMatches).where(eq(bankLineMatches.statementLineId, id)).returning({ journalLineId: bankLineMatches.journalLineId });
       await ctx.tx.update(bankStatementLines)
-        .set({ status: 'unmatched', matchedJournalLineId: null, matchedAt: null, matchedBy: null, updatedAt: new Date() })
+        .set({ status: 'unmatched', matchedAt: null, matchedBy: null, updatedAt: new Date() })
         .where(eq(bankStatementLines.id, id));
-      await audit(ctx, 'bank_statement_line', id, 'unmatch', { status: 'matched', journalLineId: line.matchedJournalLineId }, { status: 'unmatched' });
+      await audit(ctx, 'bank_statement_line', id, 'unmatch', { status: 'matched', journalLineIds: freed.map((f) => f.journalLineId) }, { status: 'unmatched' });
     });
     res.json({ ok: true });
   });
