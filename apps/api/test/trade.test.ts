@@ -613,6 +613,31 @@ describe('GST returns', () => {
   });
 });
 
+describe('home overview', () => {
+  it('counts what is waiting at each step, and shows each role only its own steps', async () => {
+    const owner = await w.as('owner');
+    const all = (await owner.get('/api/dashboards/overview').expect(200)).body.data;
+    expect(all.orders).toEqual({ quotes: 0, to_deliver: 0, to_invoice: 0 });
+    expect(all.invoices).toEqual({ unpaid: 1, outstanding: '400.00' });
+    expect(all.purchasing).toMatchObject({ awaiting_goods: 0, waiting_qc: 0, rejects_to_return: 0, bills_unpaid: 1, bills_outstanding: '31100.00' });
+    expect(all.stock).toMatchObject({ adjustments_pending: 0 });
+    expect(all.leads.converted_this_month).toBe(1);
+    expect(all.bank).toEqual({ unreconciled: 0 });
+
+    // Store staff see leads, orders and the count of unpaid invoices, but no rupee totals, purchasing or bank.
+    const store = await w.as('store');
+    const mine = (await store.get('/api/dashboards/overview').expect(200)).body.data;
+    expect(mine.invoices).toEqual({ unpaid: 1 });
+    expect(mine.purchasing).toBeUndefined();
+    expect(mine.bank).toBeUndefined();
+    expect(mine.leads).toBeDefined();
+    // Marketing sees leads and stock only.
+    const marketing = await w.as('marketing');
+    const mk = (await marketing.get('/api/dashboards/overview').expect(200)).body.data;
+    expect(Object.keys(mk).sort()).toEqual(['leads', 'stock']);
+  });
+});
+
 describe('dashboards', () => {
   it('sales, marketing and accounts dashboards compute live from the records', async () => {
     const owner = await w.as('owner');
@@ -623,6 +648,11 @@ describe('dashboards', () => {
     expect(sales.body.data.walk_ins_today.purchases).toBe(1);
     expect(sales.body.data.top_items[0].item).toBe('Cruiser Board');
     expect(sales.body.data.dealer_outstanding[0].name).toBe('Bangalore Boards');
+
+    // One point per day for the trend chart; the point for today is the sum of the channels.
+    expect(sales.body.data.sales_by_day).toHaveLength(1);
+    expect(sales.body.data.sales_by_day[0].day).toBe(TODAY);
+    expect(Number(sales.body.data.sales_by_day[0].value)).toBe(36720 - 4720 + 8376 + 1000 + 1120);
 
     const marketing = await owner.get('/api/dashboards/marketing').expect(200);
     const walkIn = marketing.body.data.by_source.find((s: { source: string }) => s.source === 'Walk-in');

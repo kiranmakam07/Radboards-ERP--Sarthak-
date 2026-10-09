@@ -1,8 +1,8 @@
 import { sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { addDays, istDate } from '@radcore/shared';
-import { requirePerm } from '../core/auth';
+import { addDays, can, istDate } from '@radcore/shared';
+import { requireAuth, requirePerm } from '../core/auth';
 import { rows, type DB } from '../db/client';
 import { zDate } from '../lib/http';
 import { gstSummary } from './gst';
@@ -31,6 +31,70 @@ function salesByChannel(db: DB, from: string, to: string) {
 export function dashboardsRouter(db: DB) {
   const r = Router();
 
+  /**
+   * The picture on the home screen: how many things are sitting at each step of
+   * lead-to-cash and purchase-to-stock right now. Each person gets only the steps their
+   * role may see, and rupee amounts only with accounts access.
+   */
+  r.get('/overview', requireAuth, async (req, res) => {
+    const role = req.user!.role;
+    const today = istDate();
+    const money = can(role, 'accounts:read');
+    const one = async <T>(q: ReturnType<typeof sql>) => (await rows<T>(db, q))[0]!;
+    const data: Record<string, unknown> = {};
+
+    if (can(role, 'leads:read')) {
+      data.leads = await one(sql`
+        select count(*) filter (where stage = 'new')::int as fresh,
+               count(*) filter (where stage in ('contacted','interested','meeting_booked'))::int as in_progress,
+               count(*) filter (where stage in ('new','contacted','interested','meeting_booked')
+                                  and (next_follow_up_at at time zone ${IST})::date <= ${today}::date)::int as follow_ups_due,
+               count(*) filter (where stage = 'converted'
+                                  and (converted_at at time zone ${IST})::date >= date_trunc('month', ${today}::date))::int as converted_this_month
+          from leads`);
+    }
+    if (can(role, 'sales:read')) {
+      data.orders = await one(sql`
+        select count(*) filter (where o.status = 'draft')::int as quotes,
+               count(*) filter (where o.status = 'confirmed' and exists (
+                 select 1 from sales_order_lines l where l.order_id = o.id and l.delivered_qty < l.qty))::int as to_deliver,
+               count(*) filter (where o.status in ('confirmed','delivered') and exists (
+                 select 1 from sales_order_lines l where l.order_id = o.id and l.invoiced_qty < l.delivered_qty))::int as to_invoice
+          from sales_orders o`);
+    }
+    if (can(role, 'invoices:read')) {
+      const inv = await one<{ unpaid: number; outstanding: string }>(sql`
+        select count(*)::int as unpaid, coalesce(sum(outstanding), 0)::numeric(14,2)::text as outstanding
+          from v_invoice_outstanding where outstanding > 0`);
+      data.invoices = money ? inv : { unpaid: inv.unpaid };
+    }
+    if (can(role, 'purchasing:read')) {
+      const bills = await one<{ unpaid: number; outstanding: string }>(sql`
+        select count(*)::int as unpaid, coalesce(sum(outstanding), 0)::numeric(14,2)::text as outstanding
+          from v_bill_outstanding where outstanding > 0`);
+      data.purchasing = {
+        ...(await one<Record<string, number>>(sql`
+          select (select count(*) from purchase_orders where status in ('sent','partly_received'))::int as awaiting_goods,
+                 (select count(*) from goods_receipts where status = 'received')::int as waiting_qc,
+                 (select count(distinct grn_id) from goods_receipt_lines where coalesce(rejected_qty, 0) > returned_qty)::int as rejects_to_return`)),
+        bills_unpaid: bills.unpaid,
+        ...(money ? { bills_outstanding: bills.outstanding } : {}),
+      };
+    }
+    if (can(role, 'stock:read')) {
+      data.stock = await one(sql`
+        select (select count(*) from items i
+                  left join (select m.item_id, sum(m.qty) as qty from stock_movements m join locations l on l.id = m.location_id
+                              where l.type <> 'rejected' group by m.item_id) s on s.item_id = i.id
+                 where i.is_stock_item and i.active and i.reorder_level is not null and coalesce(s.qty, 0) < i.reorder_level)::int as low_stock,
+               (select count(*) from stock_adjustments where status = 'pending')::int as adjustments_pending`);
+    }
+    if (money) {
+      data.bank = await one(sql`select count(*)::int as unreconciled from bank_statement_lines where status = 'unmatched'`);
+    }
+    res.json({ data });
+  });
+
   r.get('/sales', requirePerm('dashboard:sales'), async (req, res) => {
     const { from, to, today } = range(req.query);
     // Week starts Monday.
@@ -45,6 +109,14 @@ export function dashboardsRouter(db: DB) {
         sales_this_week: await salesByChannel(db, weekStart, today),
         sales_month_to_date: await salesByChannel(db, monthStart, today),
         sales_in_range: await salesByChannel(db, from, to),
+        // Net sales per day for the trend chart (days with no sales are simply absent).
+        sales_by_day: await rows(db, sql`
+          select i.invoice_date as day,
+                 count(*) filter (where i.doc_type = 'tax_invoice')::int as invoices,
+                 sum(case when i.doc_type = 'credit_note' then -i.grand_total else i.grand_total end) as value
+            from invoices i
+           where i.status = 'issued' and i.invoice_date between ${from}::date and ${to}::date
+           group by i.invoice_date order by i.invoice_date`),
         pipeline: await rows(db, sql`
           select l.stage, count(*)::int as count,
                  coalesce(sum((select sum(i.retail_price) from items i where i.id = any(l.interested_item_ids))), 0) as value

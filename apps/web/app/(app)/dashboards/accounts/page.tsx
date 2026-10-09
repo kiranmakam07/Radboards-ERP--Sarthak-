@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { BarList, ChartCard, ColumnChart, compactRupees, plural, rupees } from '@/components/charts';
 import { useRange } from '@/components/range';
 import { Card, Loading, Page, Stat, Table, date, inr } from '@/components/ui';
 import { useGet } from '@/lib/api';
@@ -9,6 +10,10 @@ export default function AccountsDashboard() {
   const { query, picker } = useRange();
   const { data, loading, error } = useGet<{ data: any }>(`/dashboards/accounts${query}`);
   const d = data?.data;
+  const ageing = d ? [
+    { label: '0–30', values: [Number(d.receivables.d0_30)] }, { label: '31–60', values: [Number(d.receivables.d31_60)] },
+    { label: '61–90', values: [Number(d.receivables.d61_90)] }, { label: 'Over 90', values: [Number(d.receivables.d90_plus)] },
+  ] : [];
   return (
     <Page title="Accounts dashboard">
       {picker}
@@ -28,31 +33,33 @@ export default function AccountsDashboard() {
               hint={`Income ₹${inr(d.profit_and_loss.income)} − Expenses ₹${inr(d.profit_and_loss.expense)}`} />
           </div>
           <div className="grid">
+            <ChartCard title="Money owed to us, by age in days" table={
+              <Table rows={ageing} columns={[{ key: 'label', title: 'Age', render: (r) => `${r.label} days` }, { key: 'amount', title: 'Outstanding', align: 'right', render: (r) => inr(r.values[0]) }]} />
+            }>
+              <ColumnChart data={ageing} series={['Outstanding']} format={rupees} axisFormat={compactRupees} empty="Nobody owes us anything." />
+            </ChartCard>
+
+            <ChartCard title="Who owes the most">
+              <BarList format={rupees} empty="Nobody owes us anything."
+                data={d.top_debtors.map((r: any) => ({
+                  label: r.name, value: Number(r.outstanding), note: r.oldest_due ? `due ${date(r.oldest_due)}` : undefined, href: r.party_id ? `/parties/${r.party_id}` : null,
+                }))} />
+            </ChartCard>
+
+            <ChartCard title="Expenses by category, this month">
+              <BarList format={rupees} empty="No expenses this month."
+                data={d.expenses_by_category.map((r: any) => ({ label: r.category, value: Number(r.amount), note: plural(r.count, 'entry', 'entries') }))} />
+            </ChartCard>
+
             <Card title="Cash & bank">
               <Table rows={d.cash_and_bank} columns={[{ key: 'name', title: 'Account' }, { key: 'balance', title: 'Balance', align: 'right', render: (r) => inr(r.balance) }]} />
             </Card>
-            <Card title="Receivables by age">
-              <Table rows={[
-                { bucket: '0–30 days', amount: d.receivables.d0_30 }, { bucket: '31–60 days', amount: d.receivables.d31_60 },
-                { bucket: '61–90 days', amount: d.receivables.d61_90 }, { bucket: '90+ days', amount: d.receivables.d90_plus },
-              ]} columns={[{ key: 'bucket', title: 'Age' }, { key: 'amount', title: 'Outstanding', align: 'right', render: (r) => inr(r.amount) }]} />
-            </Card>
-            <Card title="Top debtors">
-              <Table rows={d.top_debtors} empty="Nobody owes us anything." rowHref={(r) => (r.party_id ? `/parties/${r.party_id}` : null)} columns={[
-                { key: 'name', title: 'Party' }, { key: 'oldest_due', title: 'Oldest due', render: (r) => date(r.oldest_due) },
-                { key: 'outstanding', title: 'Outstanding', align: 'right', render: (r) => inr(r.outstanding) },
-              ]} />
-            </Card>
+
             <Card title="Supplier bills due or overdue">
               <Table rows={d.overdue_bills} empty="Nothing due this week." rowHref={(r) => `/purchasing/bills/${r.bill_id}`} columns={[
                 { key: 'bill_no', title: 'Bill' }, { key: 'supplier', title: 'Supplier' }, { key: 'due_date', title: 'Due', render: (r) => date(r.due_date) },
                 { key: 'days_overdue', title: 'Overdue', align: 'right', render: (r) => (Number(r.days_overdue) > 0 ? `${r.days_overdue} d` : '') },
                 { key: 'outstanding', title: 'Outstanding', align: 'right', render: (r) => inr(r.outstanding) },
-              ]} />
-            </Card>
-            <Card title="Expenses by category (month to date)">
-              <Table rows={d.expenses_by_category} empty="No expenses this month." columns={[
-                { key: 'category', title: 'Category' }, { key: 'count', title: 'Entries', align: 'right' }, { key: 'amount', title: 'Amount', align: 'right', render: (r) => inr(r.amount) },
               ]} />
             </Card>
           </div>
