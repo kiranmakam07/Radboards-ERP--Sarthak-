@@ -1,0 +1,88 @@
+# Production stack for one server: PostgreSQL, API, web app, HTTPS reverse proxy, daily backups.
+#   cp .env.production.example .env.production   (then fill it in)
+#   docker compose --env-file .env.production -f compose.prod.yml up -d --build
+# Full steps, updates and restore: "Run it on a server" in README.md
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: radcore
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: radcore
+      TZ: Asia/Kolkata
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U radcore -d radcore']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgres://radcore:${POSTGRES_PASSWORD}@db:5432/radcore
+      WEB_ORIGIN: https://${DOMAIN:?set DOMAIN in .env.production}
+      COOKIE_SECURE: 'true'
+      # The API sits behind exactly one proxy (Caddy), so the caller's real address is one hop back.
+      TRUST_PROXY: 1
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Admin}
+      SEED_ADMIN_PHONE: ${SEED_ADMIN_PHONE:?set SEED_ADMIN_PHONE in .env.production}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - web
+      - api
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: radcore
+      PGDATABASE: radcore
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      TZ: Asia/Kolkata
+      KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+    volumes:
+      - ./deploy/backup.sh:/backup.sh:ro
+      - ./backups:/backups
+    entrypoint: ['/bin/bash', '/backup.sh']
+
+volumes:
+  db_data:
+  caddy_data:
+  caddy_config:

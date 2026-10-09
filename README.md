@@ -54,6 +54,35 @@ npm run dev
   CGST/SGST vs IGST split), add users, add items, then enter opening stock
   (**Stock → Opening stock**, approved by admin/owner).
 
+## Run it on a server
+
+`compose.prod.yml` runs everything on one Linux server: PostgreSQL 16, the API, the web app,
+Caddy for automatic HTTPS, and a daily database backup. It needs Docker, and a domain name
+whose DNS points at the server.
+
+```bash
+cp .env.production.example .env.production
+```
+
+Fill in `DOMAIN`, `POSTGRES_PASSWORD` and the first admin's phone and password, then:
+
+```bash
+docker compose --env-file .env.production -f compose.prod.yml up -d --build
+```
+
+- **First sign-in:** the admin from `.env.production`. Change the password, then fill in
+  Setup → Company profile and add the users.
+- **Updating:** `git pull`, then the same `up -d --build` command. Database migrations are
+  applied automatically when the API starts.
+- **Backups:** one compressed dump per day in `./backups` on the server, kept for
+  `BACKUP_KEEP_DAYS` (30). They are on the same disk as the database, so also copy that
+  folder off the server (provider snapshots or object storage).
+- **Restore:** `docker compose --env-file .env.production -f compose.prod.yml exec -T db pg_restore --clean --if-exists -U radcore -d radcore < backups/<file>.dump`
+- **Logs:** `docker compose --env-file .env.production -f compose.prod.yml logs -f api`
+
+CI builds these images and starts the stack on every push, so a broken build is caught
+before it reaches the server.
+
 ## Commands
 
 | Command | What it does |
@@ -61,6 +90,7 @@ npm run dev
 | `npm run demo` | API on in-memory demo data + web app |
 | `npm run dev` | API + web app against your database |
 | `npm test` | All automated tests (shared + API) |
+| `TEST_DATABASE_URL=postgres://… npm test -w @radcore/api` | The API tests on a real PostgreSQL server, including the simultaneous-request tests |
 | `npm run typecheck` | TypeScript check for all three packages |
 | `npm run build:web` | Production build of the web app |
 | `npm run db:generate` | Generate a SQL migration after editing `apps/api/src/db/schema.ts` |
