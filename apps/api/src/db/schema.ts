@@ -722,6 +722,24 @@ export const journalLines = pgTable('journal_lines', {
   check('journal_lines_one_side', sql`(${t.debit} = 0) <> (${t.credit} = 0)`),
 ]);
 
+/**
+ * Year-end close: one row per financial year that has been closed. The closing journal entry
+ * (ref_type 'year_close') moves that year's income and expenses into Retained Earnings.
+ * Reopening a year reverses the entry and removes the row.
+ */
+export const fiscalCloses = pgTable('fiscal_closes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  fy: text('fy').notNull().unique(),
+  fromDate: date('from_date').notNull(),
+  toDate: date('to_date').notNull(),
+  /** Null when the year had nothing to close. */
+  entryId: uuid('entry_id').references(() => journalEntries.id),
+  income: numeric('income', { precision: 16, scale: 2 }).notNull().default('0'),
+  expense: numeric('expense', { precision: 16, scale: 2 }).notNull().default('0'),
+  profit: numeric('profit', { precision: 16, scale: 2 }).notNull().default('0'),
+  ...stamps,
+});
+
 // ----------------------------------------------------------------------------
 // Bank reconciliation: statement lines imported from the bank, matched one-to-one to the
 // journal line that recorded the same movement on that bank account.
