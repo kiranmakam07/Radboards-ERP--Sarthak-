@@ -29,7 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        # The official image, from a mirror: Docker Hub limits anonymous downloads from shared build machines.
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -61,6 +62,14 @@ jobs:
       SEED_ADMIN_PASSWORD: ci-only-admin-password
     steps:
       - uses: actions/checkout@v4
+      # Docker Hub limits anonymous downloads from shared build machines. Take the same official
+      # images from a mirror and give them the names the compose file and the Dockerfile ask for.
+      - name: Fetch base images
+        run: |
+          for image in postgres:16 node:22-bookworm-slim; do
+            docker pull -q "public.ecr.aws/docker/library/$image"
+            docker tag "public.ecr.aws/docker/library/$image" "$image"
+          done
       - name: Build images and start database, API and web
         run: docker compose -f compose.prod.yml up -d --build --wait db api web
       - name: Sign in through the API and read a report
