@@ -21,11 +21,13 @@ export function scheduleText(t: Record<string, any>): string {
 export const everyText = (s: Record<string, any>): string =>
   `Every ${s.interval_count === 1 ? s.interval_unit.replace(/s$/, '') : `${s.interval_count} ${s.interval_unit}`}`;
 
-export function dueText(s: Record<string, any>): string {
-  if (s.state === 'off') return 'Switched off';
-  if (s.days_left < 0) return `${-s.days_left} day${s.days_left === -1 ? '' : 's'} overdue`;
-  if (s.days_left === 0) return 'Due today';
-  return `Due in ${s.days_left} day${s.days_left === 1 ? '' : 's'} (${date(s.next_due_on)})`;
+/** Where a maintenance schedule stands: a coloured word, then how far off it is. */
+export function Due({ schedule: s }: { schedule: Record<string, any> }) {
+  if (s.state === 'off') return <Badge value="off" />;
+  const days = Math.abs(s.days_left);
+  const far = s.days_left < 0 ? `${days} day${days === 1 ? '' : 's'} late`
+    : s.days_left === 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'} (${date(s.next_due_on)})`;
+  return <><Badge value={s.state === 'ok' ? 'on_track' : s.state} /> <span className="small">{far}</span></>;
 }
 
 /** One task, workable in place: tick the checklist, then finish it or say why it could not be done. */

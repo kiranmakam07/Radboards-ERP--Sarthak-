@@ -3,7 +3,7 @@
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { INTERVAL_UNITS, istDate } from '@radcore/shared';
-import { MaintenanceDone, dueText, everyText } from '@/components/ops';
+import { MaintenanceDone, Due, everyText } from '@/components/ops';
 import { ActionButton, Badge, Card, Form, KV, Loading, Page, Table, date, inr, label } from '@/components/ui';
 import { patch, post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -43,7 +43,7 @@ export default function AssetPage() {
         <Table rows={a.schedules} empty="No schedule yet. Add one below and it will remind you ahead of each due date." columns={[
           { key: 'title', title: 'Work' },
           { key: 'interval', title: 'How often', render: (r) => everyText(r) },
-          { key: 'state', title: 'Due', render: (r) => <><Badge value={r.state} /> <span className="small">{dueText(r)}</span></> },
+          { key: 'state', title: 'Due', render: (r) => <Due schedule={r} /> },
           { key: 'last_done_on', title: 'Last done', render: (r) => date(r.last_done_on) },
           { key: 'assignee_name', title: 'Looked after by' },
           { key: 'remind_days_before', title: 'Reminder', render: (r) => `${r.remind_days_before} days ahead` },

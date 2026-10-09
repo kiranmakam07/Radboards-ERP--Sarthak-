@@ -23,7 +23,7 @@ const gstin = (state: string, pan: string) => `${state}${pan}1Z${gstinCheckChar(
 export async function seedDemo(db: DB): Promise<void> {
   const hash = await hashPassword(DEMO_PASSWORD);
   await db.insert(users).values(
-    ROLES.map((role, i) => ({ name: `Demo ${role[0]!.toUpperCase()}${role.slice(1)}`, phone: `+91900000000${i}`, passwordHash: hash, role })),
+    ROLES.map((role, i) => ({ name: role === 'hr' ? 'Demo HR' : `Demo ${role[0]!.toUpperCase()}${role.slice(1)}`, phone: `+91900000000${i}`, passwordHash: hash, role })),
   );
   const [admin] = await rows<{ id: string; name: string; phone: string }>(db, sql`select id, name, phone from users where role = 'admin' limit 1`);
 

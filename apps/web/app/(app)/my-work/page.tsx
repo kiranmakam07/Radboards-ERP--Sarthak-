@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { plural } from '@/components/charts';
 import { InterviewResult } from '@/components/hr';
-import { MaintenanceDone, TaskCard, dueText, everyText } from '@/components/ops';
-import { Badge, Card, Loading, Page, Stat, Table, dateTime, label, num } from '@/components/ui';
+import { MaintenanceDone, TaskCard, Due, everyText } from '@/components/ops';
+import { Card, Loading, Page, Stat, Table, dateTime, label, num } from '@/components/ui';
 import { useGet } from '@/lib/api';
 
 /**
@@ -31,7 +31,7 @@ export default function MyWorkPage() {
         <>
           <div className="stats">
             <Stat label="To do today" value={today.length} hint={closed.length ? `${closed.length} already closed today` : undefined} />
-            <Stat label="Late" value={late.length ? <span className="error">{late.length}</span> : 0} />
+            <Stat label="Late" value={late.length ? <span style={{ color: 'var(--danger)' }}>{late.length}</span> : 0} />
             <Stat label="Coming up this week" value={ahead.length} />
             <Stat label="Maintenance due" value={d.maintenance.length} />
             <Stat label="Interviews to take" value={interviews.data?.data.length ?? 0} />
@@ -53,7 +53,7 @@ export default function MyWorkPage() {
                 { key: 'asset_name', title: 'Asset', render: (r) => <Link href={`/ops/assets/${r.asset_id}`}>{r.asset_name}</Link> },
                 { key: 'title', title: 'Work' },
                 { key: 'interval', title: 'How often', render: (r) => everyText(r) },
-                { key: 'state', title: 'Due', render: (r) => <><Badge value={r.state} /> <span className="small">{dueText(r)}</span></> },
+                { key: 'state', title: 'Due', render: (r) => <Due schedule={r} /> },
                 { key: 'instructions', title: 'Instructions', render: (r) => <span style={{ whiteSpace: 'normal' }}>{r.instructions}</span> },
                 { key: 'actions', title: '', render: (r) => <button type="button" onClick={() => setDoneFor(doneFor === r.id ? null : r.id)}>Mark done</button> },
               ]} />

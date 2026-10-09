@@ -48,7 +48,7 @@ const TONES: Record<string, string> = {
   open: 'blue', on_hold: 'amber', done: 'green', skipped: 'red', scheduled: 'blue', completed: 'green', no_show: 'red',
   pass: 'green', hold: 'amber', fail: 'red', active: 'green', left: 'grey',
   present: 'green', half_day: 'amber', absent: 'red', leave: 'blue', weekly_off: 'grey', holiday: 'grey',
-  in_use: 'green', under_repair: 'amber', retired: 'grey', overdue: 'red', due_soon: 'amber', ok: 'green', off: 'grey',
+  in_use: 'green', under_repair: 'amber', retired: 'grey', overdue: 'red', due_soon: 'amber', on_track: 'green', off: 'grey',
 };
 
 export function Badge({ value }: { value: unknown }) {

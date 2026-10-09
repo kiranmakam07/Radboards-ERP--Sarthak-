@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { addDays } from '@radcore/shared';
 import { BarList, ChartCard, ColumnChart, Flow, rupees } from '@/components/charts';
-import { dueText, everyText } from '@/components/ops';
-import { Badge, Card, Loading, Page, Stat, Table, date, label } from '@/components/ui';
+import { Due, everyText } from '@/components/ops';
+import { Card, Loading, Page, Stat, Table, date, label } from '@/components/ui';
 import { useGet } from '@/lib/api';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -77,7 +77,7 @@ export default function OpsDashboard() {
               { key: 'asset_name', title: 'Asset' },
               { key: 'title', title: 'Work' },
               { key: 'interval', title: 'How often', render: (r) => everyText(r) },
-              { key: 'state', title: 'Due', render: (r) => <><Badge value={r.state} /> <span className="small">{dueText(r)}</span></> },
+              { key: 'state', title: 'Due', render: (r) => <Due schedule={r} /> },
               { key: 'assignee_name', title: 'Looked after by' },
             ]} />
           </Card>

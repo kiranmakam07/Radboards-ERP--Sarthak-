@@ -57,7 +57,7 @@ function Tasks() {
         { key: 'assignee_name', title: 'Who' },
         { key: 'status', title: 'Status', render: (r) => (r.overdue ? <Badge value="overdue" /> : <Badge value={r.status} />) },
         { key: 'checklist', title: 'Checklist', render: (r) => (r.checklist_total ? `${r.checklist_done} of ${r.checklist_total}` : '') },
-        { key: 'frequency', title: 'From', render: (r) => (r.frequency ? `${label(r.frequency)} routine` : 'One-off') },
+        { key: 'frequency', title: 'From', render: (r) => (!r.frequency ? 'One-off' : r.frequency === 'need_based' ? 'Routine, raised by hand' : `${label(r.frequency)} routine`) },
         { key: 'completed_at', title: 'Closed', render: (r) => (r.completed_at ? `${dateTime(r.completed_at)}${r.completed_by_name ? ` · ${r.completed_by_name}` : ''}` : '') },
         { key: 'note', title: 'Note', render: (r) => <span style={{ whiteSpace: 'normal' }}>{r.note}</span> },
         { key: 'actions', title: '', render: (r) => (manage && r.status !== 'open'
