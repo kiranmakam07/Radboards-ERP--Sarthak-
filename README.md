@@ -110,6 +110,33 @@ set `SEED_DEMO_DATA=false`, and start again; the first admin from `.env.producti
 docker compose --env-file .env.production -f compose.prod.yml down -v
 ```
 
+### A review copy on Vercel
+
+Vercel runs the screens and the API as one deployment (no server to look after), and the database
+is a Postgres added from Vercel's own Storage tab. Every push to `main` then redeploys by itself.
+
+1. In Vercel: **Add New → Project**, import this repository, and set **Root Directory** to `apps/web`.
+2. Under **Environment Variables** add `SEED_DEMO_DATA` = `true` and `DEMO_PASSWORD` = your own
+   password of at least 10 characters. Deploy. This first deployment has no database yet, so
+   signing in says so.
+3. In the project: **Storage → Create Database → Neon (Postgres)**, region **Singapore** (the API
+   runs there too, see `apps/web/vercel.json`), and connect it to the project.
+4. **Deployments → ⋯ → Redeploy.** The build brings the database up to date and loads the sample
+   data; the sign-ins are the ones in the table above.
+
+What is different from a server:
+
+| | On a server | On Vercel |
+| --- | --- | --- |
+| The API | A program of its own, behind `/api` | Inside the web app (`apps/web/scripts/embed-api.mjs` writes the `/api` route at build time; `apps/api/src/serverless.ts` answers it) |
+| Database updates | When the API starts | When the app is built (`npm run prepare:db -w @radcore/api`) |
+| Attached files | A folder on a volume, up to 10 MB each | In the database, up to 4 MB each (Vercel caps the size of a request) |
+| Backups | `deploy/backup.sh`, nightly | The database provider's own (Neon keeps a history to restore from) |
+
+`DATABASE_URL` comes from the database connection; nothing else needs setting. To try the same
+build on your own machine: `EMBED_API=true DATABASE_URL=postgres://... npm run vercel-build -w @radcore/web`,
+then `EMBED_API=true DATABASE_URL=postgres://... npm run start -w @radcore/web`.
+
 ## Connecting lead sources
 
 Every outside source ends in the same lead list (same phone check, owner and first follow-up as

@@ -8,16 +8,17 @@ import { can, type Permission } from '@radcore/shared';
 import { config } from '../config';
 import { requireAuth } from '../core/auth';
 import { rows, type DB } from '../db/client';
-import { files } from '../db/schema';
+import { fileContents, files } from '../db/schema';
 import { AppError, badRequest, forbidden, must } from '../lib/errors';
 import { zId } from '../lib/http';
 
 /**
  * Attachments. A file is posted as the request body itself (not a form), checked by its first
- * bytes rather than by what the browser says it is, and stored under the upload folder by id.
+ * bytes rather than by what the browser says it is, and stored under the upload folder by id
+ * (or in the database, where the host has no disk: see config.fileStore).
  * Only PDFs and ordinary pictures are taken: nothing a browser would run as a page.
  */
-export const MAX_BYTES = 10 * 1024 * 1024;
+export const MAX_BYTES = config.maxUploadBytes;
 
 const PURPOSES = ['resume', 'bill', 'item_image', 'other'] as const;
 type Purpose = (typeof PURPOSES)[number];
@@ -65,13 +66,16 @@ export function filesRouter(db: DB) {
       createdBy: req.user!.id,
     }).returning();
     try {
-      fs.mkdirSync(config.uploadDir, { recursive: true });
-      fs.writeFileSync(diskPath(row!.id), body, { flag: 'wx' });
+      if (config.fileStore === 'database') await db.insert(fileContents).values({ fileId: row!.id, bytes: body });
+      else {
+        fs.mkdirSync(config.uploadDir, { recursive: true });
+        fs.writeFileSync(diskPath(row!.id), body, { flag: 'wx' });
+      }
     } catch (e) {
       // Without the bytes the row means nothing; take it back out so nothing points at a missing file.
       await db.delete(files).where(eq(files.id, row!.id));
       console.error(e);
-      throw new AppError(500, 'storage_error', 'The file could not be saved. Tell an admin: the upload folder may be full or missing.');
+      throw new AppError(500, 'storage_error', 'The file could not be saved. Tell an admin: the place files are kept may be full or missing.');
     }
     res.status(201).json({ data: { id: row!.id, url: `/api/files/${row!.id}`, name, mime, size: body.length } });
   });
@@ -90,13 +94,16 @@ export function filesRouter(db: DB) {
       ok = Boolean(mine);
     }
     if (!ok) throw forbidden();
-    if (!fs.existsSync(diskPath(id))) throw must(null, 'File');
+    // Look in both places: a file stays readable if the way files are kept is changed later.
+    const [kept] = fs.existsSync(diskPath(id)) ? [] : await db.select({ bytes: fileContents.bytes }).from(fileContents).where(eq(fileContents.fileId, id));
+    if (!kept && !fs.existsSync(diskPath(id))) throw must(null, 'File');
     res.setHeader('Content-Type', f!.mime);
     res.setHeader('Content-Length', String(f!.size));
     res.setHeader('Content-Disposition', `inline; filename="${safeName(f!.originalName)}"`);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
-    fs.createReadStream(diskPath(id)).pipe(res);
+    if (kept) res.end(kept.bytes);
+    else fs.createReadStream(diskPath(id)).pipe(res);
   });
 
   return r;

@@ -22,6 +22,9 @@ Thumbs.db
 # local Claude Code settings (launch.json is shared on purpose)
 .claude/settings.local.json
 
+# written at build time on Vercel (apps/web/scripts/embed-api.mjs)
+apps/web/pages/
+
 # documents exported for sharing (not source)
 exports/
 

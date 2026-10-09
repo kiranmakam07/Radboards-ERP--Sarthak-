@@ -27,7 +27,7 @@ export default function ExpensesPage() {
               { name: 'paid_from_account_id', label: 'Paid from', type: 'select', required: true, options: (accounts.data?.data ?? []).map((a) => ({ value: a.id, label: a.name })) },
               { name: 'vendor_name', label: 'Vendor' },
               { name: 'vendor_gstin', label: 'Vendor GSTIN', help: 'Needed to claim input GST' },
-              { name: 'attachment_url', label: 'Bill (photo or PDF)', type: 'file', purpose: 'bill', help: 'Up to 10 MB' },
+              { name: 'attachment_url', label: 'Bill (photo or PDF)', type: 'file', purpose: 'bill' },
               { name: 'notes', label: 'Notes', type: 'textarea' },
             ]}
             onSubmit={(v) => post('/accounting/expenses', v)} onDone={reload} />
