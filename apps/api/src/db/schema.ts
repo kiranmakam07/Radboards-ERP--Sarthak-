@@ -1,12 +1,14 @@
 import { sql } from 'drizzle-orm';
 import {
-  bigint, bigserial, boolean, char, check, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp,
-  unique, uniqueIndex, uuid, type AnyPgColumn,
+  bigint, bigserial, boolean, char, check, date, index, integer, jsonb, numeric, pgEnum, pgTable, smallint, text, time,
+  timestamp, unique, uniqueIndex, uuid, type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import {
-  ACCOUNT_TYPES, ADJUSTMENT_STATUSES, BILL_DOC_TYPES, BILL_STATUSES, CHANNELS, GRN_STATUSES, INVOICE_DOC_TYPES,
-  INVOICE_STATUSES, ITEM_TYPES, LEAD_ACTIVITY_TYPES, LEAD_STAGES, LOCATION_TYPES, MOVEMENT_TYPES, ORDER_STATUSES,
-  PARTY_TYPES, PAYMENT_DIRECTIONS, PAYMENT_MODES, PO_STATUSES, ROLES,
+  ACCOUNT_TYPES, ADJUSTMENT_STATUSES, APPLICANT_ACTIVITY_TYPES, APPLICANT_SOURCES, APPLICANT_STAGES, ASSET_STATUSES,
+  ATTENDANCE_STATUSES, BILL_DOC_TYPES, BILL_STATUSES, CHANNELS, EMPLOYEE_STATUSES, EMPLOYMENT_TYPES, GRN_STATUSES,
+  INTERVAL_UNITS, INTERVIEW_MODES, INTERVIEW_RESULTS, INTERVIEW_STATUSES, INVOICE_DOC_TYPES, INVOICE_STATUSES, ITEM_TYPES,
+  LEAD_ACTIVITY_TYPES, LEAD_STAGES, LOCATION_TYPES, MOVEMENT_TYPES, OPENING_STATUSES, ORDER_STATUSES, PARTY_TYPES,
+  PAYMENT_DIRECTIONS, PAYMENT_MODES, PO_STATUSES, REJECT_REASONS, ROLES, TASK_FREQUENCIES, TASK_STATUSES,
 } from '@radcore/shared';
 
 // Money is numeric(12,2) in INR, quantities numeric(12,3) (PRD section 8).
@@ -770,3 +772,234 @@ export const channelEvents = pgTable('channel_events', {
   processedAt: ts('processed_at'),
   createdAt: ts('created_at').notNull().defaultNow(),
 }, (t) => [unique('channel_events_uq').on(t.channel, t.eventType, t.externalId)]);
+
+// ----------------------------------------------------------------------------
+// HR (PRD 7.14, Tier 2): openings, applicants and their interviews, employees, attendance
+// ----------------------------------------------------------------------------
+export const openingStatusEnum = pgEnum('opening_status', OPENING_STATUSES);
+export const applicantStageEnum = pgEnum('applicant_stage', APPLICANT_STAGES);
+export const applicantSourceEnum = pgEnum('applicant_source', APPLICANT_SOURCES);
+export const rejectReasonEnum = pgEnum('reject_reason', REJECT_REASONS);
+export const applicantActivityTypeEnum = pgEnum('applicant_activity_type', APPLICANT_ACTIVITY_TYPES);
+export const interviewModeEnum = pgEnum('interview_mode', INTERVIEW_MODES);
+export const interviewStatusEnum = pgEnum('interview_status', INTERVIEW_STATUSES);
+export const interviewResultEnum = pgEnum('interview_result', INTERVIEW_RESULTS);
+export const employmentTypeEnum = pgEnum('employment_type', EMPLOYMENT_TYPES);
+export const employeeStatusEnum = pgEnum('employee_status', EMPLOYEE_STATUSES);
+export const attendanceStatusEnum = pgEnum('attendance_status', ATTENDANCE_STATUSES);
+
+export const jobOpenings = pgTable('job_openings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  title: text('title').notNull(),
+  department: text('department').notNull(),
+  /** How many people are wanted; "filled" is counted from the applicants hired against it. */
+  positions: integer('positions').notNull().default(1),
+  status: openingStatusEnum('status').notNull().default('open'),
+  description: text('description'),
+  openedOn: date('opened_on').notNull(),
+  closedOn: date('closed_on'),
+  ...stamps,
+}, (t) => [check('job_openings_positions_chk', sql`${t.positions} > 0`)]);
+
+export const employees = pgTable('employees', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  employeeNo: text('employee_no').notNull().unique(),
+  name: text('name').notNull(),
+  phone: text('phone').notNull(),
+  email: text('email'),
+  department: text('department').notNull(),
+  designation: text('designation').notNull(),
+  employmentType: employmentTypeEnum('employment_type').notNull().default('full_time'),
+  joinDate: date('join_date').notNull(),
+  monthlySalary: money('monthly_salary'),
+  /** Their sign-in, when they have one: this is how tasks reach them. */
+  userId: uuid('user_id').unique().references(() => users.id),
+  status: employeeStatusEnum('status').notNull().default('active'),
+  leftOn: date('left_on'),
+  leftReason: text('left_reason'),
+  notes: text('notes'),
+  ...stamps,
+}, (t) => [
+  // A person is on the rolls once; someone who left and came back gets a new record.
+  uniqueIndex('employees_active_phone_uq').on(t.phone).where(sql`${t.status} = 'active'`),
+  check('employees_left_chk', sql`(${t.status} = 'left') = (${t.leftOn} is not null)`),
+]);
+
+export const applicants = pgTable('applicants', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  applicantNo: text('applicant_no').notNull().unique(),
+  /** Null for a general application not tied to an opening. */
+  openingId: uuid('opening_id').references(() => jobOpenings.id),
+  name: text('name').notNull(),
+  phone: text('phone').notNull(),
+  email: text('email'),
+  source: applicantSourceEnum('source').notNull(),
+  sourceDetail: text('source_detail'),
+  resumeUrl: text('resume_url'),
+  experienceYears: numeric('experience_years', { precision: 4, scale: 1 }),
+  currentCompany: text('current_company'),
+  expectedSalary: money('expected_salary'),
+  stage: applicantStageEnum('stage').notNull().default('applied'),
+  rejectReason: rejectReasonEnum('reject_reason'),
+  ownerId: uuid('owner_id').references(() => users.id),
+  appliedOn: date('applied_on').notNull(),
+  /** When the applicant first got past screening: shortlisted, or called straight for an interview. */
+  qualifiedAt: ts('qualified_at'),
+  employeeId: uuid('employee_id').references(() => employees.id),
+  /** When the application ended: hired or rejected. */
+  closedAt: ts('closed_at'),
+  notes: text('notes'),
+  ...stamps,
+}, (t) => [
+  index('applicants_stage_idx').on(t.stage),
+  index('applicants_opening_idx').on(t.openingId),
+  index('applicants_phone_idx').on(t.phone),
+  // One live application per person: a repeat is refused and pointed at the one already open.
+  uniqueIndex('applicants_open_phone_uq').on(t.phone).where(sql`${t.stage} in ('applied','shortlisted','interview','offered')`),
+  check('applicants_reject_reason_chk', sql`(${t.stage} = 'rejected') = (${t.rejectReason} is not null)`),
+  check('applicants_hired_chk', sql`(${t.stage} = 'hired') = (${t.employeeId} is not null)`),
+]);
+
+export const applicantActivities = pgTable('applicant_activities', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  applicantId: uuid('applicant_id').notNull().references(() => applicants.id),
+  type: applicantActivityTypeEnum('type').notNull(),
+  note: text('note'),
+  at: ts('at').notNull().defaultNow(),
+  userId: uuid('user_id').references(() => users.id),
+}, (t) => [index('applicant_activities_applicant_idx').on(t.applicantId)]);
+
+export const interviews = pgTable('interviews', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  applicantId: uuid('applicant_id').notNull().references(() => applicants.id),
+  round: integer('round').notNull(),
+  title: text('title').notNull(),
+  scheduledAt: ts('scheduled_at').notNull(),
+  mode: interviewModeEnum('mode').notNull().default('in_person'),
+  interviewerId: uuid('interviewer_id').references(() => users.id),
+  status: interviewStatusEnum('status').notNull().default('scheduled'),
+  result: interviewResultEnum('result'),
+  rating: integer('rating'),
+  feedback: text('feedback'),
+  completedAt: ts('completed_at'),
+  ...stamps,
+}, (t) => [
+  unique('interviews_round_uq').on(t.applicantId, t.round),
+  index('interviews_when_idx').on(t.scheduledAt),
+  index('interviews_interviewer_idx').on(t.interviewerId),
+  check('interviews_result_chk', sql`(${t.status} = 'completed') = (${t.result} is not null)`),
+  check('interviews_rating_chk', sql`${t.rating} is null or ${t.rating} between 1 and 5`),
+]);
+
+export const attendance = pgTable('attendance', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  employeeId: uuid('employee_id').notNull().references(() => employees.id),
+  date: date('date').notNull(),
+  status: attendanceStatusEnum('status').notNull(),
+  checkIn: time('check_in'),
+  checkOut: time('check_out'),
+  note: text('note'),
+  ...stamps,
+}, (t) => [
+  unique('attendance_employee_day_uq').on(t.employeeId, t.date),
+  index('attendance_date_idx').on(t.date),
+]);
+
+// ----------------------------------------------------------------------------
+// Operations (PRD 7.14, Tier 3): recurring tasks with checklists, assets and their maintenance
+// ----------------------------------------------------------------------------
+export const taskFrequencyEnum = pgEnum('task_frequency', TASK_FREQUENCIES);
+export const taskStatusEnum = pgEnum('task_status', TASK_STATUSES);
+export const assetStatusEnum = pgEnum('asset_status', ASSET_STATUSES);
+export const intervalUnitEnum = pgEnum('interval_unit', INTERVAL_UNITS);
+
+export const taskTemplates = pgTable('task_templates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  title: text('title').notNull(),
+  description: text('description'),
+  frequency: taskFrequencyEnum('frequency').notNull(),
+  /** Daily and weekly: the days it runs on, 0 = Sunday ... 6 = Saturday. */
+  weekdays: smallint('weekdays').array().notNull().default(sql`'{}'::smallint[]`),
+  /** Monthly: the day of the month; 29 to 31 fall on the last day of a shorter month. */
+  monthDay: smallint('month_day'),
+  assigneeId: uuid('assignee_id').notNull().references(() => users.id),
+  checklist: jsonb('checklist').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  startDate: date('start_date').notNull(),
+  active: boolean('active').notNull().default(true),
+  ...stamps,
+}, (t) => [
+  check('task_templates_weekdays_chk',
+    sql`${t.weekdays} <@ array[0,1,2,3,4,5,6]::smallint[] and (${t.frequency} not in ('daily','weekly') or cardinality(${t.weekdays}) > 0)`),
+  check('task_templates_month_day_chk', sql`${t.frequency} <> 'monthly' or ${t.monthDay} between 1 and 31`),
+]);
+
+export const tasks = pgTable('tasks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  templateId: uuid('template_id').references(() => taskTemplates.id),
+  /** The day of the schedule this task was created for. Null for tasks raised by hand. */
+  scheduledFor: date('scheduled_for'),
+  title: text('title').notNull(),
+  description: text('description'),
+  assigneeId: uuid('assignee_id').notNull().references(() => users.id),
+  dueDate: date('due_date').notNull(),
+  status: taskStatusEnum('status').notNull().default('open'),
+  checklist: jsonb('checklist').$type<{ text: string; done: boolean }[]>().notNull().default(sql`'[]'::jsonb`),
+  completedAt: ts('completed_at'),
+  completedBy: uuid('completed_by').references(() => users.id),
+  note: text('note'),
+  ...stamps,
+}, (t) => [
+  // The schedule creates each day's task exactly once, however often it is run.
+  unique('tasks_template_day_uq').on(t.templateId, t.scheduledFor),
+  index('tasks_assignee_idx').on(t.assigneeId, t.status, t.dueDate),
+  index('tasks_due_idx').on(t.dueDate),
+  check('tasks_closed_chk', sql`(${t.status} = 'open') = (${t.completedAt} is null)`),
+]);
+
+export const assets = pgTable('assets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  assetNo: text('asset_no').notNull().unique(),
+  name: text('name').notNull(),
+  category: text('category').notNull(),
+  location: text('location'),
+  serialNo: text('serial_no'),
+  purchaseDate: date('purchase_date'),
+  purchaseCost: money('purchase_cost'),
+  status: assetStatusEnum('status').notNull().default('in_use'),
+  notes: text('notes'),
+  ...stamps,
+});
+
+export const maintenanceSchedules = pgTable('maintenance_schedules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  assetId: uuid('asset_id').notNull().references(() => assets.id),
+  title: text('title').notNull(),
+  intervalCount: integer('interval_count').notNull(),
+  intervalUnit: intervalUnitEnum('interval_unit').notNull(),
+  nextDueOn: date('next_due_on').notNull(),
+  lastDoneOn: date('last_done_on'),
+  assigneeId: uuid('assignee_id').references(() => users.id),
+  /** Starts showing as "due soon" this many days ahead. */
+  remindDaysBefore: integer('remind_days_before').notNull().default(7),
+  instructions: text('instructions'),
+  active: boolean('active').notNull().default(true),
+  ...stamps,
+}, (t) => [
+  index('maintenance_schedules_due_idx').on(t.nextDueOn),
+  index('maintenance_schedules_asset_idx').on(t.assetId),
+  check('maintenance_schedules_interval_chk', sql`${t.intervalCount} > 0 and ${t.remindDaysBefore} >= 0`),
+]);
+
+export const maintenanceLogs = pgTable('maintenance_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  assetId: uuid('asset_id').notNull().references(() => assets.id),
+  /** Null for a repair or service that was not on any schedule. */
+  scheduleId: uuid('schedule_id').references(() => maintenanceSchedules.id),
+  doneOn: date('done_on').notNull(),
+  doneBy: text('done_by'),
+  cost: money('cost'),
+  notes: text('notes'),
+  /** What the schedule's next due date became because of this entry. */
+  nextDueOn: date('next_due_on'),
+  ...stamps,
+}, (t) => [index('maintenance_logs_asset_idx').on(t.assetId)]);

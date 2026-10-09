@@ -237,4 +237,16 @@ td input, td select { padding: 4px 6px; }
 .flow-value { font-size: 22px; font-weight: 600; }
 .flow-label { font-size: 13px; }
 .flow-note { font-size: 12px; color: var(--muted); }
+
+/* ---- tasks and checklists ---- */
+button.link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
+button.link:hover { text-decoration: underline; }
+h2.section { margin: 18px 0 8px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.task { margin-bottom: 10px; }
+.task.late { border-left: 3px solid var(--danger); }
+.task .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.checklist { list-style: none; padding: 0; margin: 8px 0 12px; display: grid; gap: 6px; }
+.checklist label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.checklist input { width: auto; margin-top: 3px; }
+.checklist label.done { color: var(--muted); text-decoration: line-through; }
 @media print { .steps, .flow, .viz-table { display: none; } }

@@ -17,6 +17,12 @@ const TILES: [string, string, string][] = [
   ['/dashboards/sales', 'Sales dashboard', 'dashboard:sales'],
   ['/dashboards/marketing', 'Marketing dashboard', 'dashboard:marketing'],
   ['/dashboards/accounts', 'Accounts dashboard', 'dashboard:accounts'],
+  ['/hr/pipeline', 'Hiring board', 'hr:read'],
+  ['/hr/attendance', 'Attendance', 'hr:read'],
+  ['/dashboards/hr', 'HR dashboard', 'hr:read'],
+  ['/ops/tasks', 'Tasks', 'ops:read'],
+  ['/ops/assets', 'Assets & maintenance', 'ops:read'],
+  ['/dashboards/ops', 'Operations dashboard', 'ops:read'],
 ];
 
 /**
@@ -65,11 +71,35 @@ export default function Home() {
     }
   }
   if (o?.bank) attention.push({ label: 'Bank lines to reconcile', value: o.bank.unreconciled, href: '/accounts/bank', alert: o.bank.unreconciled > 0 });
+  if (o?.ops) {
+    attention.push({ label: 'Late tasks, everyone', value: o.ops.tasks_overdue, note: `${o.ops.tasks_open_today} still open today`, href: '/ops/tasks?view=overdue', alert: o.ops.tasks_overdue > 0 });
+    attention.push({ label: 'Maintenance due', value: o.ops.maintenance_due, href: '/ops/assets', alert: o.ops.maintenance_due > 0 });
+  }
+
+  const hiring: FlowStep[] = [];
+  if (o?.hiring) {
+    hiring.push({ label: 'New applications', value: o.hiring.applied, note: 'to be screened', href: '/hr/applicants?stage=applied' });
+    hiring.push({ label: 'Shortlisted', value: o.hiring.shortlisted, href: '/hr/applicants?stage=shortlisted' });
+    hiring.push({ label: 'In interviews', value: o.hiring.interview, href: '/hr/applicants?stage=interview' });
+    hiring.push({ label: 'Offer made', value: o.hiring.offered, href: '/hr/applicants?stage=offered' });
+    hiring.push({ label: 'Hired this month', value: o.hiring.hired_this_month, note: `${o.hiring.open_positions} open positions`, href: '/hr/applicants?stage=hired' });
+  }
+
+  // What is sitting with the person signed in. Shown to everyone, first.
+  const mine: FlowStep[] = [];
+  if (o?.mine) {
+    mine.push({ label: 'My tasks today', value: o.mine.tasks_today, href: '/my-work' });
+    mine.push({ label: 'My late tasks', value: o.mine.tasks_overdue, href: '/my-work', alert: o.mine.tasks_overdue > 0 });
+    if (o.mine.maintenance_due > 0) mine.push({ label: 'Maintenance I look after', value: o.mine.maintenance_due, note: 'due now or soon', href: '/my-work', alert: true });
+    if (o.mine.interviews > 0) mine.push({ label: 'Interviews to take', value: o.mine.interviews, href: '/my-work' });
+  }
 
   return (
     <Page title={`Hello, ${user.name}`}>
+      <Flow title="With me" steps={mine} arrows={false} />
       <Flow title="From enquiry to money in" steps={sale} />
       <Flow title="From purchase order to stock" steps={purchase} />
+      <Flow title="From application to joining" steps={hiring} />
       <Flow title="Needs attention" steps={attention} arrows={false} />
       {/* Store screens are at most two taps away (PRD section 9). */}
       <div className="home-tiles">

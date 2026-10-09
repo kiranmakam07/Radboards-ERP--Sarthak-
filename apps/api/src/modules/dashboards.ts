@@ -6,6 +6,7 @@ import { requireAuth, requirePerm } from '../core/auth';
 import { rows, type DB } from '../db/client';
 import { zDate } from '../lib/http';
 import { gstSummary } from './gst';
+import { ensureTasks } from './ops';
 
 /** Default range: month to date (IST). Every figure is computed live from the records (PRD 7.10). */
 function range(query: unknown) {
@@ -92,6 +93,32 @@ export function dashboardsRouter(db: DB) {
     if (money) {
       data.bank = await one(sql`select count(*)::int as unreconciled from bank_statement_lines where status = 'unmatched'`);
     }
+    if (can(role, 'hr:read')) {
+      data.hiring = await one(sql`
+        select count(*) filter (where stage = 'applied')::int as applied,
+               count(*) filter (where stage = 'shortlisted')::int as shortlisted,
+               count(*) filter (where stage = 'interview')::int as interview,
+               count(*) filter (where stage = 'offered')::int as offered,
+               count(*) filter (where stage = 'hired' and (closed_at at time zone ${IST})::date >= date_trunc('month', ${today}::date))::int as hired_this_month,
+               (select count(*) from job_openings where status = 'open')::int as open_positions
+          from applicants`);
+    }
+    // Recurring tasks are created on first look each day, so the counts below are for today.
+    await ensureTasks(db, today);
+    if (can(role, 'ops:read')) {
+      data.ops = await one(sql`
+        select (select count(*) from tasks where status = 'open' and due_date = ${today}::date)::int as tasks_open_today,
+               (select count(*) from tasks where status = 'open' and due_date < ${today}::date)::int as tasks_overdue,
+               (select count(*) from maintenance_schedules
+                 where active and next_due_on <= ${today}::date + remind_days_before)::int as maintenance_due`);
+    }
+    // For everyone, whatever their role: what is sitting with me.
+    data.mine = await one(sql`
+      select (select count(*) from tasks where assignee_id = ${req.user!.id} and status = 'open' and due_date = ${today}::date)::int as tasks_today,
+             (select count(*) from tasks where assignee_id = ${req.user!.id} and status = 'open' and due_date < ${today}::date)::int as tasks_overdue,
+             (select count(*) from maintenance_schedules
+               where assignee_id = ${req.user!.id} and active and next_due_on <= ${today}::date + remind_days_before)::int as maintenance_due,
+             (select count(*) from interviews where interviewer_id = ${req.user!.id} and status = 'scheduled')::int as interviews`);
     res.json({ data });
   });
 

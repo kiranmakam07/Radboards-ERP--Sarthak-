@@ -11,9 +11,11 @@ import { authRouter, mastersRouter, settingsRouter, usersRouter } from './module
 import { bankRouter } from './modules/bank';
 import { dashboardsRouter } from './modules/dashboards';
 import { gstRouter } from './modules/gst';
+import { hrRouter } from './modules/hr';
 import { inventoryRouter } from './modules/inventory';
 import { itemsRouter } from './modules/items';
 import { leadsRouter, publicLeadsRouter } from './modules/leads';
+import { opsRouter } from './modules/ops';
 import { partiesRouter } from './modules/parties';
 import { paymentsRouter } from './modules/payments';
 import { purchasingRouter } from './modules/purchasing';
@@ -101,6 +103,8 @@ export function createApp(db: DB) {
   app.use('/api/accounting', accountingRouter(db));
   app.use('/api/bank', bankRouter(db));
   app.use('/api/gst', gstRouter(db));
+  app.use('/api/hr', hrRouter(db));
+  app.use('/api/ops', opsRouter(db));
   app.use('/api/dashboards', dashboardsRouter(db));
 
   app.use('/api', () => {

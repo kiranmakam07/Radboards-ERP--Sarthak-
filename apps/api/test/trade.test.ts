@@ -634,7 +634,17 @@ describe('home overview', () => {
     // Marketing sees leads and stock only.
     const marketing = await w.as('marketing');
     const mk = (await marketing.get('/api/dashboards/overview').expect(200)).body.data;
-    expect(Object.keys(mk).sort()).toEqual(['leads', 'stock']);
+    expect(Object.keys(mk).sort()).toEqual(['leads', 'mine', 'stock']);
+    // Everyone gets their own to-do counts; HR and operations get their own blocks and none of the trading ones.
+    expect(mk.mine).toEqual({ tasks_today: 0, tasks_overdue: 0, maintenance_due: 0, interviews: 0 });
+    const hr = (await (await w.as('hr')).get('/api/dashboards/overview').expect(200)).body.data;
+    expect(Object.keys(hr).sort()).toEqual(['hiring', 'mine']);
+    expect(hr.hiring).toEqual({ applied: 0, shortlisted: 0, interview: 0, offered: 0, hired_this_month: 0, open_positions: 0 });
+    const ops = (await (await w.as('operations')).get('/api/dashboards/overview').expect(200)).body.data;
+    expect(Object.keys(ops).sort()).toEqual(['mine', 'ops']);
+    expect(ops.ops).toEqual({ tasks_open_today: 0, tasks_overdue: 0, maintenance_due: 0 });
+    expect(all.hiring).toBeDefined();
+    expect(all.ops).toBeDefined();
   });
 });
 

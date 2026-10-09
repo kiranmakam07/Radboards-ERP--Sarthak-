@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  amountInWords, canMoveLead, computeLine, computeTotals, formatINR, fyOf, fyShort, gstinCheckChar,
-  isInterState, isValidGstin, money, normalisePhone, stateCodeFromGstin, can,
+  ROLES, addMonths, amountInWords, canMoveApplicant, canMoveLead, computeLine, computeTotals, formatINR, fyOf, fyShort, gstinCheckChar,
+  isInterState, isTaskDueOn, isValidGstin, money, normalisePhone, stateCodeFromGstin, can, weekdayOf,
 } from '../src';
 
 describe('money', () => {
@@ -132,5 +132,49 @@ describe('state machine + permissions', () => {
     expect(can('marketing', 'payments:read')).toBe(false);
     expect(can('admin', 'accounts:write')).toBe(true);
     expect(can('owner', 'stock:approve')).toBe(true);
+  });
+});
+
+describe('HR and operations', () => {
+  it('follows the applicant stage machine', () => {
+    expect(canMoveApplicant('applied', 'interview')).toBe(true);
+    expect(canMoveApplicant('applied', 'hired')).toBe(false);
+    expect(canMoveApplicant('interview', 'hired')).toBe(false);
+    expect(canMoveApplicant('offered', 'hired')).toBe(true);
+    expect(canMoveApplicant('hired', 'rejected')).toBe(false);
+    expect(canMoveApplicant('rejected', 'shortlisted')).toBe(true);
+  });
+  it('keeps HR and operations to their own roles, and existing roles in their old positions', () => {
+    expect(ROLES.slice(0, 7)).toEqual(['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin']);
+    expect(can('hr', 'hr:write')).toBe(true);
+    expect(can('owner', 'hr:read')).toBe(true);
+    expect(can('owner', 'hr:write')).toBe(false);
+    expect(can('sales', 'hr:read')).toBe(false);
+    expect(can('hr', 'accounts:read')).toBe(false);
+    expect(can('operations', 'ops:manage')).toBe(true);
+    expect(can('stores', 'ops:manage')).toBe(false);
+  });
+  it('adds calendar months, landing on the last day when the month is shorter', () => {
+    expect(addMonths('2026-10-09', 6)).toBe('2027-04-09');
+    expect(addMonths('2026-08-31', 6)).toBe('2027-02-28');
+    expect(addMonths('2027-08-31', 6)).toBe('2028-02-29');
+    expect(addMonths('2026-01-31', 1)).toBe('2026-02-28');
+    expect(addMonths('2026-12-15', 1)).toBe('2027-01-15');
+    expect(addMonths('2026-03-31', -1)).toBe('2026-02-28');
+  });
+  it('knows which days a recurring task falls on', () => {
+    expect(weekdayOf('2026-10-09')).toBe(5); // a Friday
+    const monToSat = { frequency: 'daily' as const, weekdays: [1, 2, 3, 4, 5, 6], monthDay: null };
+    expect(isTaskDueOn(monToSat, '2026-10-10')).toBe(true); // Saturday
+    expect(isTaskDueOn(monToSat, '2026-10-11')).toBe(false); // Sunday
+    const everyMonday = { frequency: 'weekly' as const, weekdays: [1], monthDay: null };
+    expect(isTaskDueOn(everyMonday, '2026-10-12')).toBe(true);
+    expect(isTaskDueOn(everyMonday, '2026-10-13')).toBe(false);
+    const monthEnd = { frequency: 'monthly' as const, weekdays: [], monthDay: 31 };
+    expect(isTaskDueOn(monthEnd, '2026-10-31')).toBe(true);
+    expect(isTaskDueOn(monthEnd, '2026-11-30')).toBe(true); // November has no 31st
+    expect(isTaskDueOn(monthEnd, '2026-11-29')).toBe(false);
+    expect(isTaskDueOn({ frequency: 'monthly', weekdays: [], monthDay: 5 }, '2026-11-05')).toBe(true);
+    expect(isTaskDueOn({ frequency: 'need_based', weekdays: [1], monthDay: 1 }, '2026-11-02')).toBe(false);
   });
 });

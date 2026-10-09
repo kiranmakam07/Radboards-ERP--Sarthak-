@@ -54,3 +54,38 @@ export function addDays(date: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+/** Day of the week for a YYYY-MM-DD date: 0 = Sunday ... 6 = Saturday. */
+export function weekdayOf(date: string): number {
+  return new Date(`${date}T00:00:00Z`).getUTCDay();
+}
+
+export function lastDayOfMonth(date: string): number {
+  return new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0)).getUTCDate();
+}
+
+/** Add calendar months. The day is kept when the month has it, otherwise the month's last day: 31 Aug + 6 months = 28 Feb. */
+export function addMonths(date: string, months: number): string {
+  const total = Number(date.slice(0, 4)) * 12 + (Number(date.slice(5, 7)) - 1) + months;
+  const year = Math.floor(total / 12);
+  const month = total - year * 12 + 1;
+  const first = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-01`;
+  const day = Math.min(Number(date.slice(8, 10)), lastDayOfMonth(first));
+  return `${first.slice(0, 8)}${String(day).padStart(2, '0')}`;
+}
+
+export type TaskRule = { frequency: 'daily' | 'weekly' | 'monthly' | 'need_based'; weekdays: number[]; monthDay: number | null };
+
+/**
+ * Does a recurring task fall on this date? Daily and weekly tasks list the weekdays they run on.
+ * A monthly task set for the 29th to the 31st runs on the last day of a shorter month, so it is never skipped.
+ * Need-based tasks have no schedule: someone raises them when they are needed.
+ */
+export function isTaskDueOn(rule: TaskRule, date: string): boolean {
+  if (rule.frequency === 'need_based') return false;
+  if (rule.frequency === 'monthly') {
+    if (!rule.monthDay) return false;
+    return Number(date.slice(8, 10)) === Math.min(rule.monthDay, lastDayOfMonth(date));
+  }
+  return rule.weekdays.includes(weekdayOf(date));
+}
