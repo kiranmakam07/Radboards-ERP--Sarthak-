@@ -27,12 +27,13 @@ export function compactRupees(v: number): string {
   return `${v < 0 ? '-' : ''}₹${Math.round(a)}`;
 }
 
-/** Round the top of the scale up to a clean number and return four even steps. */
-function niceScale(max: number): { top: number; ticks: number[] } {
+/** Round the top of the scale up to a clean number and return about four even steps. Counts of things never get half-steps. */
+function niceScale(max: number, whole = false): { top: number; ticks: number[] } {
   if (max <= 0) return { top: 1, ticks: [0, 1] };
   const rough = max / 4;
   const pow = 10 ** Math.floor(Math.log10(rough));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * pow).find((s) => s >= rough) ?? 10 * pow;
+  const clean = [1, 2, 2.5, 5, 10].map((m) => m * pow).find((s) => s >= rough) ?? 10 * pow;
+  const step = whole ? Math.max(1, Math.ceil(clean)) : clean;
   const top = Math.ceil(max / step) * step;
   const ticks: number[] = [];
   for (let t = 0; t <= top + step / 2; t += step) ticks.push(Number(t.toFixed(6)));
@@ -147,7 +148,7 @@ export function ColumnChart({
   const totals = data.map((d) => d.values.reduce((a, b) => a + b, 0));
   if (data.length === 0 || Math.max(...totals) <= 0) return <p className="muted">{empty}</p>;
   const axis = axisFormat ?? format;
-  const { top, ticks } = niceScale(Math.max(...totals));
+  const { top, ticks } = niceScale(Math.max(...totals), format === count);
   const pad = { left: 52, right: 8, top: 10, bottom: 26 };
   const plotW = Math.max(width - pad.left - pad.right, 10);
   const plotH = height - pad.top - pad.bottom;
@@ -224,15 +225,15 @@ export function fillDays(rows: { day: string; value: number }[], from: string, t
 }
 
 export function LineChart({
-  points, name, format = count, axisFormat, height = 220, empty = 'Nothing to show.',
+  points, name, singular, format = count, axisFormat, height = 220, empty = 'Nothing to show.',
 }: {
-  points: Point[]; name: string; format?: (v: number) => string; axisFormat?: (v: number) => string; height?: number; empty?: string;
+  points: Point[]; name: string; singular?: string; format?: (v: number) => string; axisFormat?: (v: number) => string; height?: number; empty?: string;
 }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [at, setAt] = useState<number | null>(null);
   if (points.length === 0 || Math.max(...points.map((p) => p.value)) <= 0) return <p className="muted">{empty}</p>;
   const axis = axisFormat ?? format;
-  const { top, ticks } = niceScale(Math.max(...points.map((p) => p.value)));
+  const { top, ticks } = niceScale(Math.max(...points.map((p) => p.value)), format === count);
   const pad = { left: 52, right: 16, top: 12, bottom: 26 };
   const plotW = Math.max(width - pad.left - pad.right, 10);
   const plotH = height - pad.top - pad.bottom;
@@ -271,7 +272,7 @@ export function LineChart({
           <circle cx={x(shown)} cy={y(p.value)} r="5" fill="var(--viz-1)" stroke="var(--panel)" strokeWidth="2" />
         </svg>
       )}
-      <Tooltip width={width} tip={width > 0 ? { x: x(shown), y: y(p.value) - 10, title: shortDate(p.date), rows: [{ value: format(p.value), name }] } : null} />
+      <Tooltip width={width} tip={width > 0 ? { x: x(shown), y: y(p.value) - 10, title: shortDate(p.date), rows: [{ value: format(p.value), name: p.value === 1 && singular ? singular : name }] } : null} />
     </div>
   );
 }

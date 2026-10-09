@@ -28,6 +28,8 @@ export type SettingsMap = {
   default_follow_up_days: number;
   /** Pointer for round-robin lead assignment. */
   lead_round_robin_last: string | null;
+  /** YYYY-MM-DD: recurring tasks have been created up to and including this day. */
+  tasks_generated_through: string | null;
 };
 
 export const SETTING_DEFAULTS: SettingsMap = {
@@ -42,6 +44,7 @@ export const SETTING_DEFAULTS: SettingsMap = {
   valuation_method: 'moving_average',
   default_follow_up_days: 1,
   lead_round_robin_last: null,
+  tasks_generated_through: null,
 };
 
 export async function getSetting<K extends keyof SettingsMap>(tx: DB, key: K): Promise<SettingsMap[K]> {

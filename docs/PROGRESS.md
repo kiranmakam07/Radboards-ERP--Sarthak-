@@ -82,7 +82,8 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.13 | Company profile, users, roles, masters, period lock | ✅ | |
 | 7.13 | Permission matrix | 🟡 | Enforced on every route, but fixed in code (`PERMISSIONS`), not editable on screen |
 | 7.13 | Numbering series, integration settings | 🟡 | Series are visible, not editable. No integration settings yet |
-| 7.14 | HR (Tier 2), Operations (Tier 3) | ⬜ | V2 |
+| 7.14 | HR (Tier 2): openings, applicants → interview rounds → hired (creates the employee) or rejected, employees, attendance (daily register, CSV import, month summary), HR dashboard | 🟡 | API built and tested (20 tests). Screens written and building; only the home screen, HR dashboard, hiring board and applicant list have been checked in the browser so far |
+| 7.14 | Operations (Tier 3): routines (daily / weekly / monthly / when needed) with checklists that create each person's tasks, one-off tasks, "My work" for everyone, asset register, maintenance schedules that roll forward when the work is logged, operations dashboard | 🟡 | API built and tested (17 tests). Screens written and building, **not yet checked in the browser**. Reminders are in-app only (no WhatsApp) |
 
 ### 9. Non-functional requirements
 | Item | State | Notes |
@@ -248,4 +249,5 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | Direction (Sarthak): build the whole app first; server, real data and user lists only when close to deployment. |
 | 2026-10-09 | Printouts: delivery challan and payment receipt / voucher. |
 | 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |
+| 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. **Still to do:** click through the remaining new screens (applicant page, openings, employees, attendance, tasks, routines, assets, My work, operations dashboard), then confirm CI. |
 | 2026-10-09 | Visuals (founder's request): charts on the sales, marketing and accounts dashboards (`apps/web/components/charts.tsx`, no chart library), the home screen as a flow of what is waiting at each step (`GET /api/dashboards/overview`), and progress steps on leads, sales orders, purchase orders and goods receipts. Chart colours checked for colour-blind separation; every chart has a table behind it. |

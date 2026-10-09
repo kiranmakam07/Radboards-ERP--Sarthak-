@@ -26,6 +26,9 @@ export const SERIES = {
   stock_transfer: { prefix: (fy) => `ST/${fy}/`, pad: 5, perFy: true },
   stock_adjustment: { prefix: (fy) => `SA/${fy}/`, pad: 5, perFy: true },
   lead: { prefix: () => 'L', pad: 0, perFy: false, start: 1001 },
+  applicant: { prefix: () => 'A', pad: 0, perFy: false, start: 1001 },
+  employee: { prefix: () => 'EMP', pad: 3, perFy: false },
+  asset: { prefix: () => 'AST', pad: 3, perFy: false },
 } as const satisfies Record<string, SeriesDef>;
 
 export type SeriesKey = keyof typeof SERIES;

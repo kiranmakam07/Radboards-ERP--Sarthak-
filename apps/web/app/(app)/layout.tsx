@@ -8,6 +8,9 @@ import { SessionContext, type Session } from '@/lib/session';
 
 type NavItem = { href: string; label: string; perm?: string };
 const NAV: { group: string; items: NavItem[] }[] = [
+  { group: 'Me', items: [
+    { href: '/my-work', label: 'My work' },
+  ] },
   { group: 'Store', items: [
     { href: '/walk-in', label: 'Walk-in', perm: 'leads:write' },
     { href: '/quick-bill', label: 'Quick bill', perm: 'quickbill:create' },
@@ -40,6 +43,20 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/accounts/bank', label: 'Bank reconciliation', perm: 'accounts:read' },
     { href: '/gst', label: 'GST', perm: 'gst:read' },
   ] },
+  { group: 'HR', items: [
+    { href: '/dashboards/hr', label: 'HR dashboard', perm: 'hr:read' },
+    { href: '/hr/pipeline', label: 'Hiring board', perm: 'hr:read' },
+    { href: '/hr/applicants', label: 'Applicants', perm: 'hr:read' },
+    { href: '/hr/openings', label: 'Openings', perm: 'hr:read' },
+    { href: '/hr/employees', label: 'Employees', perm: 'hr:read' },
+    { href: '/hr/attendance', label: 'Attendance', perm: 'hr:read' },
+  ] },
+  { group: 'Operations', items: [
+    { href: '/dashboards/ops', label: 'Operations dashboard', perm: 'ops:read' },
+    { href: '/ops/tasks', label: 'Tasks', perm: 'ops:read' },
+    { href: '/ops/routines', label: 'Routines', perm: 'ops:read' },
+    { href: '/ops/assets', label: 'Assets & maintenance', perm: 'ops:read' },
+  ] },
   { group: 'Admin', items: [
     { href: '/admin', label: 'Setup', perm: 'settings:manage' },
     { href: '/admin/users', label: 'Users', perm: 'users:manage' },
@@ -53,6 +70,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   if (error) return <div className="center"><div className="error">{error}</div></div>;
   if (!data) return <div className="center muted">Loading…</div>;
   const can = (p?: string) => !p || data.permissions.includes(p);
+  // Highlight the one entry that fits the page best: on /leads/pipeline that is "Pipeline", not "Leads" as well.
+  const active = NAV.flatMap((g) => g.items).filter((i) => can(i.perm) && (pathname === i.href || pathname.startsWith(`${i.href}/`)))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
   return (
     <SessionContext.Provider value={data}>
@@ -66,8 +86,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               <div key={g.group} style={{ display: 'contents' }}>
                 <div className="group">{g.group}</div>
                 {items.map((i) => (
-                  <Link key={i.href} href={i.href}
-                    className={pathname === i.href || (i.href !== '/leads' && pathname.startsWith(`${i.href}/`)) ? 'active' : undefined}>
+                  <Link key={i.href} href={i.href} className={i.href === active ? 'active' : undefined}>
                     {i.label}
                   </Link>
                 ))}
