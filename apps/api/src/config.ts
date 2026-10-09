@@ -40,4 +40,10 @@ export const config = {
   metaVerifyToken: env.META_VERIFY_TOKEN ?? '',
   metaPageAccessToken: env.META_PAGE_ACCESS_TOKEN ?? '',
   metaGraphVersion: env.META_GRAPH_VERSION ?? 'v21.0',
+  /**
+   * "Are you a person?" check on the public enquiry form (Cloudflare Turnstile). Blank = no check,
+   * and the form relies on its hidden trap field and rate limit alone.
+   */
+  turnstileSiteKey: env.TURNSTILE_SITE_KEY ?? '',
+  turnstileSecret: env.TURNSTILE_SECRET ?? '',
 };

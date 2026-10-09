@@ -898,6 +898,8 @@ export const employees = pgTable('employees', {
   employmentType: employmentTypeEnum('employment_type').notNull().default('full_time'),
   joinDate: date('join_date').notNull(),
   monthlySalary: money('monthly_salary'),
+  /** Leave days per year for this person; null means the company's usual number. */
+  annualLeaveDays: numeric('annual_leave_days', { precision: 4, scale: 1 }),
   /** Their sign-in, when they have one: this is how tasks reach them. */
   userId: uuid('user_id').unique().references(() => users.id),
   status: employeeStatusEnum('status').notNull().default('active'),

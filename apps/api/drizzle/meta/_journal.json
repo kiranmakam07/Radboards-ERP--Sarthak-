@@ -71,6 +71,13 @@
       "when": 1791576724501,
       "tag": "0009_bank_many_to_one",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791577298396,
+      "tag": "0010_leave_days",
+      "breakpoints": true
     }
   ]
 }

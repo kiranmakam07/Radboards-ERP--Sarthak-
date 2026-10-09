@@ -28,6 +28,7 @@ export default function EmployeePage() {
           ['Phone', e.phone], ['Email', e.email],
           ['Joined', date(e.join_date)],
           ['Salary', e.monthly_salary ? `₹${inr(e.monthly_salary)} per month` : null],
+          ['Leave days a year', e.annual_leave_days !== null ? `${Number(e.annual_leave_days)} (own figure)` : null],
           ['Sign-in', e.user_name ? `${e.user_name} (${e.user_role})${e.user_active ? '' : ', switched off'}` : null],
           ['Application', e.applicant_id ? <Link href={`/hr/applicants/${e.applicant_id}`}>{e.applicant_no}</Link> : null],
           ['Notes', e.notes],
@@ -42,6 +43,7 @@ export default function EmployeePage() {
               initial={{
                 name: e.name, phone: e.phone, email: e.email ?? '', department: e.department, designation: e.designation,
                 employment_type: e.employment_type, join_date: e.join_date, monthly_salary: e.monthly_salary ?? '', user_id: e.user_id ?? '', notes: e.notes ?? '',
+                annual_leave_days: e.annual_leave_days ?? '',
               }}
               fields={[
                 { name: 'name', label: 'Name', required: true },
@@ -52,6 +54,7 @@ export default function EmployeePage() {
                 { name: 'employment_type', label: 'Type', type: 'select', required: true, options: EMPLOYMENT_TYPES.map((t) => ({ value: t, label: label(t) })) },
                 { name: 'join_date', label: 'Joining date', type: 'date', required: true },
                 { name: 'monthly_salary', label: 'Salary (per month)', type: 'number' },
+                { name: 'annual_leave_days', label: 'Leave days a year', type: 'number', step: '0.5', help: 'Blank = the company figure' },
                 { name: 'user_id', label: 'Their sign-in', type: 'select', options: (users.data?.data ?? []).map((u) => ({ value: u.id, label: `${u.name} (${u.role})` })) },
                 { name: 'notes', label: 'Notes', type: 'textarea' },
               ]}

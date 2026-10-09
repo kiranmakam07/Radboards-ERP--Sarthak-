@@ -1,0 +1,1 @@
+ALTER TABLE "employees" ADD COLUMN "annual_leave_days" numeric(4, 1);

@@ -1,14 +1,31 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ErrorBox } from '@/components/ui';
 import { post, useGet } from '@/lib/api';
 
 /** Public enquiry form behind a campaign QR code / short link. No login. */
 export default function EnquiryPage() {
   const { token } = useParams<{ token: string }>();
-  const { data, error } = useGet<{ data: { campaign: string; products: { id: string; name: string }[] } }>(`/public/campaign/${token}`);
+  const { data, error } = useGet<{ data: { campaign: string; products: { id: string; name: string }[]; captcha_site_key: string | null } }>(`/public/campaign/${token}`);
+  const siteKey = data?.data.captcha_site_key ?? null;
+  const [captcha, setCaptcha] = useState('');
+  const box = useRef<HTMLDivElement | null>(null);
+
+  // When the server has a check configured, draw Cloudflare's widget; its answer goes in with the form.
+  useEffect(() => {
+    if (!siteKey || !box.current) return;
+    const draw = () => (window as any).turnstile?.render(box.current, {
+      sitekey: siteKey, callback: (t: string) => setCaptcha(t), 'expired-callback': () => setCaptcha(''), 'error-callback': () => setCaptcha(''),
+    });
+    if ((window as any).turnstile) { draw(); return; }
+    const script = document.createElement('script');
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.async = true;
+    script.onload = draw;
+    document.head.appendChild(script);
+  }, [siteKey]);
   const [v, setV] = useState({ name: '', phone: '', item: '', message: '', website: '' });
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -27,6 +44,7 @@ export default function EnquiryPage() {
           try {
             await post(`/public/enquiry/${token}`, {
               name: v.name, phone: v.phone, message: v.message, interested_item_ids: v.item ? [v.item] : [], website: v.website,
+              captcha_token: captcha || undefined,
             });
             setSent(true);
           } catch (ex) {
@@ -47,7 +65,8 @@ export default function EnquiryPage() {
           {/* Honeypot: hidden from people, filled in by bots. */}
           <input type="text" name="website" tabIndex={-1} autoComplete="off" value={v.website} onChange={(e) => setV({ ...v, website: e.target.value })}
             style={{ position: 'absolute', left: '-9999px', width: 1, height: 1 }} aria-hidden="true" />
-          <div className="form-foot"><button className="primary big" disabled={busy}>{busy ? 'Sending…' : 'Send enquiry'}</button><ErrorBox error={err} /></div>
+          {siteKey ? <div ref={box} style={{ gridColumn: '1 / -1' }} /> : null}
+          <div className="form-foot"><button className="primary big" disabled={busy || (Boolean(siteKey) && !captcha)}>{busy ? 'Sending…' : 'Send enquiry'}</button><ErrorBox error={err} /></div>
         </form>
       </div>
     </div>

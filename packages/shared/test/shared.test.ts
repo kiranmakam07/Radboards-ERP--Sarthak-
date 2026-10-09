@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ROLES, addMonths, amountInWords, canMoveApplicant, canMoveLead, computeLine, computeTotals, formatINR, fyOf, fyShort, gstinCheckChar,
-  isInterState, isTaskDueOn, isValidGstin, money, normalisePhone, peakLoad, stateCodeFromGstin, can, weekStart, weekdayOf,
+  isInterState, isTaskDueOn, isValidGstin, leaveEntitlement, money, normalisePhone, peakLoad, stateCodeFromGstin, can, weekStart, weekdayOf,
 } from '../src';
 
 describe('money', () => {
@@ -192,5 +192,15 @@ describe('HR and operations', () => {
     expect(weekStart('2026-10-09')).toBe('2026-10-05'); // Friday -> Monday
     expect(weekStart('2026-10-11')).toBe('2026-10-05'); // Sunday belongs to the week that started on Monday
     expect(weekStart('2026-10-12')).toBe('2026-10-12');
+  });
+  it('gives a part-year joiner leave in proportion to the months left', () => {
+    const year = { from: '2026-04-01', to: '2027-03-31' };
+    expect(leaveEntitlement(12, '2024-06-01', year)).toBe(12); // here all year
+    expect(leaveEntitlement(12, '2026-04-01', year)).toBe(12);
+    expect(leaveEntitlement(12, '2026-10-15', year)).toBe(6); // October to March
+    expect(leaveEntitlement(12, '2027-03-31', year)).toBe(1); // the joining month counts
+    expect(leaveEntitlement(15, '2027-01-01', year)).toBe(4); // 3.75, to the nearest half
+    expect(leaveEntitlement(18, '2027-01-10', year)).toBe(4.5);
+    expect(leaveEntitlement(12, '2027-04-01', year)).toBe(0); // joins after the year ends
   });
 });

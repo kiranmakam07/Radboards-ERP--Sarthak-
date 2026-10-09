@@ -113,3 +113,14 @@ export function peakLoad(spans: Span[], from: string, to: string): number {
   }
   return peak;
 }
+
+/**
+ * Leave a person is entitled to in a leave year (the financial year). Someone who joined part-way
+ * through gets it in proportion to the months left, counting the month they joined, to the nearest half day.
+ */
+export function leaveEntitlement(daysPerYear: number, joinDate: string, year: { from: string; to: string }): number {
+  if (joinDate <= year.from) return daysPerYear;
+  if (joinDate > year.to) return 0;
+  const months = (Number(year.to.slice(0, 4)) * 12 + Number(year.to.slice(5, 7))) - (Number(joinDate.slice(0, 4)) * 12 + Number(joinDate.slice(5, 7))) + 1;
+  return Math.round((daysPerYear * months) / 12 * 2) / 2;
+}
