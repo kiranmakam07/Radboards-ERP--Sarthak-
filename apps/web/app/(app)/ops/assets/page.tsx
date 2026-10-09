@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { ASSET_STATUSES } from '@radcore/shared';
-import { MaintenanceDone, dueText, everyText } from '@/components/ops';
+import { MaintenanceDone, Due, everyText } from '@/components/ops';
 import { Badge, Card, CsvLink, Form, Loading, Page, Table, Toggle, date, inr, label } from '@/components/ui';
 import { post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -25,7 +25,7 @@ export default function AssetsPage() {
           { key: 'asset_name', title: 'Asset', render: (r) => <Link href={`/ops/assets/${r.asset_id}`}>{r.asset_name}</Link> },
           { key: 'title', title: 'Work' },
           { key: 'interval', title: 'How often', render: (r) => everyText(r) },
-          { key: 'state', title: 'Due', render: (r) => <><Badge value={r.state} /> <span className="small">{dueText(r)}</span></> },
+          { key: 'state', title: 'Due', render: (r) => <Due schedule={r} /> },
           { key: 'last_done_on', title: 'Last done', render: (r) => date(r.last_done_on) },
           { key: 'assignee_name', title: 'Looked after by' },
           { key: 'actions', title: '', render: (r) => (manage ? <button type="button" onClick={() => setDoneFor(doneFor === r.id ? null : r.id)}>Mark done</button> : null) },

@@ -14,8 +14,8 @@ the way they were**. Update it with every change (add a line to the change log a
 | Area | State |
 | --- | --- |
 | Backend (API, database, posting engine) | MVP **and** most of V1.1 built and tested |
-| Frontend | Simple working screens for every built flow (39 screens, plain styling), with charts on the dashboards, a "what is waiting where" picture on the home screen and progress steps on documents |
-| Automated tests | 94 passing: 17 shared, 69 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
+| Frontend | Simple working screens for every built flow (53 screens, plain styling), with charts on the dashboards, a "what is waiting where" picture on the home screen and progress steps on documents |
+| Automated tests | 135 passing: 21 shared, 106 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
 | Integrations (Meta, Google, Shopify, GSP) | Not built — data model and idempotency keys are ready |
 | Vyapar migration | Not built — needs sample export files |
 | Deployment / hosting / backups | Packaged for one server (Docker, HTTPS, daily backups) and verified in CI. **Not deployed**: needs a server and a domain |
@@ -82,8 +82,8 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.13 | Company profile, users, roles, masters, period lock | ✅ | |
 | 7.13 | Permission matrix | 🟡 | Enforced on every route, but fixed in code (`PERMISSIONS`), not editable on screen |
 | 7.13 | Numbering series, integration settings | 🟡 | Series are visible, not editable. No integration settings yet |
-| 7.14 | HR (Tier 2): openings, applicants → interview rounds → hired (creates the employee) or rejected, employees, attendance (daily register, CSV import, month summary), HR dashboard | 🟡 | API built and tested (20 tests). Screens written and building; only the home screen, HR dashboard, hiring board and applicant list have been checked in the browser so far |
-| 7.14 | Operations (Tier 3): routines (daily / weekly / monthly / when needed) with checklists that create each person's tasks, one-off tasks, "My work" for everyone, asset register, maintenance schedules that roll forward when the work is logged, operations dashboard | 🟡 | API built and tested (17 tests). Screens written and building, **not yet checked in the browser**. Reminders are in-app only (no WhatsApp) |
+| 7.14 | HR (Tier 2): openings, applicants → interview rounds → hired (creates the employee) or rejected, employees, attendance (daily register, CSV import, month summary), HR dashboard | ✅ | 20 API tests. Every screen checked in the browser on demo data. Resumes are kept as links (no file upload yet). The attendance import takes a plain CSV (employee number or phone, date, status, optional in/out times); the real export from the current attendance app has not been seen yet. No payroll and no leave balances |
+| 7.14 | Operations (Tier 3): routines (daily / weekly / monthly / when needed) with checklists that create each person's tasks, one-off tasks, "My work" for everyone, asset register, maintenance schedules that roll forward when the work is logged, operations dashboard | ✅ | 17 API tests. Every screen checked in the browser on demo data. Tasks are created the first time anyone opens a task screen each day (no background job needed). Reminders are in-app only: the home screen and My work (no WhatsApp yet). Maintenance cost is a record only; the expense itself is still entered under Expenses |
 
 ### 9. Non-functional requirements
 | Item | State | Notes |
@@ -175,7 +175,7 @@ Items 6 and 7 below are covered by the approval above.
 
 ## 5. How it was verified
 
-- `npm test` — 69 tests. `apps/api/test/trade.test.ts` runs the full story (buy → QC →
+- `npm test` — 127 tests (21 shared, 106 API). `apps/api/test/trade.test.ts` runs the full story (buy → QC →
   return → transfer → count → quick bill → dealer order with partial delivery → receipts →
   credit note → cancel → expenses → period lock → GST returns → dashboards) and asserts
   hand-calculated numbers, that the trial balance and balance sheet balance, and that the
@@ -195,6 +195,11 @@ Items 6 and 7 below are covered by the approval above.
 - Manual click-through on demo data (8 Oct 2026): sign-in, quick bill with barcode scan →
   printed invoice, pipeline, stock, PO → bill → receipt → QC with reject → supplier return,
   reports, dashboards, setup.
+- HR and operations (9 Oct 2026): `hr.test.ts` and `ops.test.ts` cover the stage machine, one
+  open application per person, hire creating exactly one employee, attendance rules and import,
+  the schedule creating each task once (also when run three times at the same moment, and after
+  a long gap), checklists, and maintenance dates rolling forward. An existing database was
+  upgraded to the new migration on PostgreSQL 18. Screens clicked through on demo data.
 
 ## 6. Next steps
 
@@ -208,9 +213,11 @@ Still to build in the app, in rough order:
 4. A credit note's credit set against another invoice.
 5. Portal-format GSTR-1 file; Excel export of lists.
 6. Matching one bank line to several book entries (card-machine payouts).
-7. Later phases as approved: Shopify orders and Meta / Google leads coming in automatically,
-   Amazon and Flipkart, then HR hiring and operations tasks. Open question to Sarthak: are
-   these to be built before the first go-live, or after it as the founder's report says?
+7. Shopify orders and Meta / Google leads coming in automatically, then Amazon and Flipkart.
+8. HR and operations follow-ups, if wanted: resume and bill file upload, leave balances,
+   WhatsApp reminders for tasks and maintenance.
+
+HR and operations were built on 9 Oct 2026 (Sarthak: they are part of the app, not a later phase).
 
 For go-live, when it is close (nothing needed before then):
 - A server and a domain. Deployment is then the two commands in the README.
@@ -249,5 +256,6 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | Direction (Sarthak): build the whole app first; server, real data and user lists only when close to deployment. |
 | 2026-10-09 | Printouts: delivery challan and payment receipt / voucher. |
 | 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |
-| 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. **Still to do:** click through the remaining new screens (applicant page, openings, employees, attendance, tasks, routines, assets, My work, operations dashboard), then confirm CI. |
+| 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. |
+| 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
 | 2026-10-09 | Visuals (founder's request): charts on the sales, marketing and accounts dashboards (`apps/web/components/charts.tsx`, no chart library), the home screen as a flow of what is waiting at each step (`GET /api/dashboards/overview`), and progress steps on leads, sales orders, purchase orders and goods receipts. Chart colours checked for colour-blind separation; every chart has a table behind it. |

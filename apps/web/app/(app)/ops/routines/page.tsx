@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { TASK_FREQUENCIES, WEEKDAY_LABELS } from '@radcore/shared';
+import { plural } from '@/components/charts';
 import { scheduleText } from '@/components/ops';
 import { ActionButton, Badge, Card, Form, Loading, Notice, Page, Table, Toggle, date, type Field } from '@/components/ui';
 import { patch, post, useGet } from '@/lib/api';
@@ -61,7 +62,7 @@ export default function RoutinesPage() {
         { key: 'title', title: 'Routine', render: (r) => (manage ? <button type="button" className="link" onClick={() => setEditId(editId === r.id ? null : r.id)}>{r.title}</button> : r.title) },
         { key: 'frequency', title: 'When', render: (r) => scheduleText(r) },
         { key: 'assignee_name', title: 'Who' },
-        { key: 'checklist', title: 'Checklist', align: 'right', render: (r) => (r.checklist.length ? `${r.checklist.length} steps` : '') },
+        { key: 'checklist', title: 'Checklist', align: 'right', render: (r) => (r.checklist.length ? plural(r.checklist.length, 'step') : '') },
         { key: 'open_tasks', title: 'Open tasks', align: 'right' },
         { key: 'last_raised_for', title: 'Last task for', render: (r) => date(r.last_raised_for) },
         { key: 'active', title: 'Status', render: (r) => <Badge value={r.active ? 'active' : 'off'} /> },
