@@ -14,7 +14,7 @@ import { rows, type DB } from '../db/client';
 import { applicantActivities, applicants, attendance, employees, interviews, jobOpenings, users } from '../db/schema';
 import { parseBankDate, parseCsv } from '../lib/bank-csv';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zClock, zDate, zHttpUrl, zId, zListQuery, zMoney, zPhone, zText, wantsFile, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zClock, zDate, zLink, zId, zListQuery, zMoney, zPhone, zText, wantsFile, type Ctx } from '../lib/http';
 
 export type Applicant = typeof applicants.$inferSelect;
 export type Employee = typeof employees.$inferSelect;
@@ -413,7 +413,7 @@ const zApplicant = z.object({
   opening_id: emptyToNull(zId).optional(),
   source: z.enum(APPLICANT_SOURCES),
   source_detail: emptyToNull(z.string().trim().max(200)).optional(),
-  resume_url: emptyToNull(zHttpUrl).optional(),
+  resume_url: emptyToNull(zLink).optional(),
   experience_years: emptyToNull(zYears).optional(),
   current_company: emptyToNull(z.string().trim().max(200)).optional(),
   expected_salary: emptyToNull(zMoney).optional(),

@@ -829,6 +829,21 @@ export const channelEvents = pgTable('channel_events', {
 ]);
 
 /**
+ * Files people attach: a resume, a photo of a bill, a picture of an item. The bytes are kept on
+ * disk under the upload folder, named by this row's id; this row is what says what it is and
+ * who may open it. `purpose` decides that: a resume is for HR, a bill for accounts.
+ */
+export const files = pgTable('files', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  purpose: text('purpose').notNull(),
+  originalName: text('original_name').notNull(),
+  mime: text('mime').notNull(),
+  size: integer('size').notNull(),
+  sha256: text('sha256').notNull(),
+  ...stamps,
+}, (t) => [check('files_purpose_chk', sql`${t.purpose} in ('resume', 'bill', 'item_image', 'other')`)]);
+
+/**
  * What was spent on advertising, so the marketing dashboard can show cost per lead. An entry is
  * for a lead source, and optionally for one campaign within it (`detail` is the campaign name as
  * it appears on the leads). This is a marketing record: the payment itself is booked under Expenses.

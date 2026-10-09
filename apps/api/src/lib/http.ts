@@ -88,6 +88,12 @@ export const zText = (max = 500) => z.string().trim().min(1).max(max);
 /** Links shown in the UI must be plain web links - never javascript: or data: URLs. */
 export const zHttpUrl = z.string().trim().max(1000).url().refine((u) => /^https?:\/\//i.test(u), 'must start with http:// or https://');
 
+/** A link shown in the UI: a web link, or a file attached here (/api/files/<id>). Never javascript: or data:. */
+export const zLink = z.string().trim().max(1000).refine(
+  (u) => /^\/api\/files\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(u) || (/^https?:\/\//i.test(u) && URL.canParse(u)),
+  'must be an attached file or a link starting with http:// or https://',
+);
+
 export const zListQuery = z.object({
   q: z.string().trim().max(100).optional(),
   limit: z.coerce.number().int().min(1).max(5000).default(100),

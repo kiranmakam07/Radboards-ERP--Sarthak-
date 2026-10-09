@@ -84,7 +84,7 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return;
   }
   if (err && typeof err === 'object' && 'type' in err && (err as { type: string }).type === 'entity.too.large') {
-    res.status(413).json({ error: { code: 'too_large', message: 'That is too much data for one request. Split the file and send it in parts.' } });
+    res.status(413).json({ error: { code: 'too_large', message: 'That is too large. An attached file can be up to 10 MB; a statement or import file up to 1 MB at a time.' } });
     return;
   }
   console.error(err);

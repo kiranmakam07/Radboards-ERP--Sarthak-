@@ -7,7 +7,7 @@ import { requirePerm } from '../core/auth';
 import { rows, type DB } from '../db/client';
 import { channelItemMap, itemImages, items, priceListItems, priceLists } from '../db/schema';
 import { badRequest, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zGstRate, zHttpUrl, zId, zListQuery, zMoney, zQtyNonNeg, zText } from '../lib/http';
+import { emptyToNull, inTx, sendList, zGstRate, zLink, zId, zListQuery, zMoney, zQtyNonNeg, zText } from '../lib/http';
 
 export type PriceList = typeof priceLists.$inferSelect;
 export type Item = typeof items.$inferSelect;
@@ -159,7 +159,7 @@ export function itemsRouter(db: DB) {
 
   r.post('/:id/images', requirePerm('items:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const body = z.object({ url: zHttpUrl, sort: z.number().int().default(0) }).parse(req.body);
+    const body = z.object({ url: zLink, sort: z.number().int().default(0) }).parse(req.body);
     const [row] = await db.insert(itemImages).values({ itemId: id, url: body.url, sort: body.sort, createdBy: req.user!.id }).returning();
     res.status(201).json({ data: row });
   });

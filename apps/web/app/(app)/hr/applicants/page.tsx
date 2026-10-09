@@ -33,7 +33,7 @@ function Applicants() {
               { name: 'experience_years', label: 'Experience (years)', type: 'number', step: '0.5' },
               { name: 'current_company', label: 'Current company' },
               { name: 'expected_salary', label: 'Expected salary (per month)', type: 'number' },
-              { name: 'resume_url', label: 'Resume link', placeholder: 'https://…', help: 'Drive / Dropbox link to the resume' },
+              { name: 'resume_url', label: 'Resume', type: 'file', purpose: 'resume', help: 'PDF or a photo, up to 10 MB' },
               { name: 'notes', label: 'Notes', type: 'textarea' },
             ]}
             onSubmit={(v) => post('/hr/applicants', v)}
