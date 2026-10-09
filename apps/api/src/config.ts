@@ -29,6 +29,8 @@ export const config = {
   /** How many reverse proxies sit in front of the API (1 = one proxy such as Caddy, or the Next dev proxy). */
   trustProxy: Number(env.TRUST_PROXY ?? 1),
   migrationsFolder: path.join(API_ROOT, 'drizzle'),
+  /** Where attached files (resumes, bill photos, item pictures) are kept. On a server this is a volume of its own. */
+  uploadDir: env.UPLOAD_DIR ?? path.join(API_ROOT, '.data', 'uploads'),
   /**
    * Lead capture from Meta (Facebook / Instagram lead ads and WhatsApp Business). All blank until
    * the accounts are connected; while blank, those webhooks refuse everything.

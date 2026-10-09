@@ -107,7 +107,9 @@ export function Table<T extends Record<string, any>>({
 export type Field = {
   name: string;
   label: string;
-  type?: 'text' | 'number' | 'date' | 'time' | 'datetime-local' | 'select' | 'textarea' | 'checkbox' | 'password' | 'tel' | 'email';
+  type?: 'text' | 'number' | 'date' | 'time' | 'datetime-local' | 'select' | 'textarea' | 'checkbox' | 'password' | 'tel' | 'email' | 'file';
+  /** For type 'file': what the file is (resume, bill, item_image), which decides who may open it. */
+  purpose?: string;
   options?: { value: string; label: string }[];
   required?: boolean;
   placeholder?: string;
@@ -159,6 +161,8 @@ export function Form({
               <option value="">—</option>
               {f.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
+          ) : f.type === 'file' ? (
+            <UploadField purpose={f.purpose ?? 'other'} value={values[f.name] ?? ''} onChange={(url) => set(f.name, url)} />
           ) : f.type === 'textarea' ? (
             <textarea value={values[f.name] ?? ''} required={f.required} placeholder={f.placeholder} rows={2}
               onChange={(e) => set(f.name, e.target.value)} />
@@ -180,6 +184,53 @@ export function Form({
         <ErrorBox error={error} />
       </div>
     </form>
+  );
+}
+
+/**
+ * Attach a file (PDF or picture, up to 10 MB). It is uploaded as soon as it is chosen; the form
+ * then carries the link to it. Works on a phone too, where "choose file" offers the camera.
+ */
+export function UploadField({ purpose, value, onChange }: { purpose: string; value: string; onChange: (url: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState<string | null>(null);
+
+  async function upload(file: File | undefined) {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/files?purpose=${encodeURIComponent(purpose)}`, {
+        method: 'POST', credentials: 'same-origin', body: file,
+        headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.error?.message ?? `Upload failed (${res.status})`);
+      setName(json.data.name);
+      onChange(json.data.url);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (value) {
+    return (
+      <span className="actions" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <a href={value} target="_blank" rel="noreferrer">{name ?? 'View the attached file'}</a>
+        <button type="button" onClick={() => { setName(null); onChange(''); }}>Remove</button>
+      </span>
+    );
+  }
+  return (
+    <>
+      <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" disabled={busy}
+        onChange={(e) => { void upload(e.target.files?.[0]); e.target.value = ''; }} />
+      {busy ? <small className="muted">Uploading…</small> : null}
+      {error ? <small className="error small">{error}</small> : null}
+    </>
   );
 }
 

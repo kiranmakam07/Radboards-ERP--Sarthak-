@@ -11,6 +11,7 @@ import { authRouter, mastersRouter, settingsRouter, usersRouter } from './module
 import { bankRouter } from './modules/bank';
 import { crmRouter, defaultDeps, hooksRouter, type CrmDeps } from './modules/crm';
 import { dashboardsRouter } from './modules/dashboards';
+import { filesRouter } from './modules/files';
 import { gstRouter } from './modules/gst';
 import { hrRouter } from './modules/hr';
 import { inventoryRouter } from './modules/inventory';
@@ -105,6 +106,7 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
 
   // Everything below needs a signed-in user; each route then names its own permission.
   app.use('/api', requireAuth);
+  app.use('/api/files', filesRouter(db));
   app.use('/api/users', usersRouter(db));
   app.use('/api/settings', settingsRouter(db));
   app.use('/api/masters', mastersRouter(db));

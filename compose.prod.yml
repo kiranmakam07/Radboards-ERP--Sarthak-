@@ -39,6 +39,7 @@ services:
       SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Admin}
       SEED_ADMIN_PHONE: ${SEED_ADMIN_PHONE:?set SEED_ADMIN_PHONE in .env.production}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      UPLOAD_DIR: /data/uploads
       # Optional "are you a person" check on the public enquiry form (Cloudflare Turnstile). Blank = off.
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
       TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
@@ -49,6 +50,9 @@ services:
       META_APP_SECRET: ${META_APP_SECRET:-}
       META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-}
       META_PAGE_ACCESS_TOKEN: ${META_PAGE_ACCESS_TOKEN:-}
+
+    volumes:
+      - uploads_data:/data/uploads
 
   web:
     build:
@@ -90,9 +94,11 @@ services:
     volumes:
       - ./deploy/backup.sh:/backup.sh:ro
       - ./backups:/backups
+      - uploads_data:/uploads:ro
     entrypoint: ['/bin/bash', '/backup.sh']
 
 volumes:
+  uploads_data:
   db_data:
   caddy_data:
   caddy_config:

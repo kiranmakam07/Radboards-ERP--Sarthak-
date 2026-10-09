@@ -77,6 +77,8 @@ docker compose --env-file .env.production -f compose.prod.yml up -d --build
 - **Backups:** one compressed dump per day in `./backups` on the server, kept for
   `BACKUP_KEEP_DAYS` (30). They are on the same disk as the database, so also copy that
   folder off the server (provider snapshots or object storage).
+- **Attached files** (resumes, bill photos) are kept on their own volume, not in the database, and are
+  copied into `./backups` as `uploads_<date>.tar.gz` alongside the database dump.
 - **Restore:** `docker compose --env-file .env.production -f compose.prod.yml exec -T db pg_restore --clean --if-exists -U radcore -d radcore < backups/<file>.dump`
 - **Logs:** `docker compose --env-file .env.production -f compose.prod.yml logs -f api`
 

@@ -11,6 +11,14 @@ while true; do
     mv "${file}.part" "$file"
     echo "$(date -Is) backup written: $file ($(du -h "$file" | cut -f1))"
     find /backups -name 'radcore_*.dump' -mtime "+${KEEP_DAYS}" -delete
+    # The attached files (resumes, bill photos) are not in the database: copy them too. Files are only
+    # ever added, so the three newest copies are enough.
+    if [ -d /uploads ] && tar -czf "/backups/uploads_${stamp}.tar.gz.part" -C /uploads .; then
+      mv "/backups/uploads_${stamp}.tar.gz.part" "/backups/uploads_${stamp}.tar.gz"
+      ls -1t /backups/uploads_*.tar.gz 2>/dev/null | tail -n +4 | xargs -r rm -f
+    else
+      rm -f "/backups/uploads_${stamp}.tar.gz.part"
+    fi
   else
     rm -f "${file}.part"
     echo "$(date -Is) BACKUP FAILED" >&2

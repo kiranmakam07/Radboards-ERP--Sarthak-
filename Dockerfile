@@ -17,8 +17,12 @@ COPY --chown=node:node packages/shared packages/shared
 
 # ---- API: Express + TypeScript, run with tsx. Applies database migrations on start. ----
 FROM deps AS api
+# Attached files live outside the app folder, on a volume, so they survive a rebuild.
+USER root
+RUN mkdir -p /data/uploads && chown node:node /data/uploads
+USER node
 COPY --chown=node:node apps/api apps/api
-ENV NODE_ENV=production PORT=4000
+ENV NODE_ENV=production PORT=4000 UPLOAD_DIR=/data/uploads
 EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

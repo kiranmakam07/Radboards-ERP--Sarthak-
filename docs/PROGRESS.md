@@ -55,7 +55,7 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.5 | Dealers: price list, credit limit, terms, quote → order → delivery → invoice, outstanding | ✅ | Credit-limit block with override by Accounts/owner |
 | 7.5 | Shopify (orders, SKU map, stock push) | ⬜ | V1.2. `channel_item_map`, `channel_events`, unique `(channel, external_order_id)` exist |
 | 7.5 | Amazon / Flipkart | ⬜ | V1.3 |
-| 7.6 | Item master, locations, append-only stock ledger | ✅ | Image upload is API-only (URL), no file storage yet |
+| 7.6 | Item master, locations, append-only stock ledger | ✅ | Item pictures can be stored (file storage exists and the API takes an attached file or a link); there is no picture control on the items screen yet |
 | 7.6 | Transfers, adjustments, physical counts (reason + approval) | ✅ | Admin or owner approves; transfers need a reason but no approval |
 | 7.6 | Valuation | 🟡 | Moving average only. FIFO not built (CA decision pending) |
 | 7.6 | Low-stock view, availability for sales, raw-material stock | ✅ | |
@@ -63,7 +63,7 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.8 | Chart of accounts (seeded, editable), FY April–March | ✅ | |
 | 7.8 | Balanced double entry for every document | ✅ | Posting service + deferred DB trigger |
 | 7.8 | Payments in/out with allocation, advances, part-payments | ✅ | |
-| 7.8 | Expenses with input GST | 🟡 | Bill photo is a link (URL); no file upload yet |
+| 7.8 | Expenses with input GST | ✅ | The bill can be attached as a photo or PDF (or a link) |
 | 7.8 | Credit notes (stock back in) and debit notes (stock out) | ✅ | A credit note on an already-paid invoice leaves the customer in credit; that credit can be set against another of their invoices (on the invoice page), in full or in part, and taken back. It cannot be used twice, on another customer, or after it was refunded in cash; the receipt and credit note behind used credit cannot be cancelled |
 | 7.8 | Multiple cash/bank accounts | ✅ | |
 | 7.8 | Bank statement import (CSV) and reconciliation | ✅ | Reads the usual Indian bank CSV layouts, skips rows already imported, matches automatically only when unambiguous, and can book the missing entry (expense, party receipt or payment, other account) from a statement line. One statement line can be matched to several book entries that add up to it (a card-machine payout covering a day's receipts); if the bank kept a fee, it is booked as an expense in the same step. Cancelling any entry in a match undoes the whole match |
@@ -88,7 +88,7 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.13 | Company profile, users, roles, masters, period lock | ✅ | |
 | 7.13 | Permission matrix | ✅ | Enforced on every route. Admin → Permissions shows who can do what and lets an admin tick or untick any role for any permission; changes take effect at once and are in the audit trail. The admin role always holds everything |
 | 7.13 | Numbering series, integration settings | 🟡 | Series are visible, not editable. No integration settings yet |
-| 7.14 | HR (Tier 2): openings, applicants → interview rounds → hired (creates the employee) or rejected, employees, attendance (daily register, CSV import, month summary), HR dashboard | ✅ | 20 API tests. Every screen checked in the browser on demo data. Resumes are kept as links (no file upload yet). The attendance import takes a plain CSV (employee number or phone, date, status, optional in/out times); the real export from the current attendance app has not been seen yet. Leave balances per leave year (entitled, taken, left). No payroll |
+| 7.14 | HR (Tier 2): openings, applicants → interview rounds → hired (creates the employee) or rejected, employees, attendance (daily register, CSV import, month summary), HR dashboard | ✅ | 20 API tests. Every screen checked in the browser on demo data. Resumes are attached as files (PDF or photo), open to HR and to whoever is taking the interview. The attendance import takes a plain CSV (employee number or phone, date, status, optional in/out times); the real export from the current attendance app has not been seen yet. Leave balances per leave year (entitled, taken, left). No payroll |
 | 7.14 | Operations (Tier 3): routines (daily / weekly / monthly / when needed) with checklists that create each person's tasks, one-off tasks, "My work" for everyone, asset register, maintenance schedules that roll forward when the work is logged, operations dashboard | ✅ | 28 API tests with projects and allocation. Also: **projects** (owner, deadline, tasks with start and deadline, progress, timeline), **resource allocation** board (people and assets by week, double-booking flagged), **deadlines with a time** on every task. Every screen checked in the browser on demo data. Tasks are created the first time anyone opens a task screen each day (no background job needed). Reminders are in-app only: the home screen and My work (no WhatsApp yet). Maintenance cost is a record only; the expense itself is still entered under Expenses |
 
 ### 9. Non-functional requirements
@@ -220,7 +220,7 @@ Still to build in the app, in rough order:
 For go-live, the CRM connections also need (not before then): a Meta developer app with the Page and
 `leads_retrieval`, the WhatsApp Business number moved to the Cloud API, and the webhook set on each
 Google Ads lead form. The steps are in the README under "Connecting lead sources".
-8. HR and operations follow-ups, if wanted: resume and bill file upload,
+8. HR and operations follow-ups, if wanted: a picture control on the items screen,
    WhatsApp reminders for tasks and maintenance.
 
 HR and operations were built on 9 Oct 2026 (Sarthak: they are part of the app, not a later phase).
@@ -265,6 +265,7 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. |
 | 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
 | 2026-10-10 | Smaller gaps: QR code for campaign links; optional person-check on the public enquiry form (`TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET`); leave balances (company figure + per-person figure, pro-rated for joiners, counted from days marked Leave; migration `0010_leave_days`). |
+| 2026-10-10 | File attachments: `files` table (migration `0011`), `/api/files` (PDF, JPG, PNG, WEBP up to 10 MB, checked by content, access by kind of file), upload control on the applicant and expense forms, a volume and a backup copy on the server. This completes the first group of remaining work. |
 | 2026-10-10 | Print documents for quotations / sales orders and purchase orders; permission matrix editable on screen (`permission_overrides` setting, `PUT /api/settings/permissions/:key`). |
 | 2026-10-10 | Review copy for "go live for review" (Sarthak, 10 Oct): `SEED_DEMO_DATA=true` + `DEMO_PASSWORD` loads the sample data once into an empty database on a real server, with a sign-in per role and a banner saying it is sample data. The sample data seed is now covered by a test. Waiting on Sarthak for where to host it. |
 | 2026-10-10 | Bank reconciliation: one statement line to several book entries, with the bank's fee booked in the same step (`bank_line_matches`, migration `0009`, which carries existing matches over; upgrade checked on PostgreSQL 18). |
