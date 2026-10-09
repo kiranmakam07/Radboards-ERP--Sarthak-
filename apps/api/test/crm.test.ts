@@ -305,3 +305,39 @@ describe('quick replies and one-tap contact', () => {
     expect(mine.fresh).toBeGreaterThan(0);
   });
 });
+
+describe('ad spend and cost per lead', () => {
+  it('turns what was spent into cost per lead on the marketing dashboard', async () => {
+    const marketing = await w.as('marketing');
+    const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+    const spend = (body: object) => marketing.post('/api/crm/spend').send({ spend_date: today, ...body });
+    await (await w.as('sales')).post('/api/crm/spend').send({ source_id: m.source('Google Ads'), spend_date: today, amount: 100 }).expect(403);
+    await spend({ source_id: m.source('Google Ads'), amount: 0 }).expect(400);
+
+    await spend({ source_id: m.source('Google Ads'), amount: 900 }).expect(201); // on Google in general
+    await spend({ source_id: m.source('Google Ads'), detail: 'Google - longboard search', amount: '300' }).expect(201);
+    const diwali = await spend({ source_id: m.source('Meta Ads'), detail: 'Diwali cruiser offer', amount: 500 }).expect(201);
+    await spend({ source_id: m.source('Meta Ads'), detail: 'Brand awareness', amount: 250 }).expect(201);
+
+    let d = (await marketing.get('/api/dashboards/marketing').expect(200)).body.data;
+    const source = (name: string) => d.by_source.find((s: { source: string }) => s.source === name);
+    // Google: one lead (Vikram) for 1,200. Meta: two leads (Asha from the form, Imran from the WhatsApp ad) for 750.
+    expect(source('Google Ads')).toMatchObject({ leads: 1, spend: '1200.00', cost_per_lead: '1200.00', cost_per_conversion: null });
+    expect(source('Meta Ads')).toMatchObject({ leads: 2, spend: '750.00', cost_per_lead: '375.00' });
+    expect(source('Website')).toMatchObject({ spend: '0.00', cost_per_lead: null });
+    const campaign = (name: string) => d.leads_by_campaign.find((c: { campaign: string }) => c.campaign === name);
+    expect(campaign('Diwali cruiser offer')).toMatchObject({ source: 'Meta Ads', leads: 1, spend: '500.00', cost_per_lead: '500.00' });
+    expect(campaign('Google - longboard search')).toMatchObject({ leads: 1, spend: '300.00', cost_per_lead: '300.00' });
+    expect(campaign('Brand awareness')).toMatchObject({ leads: 0, spend: '250.00', cost_per_lead: null }); // money spent, nothing came of it
+    expect(d.spend).toEqual({ total: '1950.00', leads_from_paid_sources: 3, cost_per_lead: '650.00' });
+
+    const list = (await marketing.get('/api/crm/spend').expect(200)).body;
+    expect(list.data).toHaveLength(4);
+    expect(list.campaign_names.map((c: { detail: string }) => c.detail)).toContain('Diwali cruiser offer');
+
+    await marketing.delete(`/api/crm/spend/${diwali.body.data.id}`).expect(200);
+    d = (await marketing.get('/api/dashboards/marketing').expect(200)).body.data;
+    expect(source('Meta Ads')).toMatchObject({ spend: '250.00', cost_per_lead: '125.00' });
+    expect(d.spend.total).toBe('1450.00');
+  });
+});

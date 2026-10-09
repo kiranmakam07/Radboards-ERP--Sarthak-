@@ -800,6 +800,24 @@ export const channelEvents = pgTable('channel_events', {
 ]);
 
 /**
+ * What was spent on advertising, so the marketing dashboard can show cost per lead. An entry is
+ * for a lead source, and optionally for one campaign within it (`detail` is the campaign name as
+ * it appears on the leads). This is a marketing record: the payment itself is booked under Expenses.
+ */
+export const adSpends = pgTable('ad_spends', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sourceId: uuid('source_id').notNull().references(() => leadSources.id),
+  detail: text('detail'),
+  spendDate: date('spend_date').notNull(),
+  amount: money('amount').notNull(),
+  notes: text('notes'),
+  ...stamps,
+}, (t) => [
+  index('ad_spends_date_idx').on(t.spendDate),
+  check('ad_spends_amount_chk', sql`${t.amount} > 0`),
+]);
+
+/**
  * Quick replies (CRM): ready-made messages a salesperson sends to a lead in one tap, with the
  * lead's own details filled in. Placeholders: {name}, {first_name}, {my_name}, {company}, {products}.
  */

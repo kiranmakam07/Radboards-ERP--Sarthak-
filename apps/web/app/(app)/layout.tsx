@@ -10,6 +10,7 @@ type NavItem = { href: string; label: string; perm?: string };
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Me', items: [
     { href: '/my-work', label: 'My work' },
+    { href: '/dashboards/owner', label: "Owner's summary", perm: 'dashboard:owner' },
   ] },
   { group: 'Store', items: [
     { href: '/walk-in', label: 'Walk-in', perm: 'leads:write' },
@@ -21,6 +22,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/crm/sources', label: 'Lead sources', perm: 'crm:manage' },
     { href: '/campaigns', label: 'Campaign links', perm: 'leads:write' },
     { href: '/crm/replies', label: 'Quick replies', perm: 'leads:read' },
+    { href: '/crm/spend', label: 'Ad spend', perm: 'crm:manage' },
     { href: '/dashboards/marketing', label: 'Marketing dashboard', perm: 'dashboard:marketing' },
   ] },
   { group: 'Sales', items: [
@@ -30,6 +32,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/parties', label: 'Parties', perm: 'parties:read' },
   ] },
   { group: 'Stores', items: [
+    { href: '/dashboards/stores', label: 'Stores dashboard', perm: 'dashboard:stores' },
     { href: '/purchasing/orders', label: 'Purchase orders', perm: 'purchasing:read' },
     { href: '/purchasing/receipts', label: 'Inward & QC', perm: 'purchasing:read' },
     { href: '/stock', label: 'Stock', perm: 'stock:read' },

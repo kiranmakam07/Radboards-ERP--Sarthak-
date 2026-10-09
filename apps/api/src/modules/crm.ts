@@ -8,9 +8,9 @@ import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { getSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
-import { campaigns, channelEvents, items, leadActivities, leads, messageTemplates } from '../db/schema';
+import { adSpends, campaigns, channelEvents, items, leadActivities, leadSources, leads, messageTemplates } from '../db/schema';
 import { AppError, badRequest, conflict, forbidden, must } from '../lib/errors';
-import { emptyToNull, inTx, zId, zText, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zText, type Ctx } from '../lib/http';
 import { captureLead, moveLead, sourceIdByName } from './leads';
 
 /**
@@ -397,6 +397,51 @@ export function crmRouter(db: DB, deps: CrmDeps = defaultDeps) {
       if (e!.status === 'processed') throw conflict('This one already became a lead');
       await ctx.tx.update(channelEvents).set({ status: 'ignored' }).where(eq(channelEvents.id, id));
       await audit(ctx, 'channel_event', id, 'ignore', { status: e!.status }, { status: 'ignored' });
+    });
+    res.json({ ok: true });
+  });
+
+  // ---- ad spend ------------------------------------------------------------
+  /** Spend entries, newest first, plus the campaign names seen on leads so a new entry can be tied to one. */
+  r.get('/spend', requirePerm('crm:manage', 'dashboard:marketing'), async (req, res) => {
+    const q = z.object({ from: zDate.optional(), to: zDate.optional() }).parse(req.query);
+    const data = await rows(db, sql`
+      select a.id, a.source_id, s.name as source, a.detail, a.spend_date, a.amount, a.notes, u.name as entered_by
+        from ad_spends a join lead_sources s on s.id = a.source_id left join users u on u.id = a.created_by
+       where (${q.from ?? null}::date is null or a.spend_date >= ${q.from ?? null}::date)
+         and (${q.to ?? null}::date is null or a.spend_date <= ${q.to ?? null}::date)
+       order by a.spend_date desc, a.created_at desc limit 2000`);
+    if (req.query.format === 'csv') return sendList(req, res, data, 'ad-spend');
+    const names = await rows(db, sql`
+      select distinct l.source_id, l.source_detail as detail from leads l where l.source_detail is not null order by 2`);
+    res.json({ data, campaign_names: names });
+  });
+
+  r.post('/spend', requirePerm('crm:manage'), async (req, res) => {
+    const b = z.object({
+      source_id: zId, detail: emptyToNull(z.string().trim().max(200)).optional(), spend_date: zDate, amount: zMoneyPos,
+      notes: emptyToNull(z.string().trim().max(500)).optional(),
+    }).parse(req.body);
+    const row = await inTx(db, req, async (ctx) => {
+      const [source] = await ctx.tx.select({ id: leadSources.id }).from(leadSources).where(eq(leadSources.id, b.source_id));
+      if (!source) throw badRequest('Unknown lead source');
+      const [a] = await ctx.tx.insert(adSpends).values({
+        sourceId: b.source_id, detail: b.detail ?? null, spendDate: b.spend_date, amount: b.amount, notes: b.notes ?? null, createdBy: ctx.user!.id,
+      }).returning();
+      await audit(ctx, 'ad_spend', a!.id, 'create', null, a);
+      return a!;
+    });
+    res.status(201).json({ data: row });
+  });
+
+  /** Take a wrong entry off. What it was is kept in the audit trail. */
+  r.delete('/spend/:id', requirePerm('crm:manage'), async (req, res) => {
+    const id = zId.parse(req.params.id);
+    await inTx(db, req, async (ctx) => {
+      const [a] = await ctx.tx.select().from(adSpends).where(eq(adSpends.id, id)).for('update');
+      must(a, 'Entry');
+      await ctx.tx.delete(adSpends).where(eq(adSpends.id, id));
+      await audit(ctx, 'ad_spend', id, 'remove', a, null);
     });
     res.json({ ok: true });
   });

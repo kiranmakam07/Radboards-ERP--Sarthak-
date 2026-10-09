@@ -17,6 +17,8 @@ const TILES: [string, string, string][] = [
   ['/dashboards/sales', 'Sales dashboard', 'dashboard:sales'],
   ['/dashboards/marketing', 'Marketing dashboard', 'dashboard:marketing'],
   ['/dashboards/accounts', 'Accounts dashboard', 'dashboard:accounts'],
+  ['/dashboards/stores', 'Stores dashboard', 'dashboard:stores'],
+  ['/dashboards/owner', "Owner's summary", 'dashboard:owner'],
   ['/hr/pipeline', 'Hiring board', 'hr:read'],
   ['/hr/attendance', 'Attendance', 'hr:read'],
   ['/dashboards/hr', 'HR dashboard', 'hr:read'],

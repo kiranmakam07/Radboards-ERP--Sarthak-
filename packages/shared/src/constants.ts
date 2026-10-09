@@ -201,6 +201,8 @@ export const PERMISSIONS = {
   'dashboard:sales': ['owner', 'sales', 'store', 'admin'],
   'dashboard:marketing': ['owner', 'marketing', 'admin'],
   'dashboard:accounts': ['owner', 'accounts', 'admin'],
+  'dashboard:stores': ['owner', 'stores', 'admin'],
+  'dashboard:owner': ['owner', 'admin'],
 
   // HR: applicants, interviews, employees, attendance. Salaries live here, so it is not open to everyone.
   'hr:read': ['owner', 'hr', 'admin'],
