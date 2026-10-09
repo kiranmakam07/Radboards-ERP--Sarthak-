@@ -65,6 +65,10 @@ async function pickOwner(ctx: Ctx, sourceDefaultOwner: string | null, explicit?:
  */
 export async function captureLead(ctx: Ctx, input: CaptureInput): Promise<{ lead: Lead; duplicate: boolean }> {
   const { tx } = ctx;
+  // One capture per phone number at a time. Without this, a double-tap on the tablet or a
+  // webhook retry arriving with the original both see "no lead yet" and both insert one.
+  // The lock is released when this transaction ends, so the second caller then finds the first's lead.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.phone}, 0))`);
   if (input.externalRef) {
     const [same] = await tx.select().from(leads).where(eq(leads.externalRef, input.externalRef));
     if (same) return { lead: same, duplicate: true };

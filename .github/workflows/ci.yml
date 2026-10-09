@@ -19,6 +19,68 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      # Tests run on an in-memory PostgreSQL (PGlite); no database service is needed.
+      # Runs on an in-memory PostgreSQL (PGlite); no database service is needed.
       - run: npm test
       - run: npm run build:web
+
+  # The same API tests on a real PostgreSQL server, plus the simultaneous-request tests
+  # (gap-free numbering, no overselling, no double payment) that need real connections.
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test -w @radcore/api
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+  # Builds the production images and starts the real stack (database, API, web) the way a
+  # server would, then signs in. Throwaway values only - nothing here is a real secret.
+  docker:
+    runs-on: ubuntu-latest
+    env:
+      DOMAIN: ci.localhost
+      POSTGRES_PASSWORD: ci0only0password
+      SEED_ADMIN_PHONE: '+919000000000'
+      SEED_ADMIN_PASSWORD: ci-only-admin-password
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images and start database, API and web
+        run: docker compose -f compose.prod.yml up -d --build --wait db api web
+      - name: Sign in through the API and read a report
+        run: |
+          docker compose -f compose.prod.yml exec -T api node --input-type=module - <<'JS'
+          const base = 'http://127.0.0.1:4000';
+          const login = await fetch(`${base}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ identifier: process.env.SEED_ADMIN_PHONE, password: process.env.SEED_ADMIN_PASSWORD }),
+          });
+          if (login.status !== 200) throw new Error(`login returned ${login.status}`);
+          const cookie = login.headers.getSetCookie()[0].split(';')[0];
+          const report = await fetch(`${base}/api/accounting/reports/trial-balance`, { headers: { cookie } });
+          if (report.status !== 200) throw new Error(`trial balance returned ${report.status}`);
+          console.log('API: signed in on PostgreSQL and read the trial balance');
+          JS
+      - name: Web app serves the login page
+        run: |
+          docker compose -f compose.prod.yml exec -T web node -e "fetch('http://127.0.0.1:3000/login').then(async r => { const t = await r.text(); if (r.status !== 200 || !t.includes('RadCore')) process.exit(1); console.log('Web: login page served'); }).catch(() => process.exit(1))"
+      - name: Show logs if something failed
+        if: failure()
+        run: docker compose -f compose.prod.yml logs --no-color --tail 200

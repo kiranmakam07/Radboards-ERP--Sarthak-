@@ -170,10 +170,10 @@ export function dashboardsRouter(db: DB) {
             from accounts a where a.subtype is not null and a.active order by a.code`),
         receivables: (await rows(db, sql`
           select coalesce(sum(outstanding), 0) as total,
-                 coalesce(sum(outstanding) filter (where current_date - coalesce(due_date, invoice_date) <= 30), 0) as d0_30,
-                 coalesce(sum(outstanding) filter (where current_date - coalesce(due_date, invoice_date) between 31 and 60), 0) as d31_60,
-                 coalesce(sum(outstanding) filter (where current_date - coalesce(due_date, invoice_date) between 61 and 90), 0) as d61_90,
-                 coalesce(sum(outstanding) filter (where current_date - coalesce(due_date, invoice_date) > 90), 0) as d90_plus
+                 coalesce(sum(outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(due_date, invoice_date) <= 30), 0) as d0_30,
+                 coalesce(sum(outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(due_date, invoice_date) between 31 and 60), 0) as d31_60,
+                 coalesce(sum(outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(due_date, invoice_date) between 61 and 90), 0) as d61_90,
+                 coalesce(sum(outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(due_date, invoice_date) > 90), 0) as d90_plus
             from v_invoice_outstanding where outstanding > 0`))[0],
         top_debtors: await rows(db, sql`
           select o.party_id, coalesce(p.name, 'Cash Sale') as name, sum(o.outstanding) as outstanding, min(o.due_date) as oldest_due

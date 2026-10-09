@@ -26,5 +26,7 @@ export const config = {
   cookieName: 'rc_session',
   cookieSecure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : env.NODE_ENV === 'production',
   webOrigin: env.WEB_ORIGIN ?? 'http://localhost:3000',
+  /** How many reverse proxies sit in front of the API (1 = one proxy such as Caddy, or the Next dev proxy). */
+  trustProxy: Number(env.TRUST_PROXY ?? 1),
   migrationsFolder: path.join(API_ROOT, 'drizzle'),
 };

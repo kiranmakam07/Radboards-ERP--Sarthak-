@@ -550,6 +550,19 @@ describe('accounts', () => {
     await store.post('/api/sales/quick-bill').send({ lines: [{ item_id: id.wheels, qty: 1 }], payments: [{ mode: 'cash', amount: 1120 }] }).expect(201);
   });
 
+  it('dates are plain calendar dates on every route, with no timezone shift', async () => {
+    const accounts = await w.as('accounts');
+    const list = await accounts.get('/api/sales/invoices').expect(200);
+    expect(list.body.data.length).toBeGreaterThan(0);
+    expect(list.body.data.every((i: { invoice_date: string }) => i.invoice_date === TODAY)).toBe(true);
+    const doc = await accounts.get(`/api/sales/invoices/${id.inv1}`).expect(200);
+    expect(doc.body.data.invoice_date).toBe(TODAY);
+    const ledger = await accounts.get(`/api/parties/${id.rahul}/ledger`).expect(200);
+    expect(ledger.body.data[0].entry_date).toBe(TODAY);
+    // Nothing billed today can be overdue today, whatever timezone the database server is in.
+    expect(list.body.data.every((i: { days_overdue: number }) => Number(i.days_overdue) === 0)).toBe(true);
+  });
+
   it('writes an audit trail with before/after values', async () => {
     const admin = await w.as('admin');
     const log = await admin.get('/api/settings/audit-log').query({ entity: 'invoice', entity_id: id.inv2 }).expect(200);

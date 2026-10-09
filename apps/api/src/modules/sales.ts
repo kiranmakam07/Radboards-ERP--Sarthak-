@@ -889,7 +889,7 @@ export function salesRouter(db: DB) {
       select i.id, i.doc_type, i.invoice_no, i.fy, i.invoice_date, i.due_date, i.party_id, i.party_name, i.party_gstin, i.channel,
              i.place_of_supply, i.taxable_total, i.cgst_total, i.sgst_total, i.igst_total, i.round_off, i.grand_total, i.status,
              o.outstanding, o.payment_status,
-             case when o.outstanding > 0 and i.due_date < current_date then current_date - i.due_date else 0 end as days_overdue
+             case when o.outstanding > 0 and i.due_date < (now() at time zone 'Asia/Kolkata')::date then (now() at time zone 'Asia/Kolkata')::date - i.due_date else 0 end as days_overdue
         from invoices i left join v_invoice_outstanding o on o.invoice_id = i.id
        where i.status <> 'draft'
          and (${q.doc_type ?? null}::text is null or i.doc_type::text = ${q.doc_type ?? null})

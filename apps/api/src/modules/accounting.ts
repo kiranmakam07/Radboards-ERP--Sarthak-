@@ -343,11 +343,11 @@ export function accountingRouter(db: DB) {
     const data = await rows(db, sql`
       select coalesce(o.party_id::text, 'cash') as party_id, coalesce(p.name, 'Cash Sale') as party_name, p.phone, p.credit_limit,
              sum(o.outstanding) as total,
-             sum(o.outstanding) filter (where current_date - coalesce(o.due_date, o.invoice_date) <= 0) as not_due,
-             sum(o.outstanding) filter (where current_date - coalesce(o.due_date, o.invoice_date) between 1 and 30) as d0_30,
-             sum(o.outstanding) filter (where current_date - coalesce(o.due_date, o.invoice_date) between 31 and 60) as d31_60,
-             sum(o.outstanding) filter (where current_date - coalesce(o.due_date, o.invoice_date) between 61 and 90) as d61_90,
-             sum(o.outstanding) filter (where current_date - coalesce(o.due_date, o.invoice_date) > 90) as d90_plus
+             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.invoice_date) <= 0) as not_due,
+             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.invoice_date) between 1 and 30) as d0_30,
+             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.invoice_date) between 31 and 60) as d31_60,
+             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.invoice_date) between 61 and 90) as d61_90,
+             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.invoice_date) > 90) as d90_plus
         from v_invoice_outstanding o left join parties p on p.id = o.party_id
        where o.outstanding > 0 group by o.party_id, p.name, p.phone, p.credit_limit order by sum(o.outstanding) desc`);
     sendList(req, res, data, 'receivables-ageing');
@@ -357,11 +357,11 @@ export function accountingRouter(db: DB) {
     const data = await rows(db, sql`
       select o.supplier_id as party_id, p.name as party_name, p.phone,
              sum(o.outstanding) as total,
-             sum(o.outstanding) filter (where current_date - coalesce(o.due_date, o.bill_date) <= 0) as not_due,
-             sum(o.outstanding) filter (where current_date - coalesce(o.due_date, o.bill_date) between 1 and 30) as d0_30,
-             sum(o.outstanding) filter (where current_date - coalesce(o.due_date, o.bill_date) between 31 and 60) as d31_60,
-             sum(o.outstanding) filter (where current_date - coalesce(o.due_date, o.bill_date) between 61 and 90) as d61_90,
-             sum(o.outstanding) filter (where current_date - coalesce(o.due_date, o.bill_date) > 90) as d90_plus
+             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.bill_date) <= 0) as not_due,
+             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.bill_date) between 1 and 30) as d0_30,
+             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.bill_date) between 31 and 60) as d31_60,
+             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.bill_date) between 61 and 90) as d61_90,
+             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.bill_date) > 90) as d90_plus
         from v_bill_outstanding o join parties p on p.id = o.supplier_id
        where o.outstanding > 0 group by o.supplier_id, p.name, p.phone order by sum(o.outstanding) desc`);
     sendList(req, res, data, 'payables-ageing');

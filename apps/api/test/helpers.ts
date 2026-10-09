@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import request from 'supertest';
 import { ROLES, gstinCheckChar, type Role } from '@radcore/shared';
 import { createApp } from '../src/app';
@@ -19,9 +20,38 @@ export const gstin = (state: string, pan = 'ABCDE1234F') => {
 
 export type Agent = ReturnType<typeof request.agent>;
 
-/** Fresh in-memory database with defaults, one user per role, and the company set to Maharashtra (27). */
+/**
+ * Where the tests run. By default each test file gets a throwaway in-memory database (PGlite).
+ * With TEST_DATABASE_URL set to a real PostgreSQL server (any database on it, e.g.
+ * postgres://postgres@localhost:5432/postgres), each test file gets its own freshly created
+ * database on that server instead, which is dropped afterwards. CI runs the suite both ways.
+ */
+export const REAL_POSTGRES = Boolean(process.env.TEST_DATABASE_URL);
+
+async function freshDatabase(): Promise<{ url: string; drop: () => Promise<void> }> {
+  const serverUrl = process.env.TEST_DATABASE_URL;
+  if (!serverUrl) return { url: 'memory://', drop: async () => {} };
+  const pg = (await import('pg')).default;
+  const name = `rc_test_${crypto.randomBytes(6).toString('hex')}`;
+  const run = async (statement: string) => {
+    const client = new pg.Client({ connectionString: serverUrl });
+    await client.connect();
+    try {
+      await client.query(statement);
+    } finally {
+      await client.end();
+    }
+  };
+  await run(`create database ${name}`);
+  const url = new URL(serverUrl);
+  url.pathname = `/${name}`;
+  return { url: url.toString(), drop: () => run(`drop database if exists ${name} with (force)`) };
+}
+
+/** Fresh database with defaults, one user per role, and the company set to Maharashtra (27). */
 export async function setup() {
-  const handle = await createDb('memory://', config.migrationsFolder);
+  const database = await freshDatabase();
+  const handle = await createDb(database.url, config.migrationsFolder);
   const db = handle.db;
   await seedDefaults(db);
   const hash = await hashPassword(PASSWORD);
@@ -41,7 +71,11 @@ export async function setup() {
     agents.set(role, agent);
     return agent;
   };
-  return { app, db, as, close: handle.close };
+  const close = async () => {
+    await handle.close();
+    await database.drop();
+  };
+  return { app, db, as, close };
 }
 
 export type World = Awaited<ReturnType<typeof setup>>;

@@ -618,7 +618,7 @@ export function purchasingRouter(db: DB) {
       select b.id, b.doc_type, b.bill_no, b.supplier_invoice_no, b.bill_date, b.due_date, b.supplier_id, s.name as supplier_name,
              b.taxable_total, b.cgst_total, b.sgst_total, b.igst_total, b.grand_total, b.status, b.mismatches, po.po_no,
              o.outstanding, o.payment_status,
-             case when o.outstanding > 0 and b.due_date < current_date then current_date - b.due_date else 0 end as days_overdue
+             case when o.outstanding > 0 and b.due_date < (now() at time zone 'Asia/Kolkata')::date then (now() at time zone 'Asia/Kolkata')::date - b.due_date else 0 end as days_overdue
         from purchase_bills b join parties s on s.id = b.supplier_id
         left join purchase_orders po on po.id = b.purchase_order_id
         left join v_bill_outstanding o on o.bill_id = b.id
@@ -687,7 +687,7 @@ export function purchasingRouter(db: DB) {
   r.get('/payables', requirePerm('purchasing:read'), async (req, res) => {
     const data = await rows(db, sql`
       select s.id as supplier_id, s.name as supplier_name, count(*)::int as open_bills, sum(o.outstanding) as outstanding,
-             sum(o.outstanding) filter (where o.due_date < current_date) as overdue, min(o.due_date) as oldest_due
+             sum(o.outstanding) filter (where o.due_date < (now() at time zone 'Asia/Kolkata')::date) as overdue, min(o.due_date) as oldest_due
         from v_bill_outstanding o join parties s on s.id = o.supplier_id
        where o.outstanding > 0 group by s.id, s.name order by sum(o.outstanding) desc`);
     sendList(req, res, data, 'payables');

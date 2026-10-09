@@ -24,3 +24,7 @@ Thumbs.db
 
 # documents exported for sharing (not source)
 exports/
+
+# server-side files that must never be committed
+.env.production
+backups/

@@ -1,0 +1,13 @@
+# HTTPS is automatic: Caddy gets and renews the certificate once DOMAIN points at this server.
+{$DOMAIN} {
+	encode gzip
+	header Strict-Transport-Security "max-age=31536000"
+
+	# The API is reached directly, so it sees one proxy and the caller's real address.
+	handle /api/* {
+		reverse_proxy api:4000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}

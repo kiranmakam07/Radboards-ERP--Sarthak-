@@ -61,7 +61,7 @@ function snakeKeys(value: unknown): unknown {
 export function createApp(db: DB) {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 1);
+  app.set('trust proxy', config.trustProxy);
   // PGlite returns int8 as BigInt; JSON cannot carry that.
   app.set('json replacer', (_k: string, v: unknown) => (typeof v === 'bigint' ? Number(v) : v));
   app.use((_req, res, next) => {
