@@ -204,6 +204,18 @@ Waiting on Sarthak / the founder:
 3. **Who uses it**: names and roles, plus the real company profile (GSTIN, address, bank
    details, logo) and how dealer prices and credit terms work.
 
+Hosting cost options (list prices read from the providers' pricing pages on 9 Oct 2026, in
+USD, before taxes and currency conversion):
+
+| Option | What you get | Monthly |
+| --- | --- | --- |
+| A. One server, everything on it (what `compose.prod.yml` runs and CI verifies) | 2 vCPU / 4 GB / 80 GB server. DigitalOcean Bangalore: $24 + daily server backups at 30% ($7.20). AWS Lightsail Mumbai: $24 + automatic snapshots at $0.05 per GB | about $31 (DigitalOcean); $24 plus snapshot storage (Lightsail) |
+| B. Same server + managed PostgreSQL (the provider runs and backs up the database) | Adds DigitalOcean Managed PostgreSQL 1 GB at $15.15, or Lightsail Standard database 1 GB at $15 (that plan has no encryption at rest) | about $39 to $46 |
+
+Sources: https://www.digitalocean.com/pricing/droplets , https://www.digitalocean.com/pricing/managed-databases ,
+https://aws.amazon.com/lightsail/pricing/ . Option A is the recommended start: it is the setup
+already tested, and moving the database to a managed service later is a configuration change.
+
 Can be built without waiting:
 4. Import tool for opening data with a dry-run validation report (PRD 7.12).
 5. A comparison report for the month beside Vyapar (sales, tax, stock, balances per day).
