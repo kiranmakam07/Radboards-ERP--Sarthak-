@@ -6,7 +6,7 @@ import { requireAuth, requirePerm } from '../core/auth';
 import { rows, type DB } from '../db/client';
 import { zDate } from '../lib/http';
 import { gstSummary } from './gst';
-import { ensureTasks } from './ops';
+import { LATE, ensureTasks } from './ops';
 
 /** Default range: month to date (IST). Every figure is computed live from the records (PRD 7.10). */
 function range(query: unknown) {
@@ -107,15 +107,15 @@ export function dashboardsRouter(db: DB) {
     await ensureTasks(db, today);
     if (can(role, 'ops:read')) {
       data.ops = await one(sql`
-        select (select count(*) from tasks where status = 'open' and due_date = ${today}::date)::int as tasks_open_today,
-               (select count(*) from tasks where status = 'open' and due_date < ${today}::date)::int as tasks_overdue,
+        select (select count(*) from tasks t where t.status = 'open' and t.due_date = ${today}::date and not ${LATE})::int as tasks_open_today,
+               (select count(*) from tasks t where ${LATE})::int as tasks_overdue,
                (select count(*) from maintenance_schedules
                  where active and next_due_on <= ${today}::date + remind_days_before)::int as maintenance_due`);
     }
     // For everyone, whatever their role: what is sitting with me.
     data.mine = await one(sql`
-      select (select count(*) from tasks where assignee_id = ${req.user!.id} and status = 'open' and due_date = ${today}::date)::int as tasks_today,
-             (select count(*) from tasks where assignee_id = ${req.user!.id} and status = 'open' and due_date < ${today}::date)::int as tasks_overdue,
+      select (select count(*) from tasks t where t.assignee_id = ${req.user!.id} and t.status = 'open' and t.due_date = ${today}::date and not ${LATE})::int as tasks_today,
+             (select count(*) from tasks t where t.assignee_id = ${req.user!.id} and ${LATE})::int as tasks_overdue,
              (select count(*) from maintenance_schedules
                where assignee_id = ${req.user!.id} and active and next_due_on <= ${today}::date + remind_days_before)::int as maintenance_due,
              (select count(*) from interviews where interviewer_id = ${req.user!.id} and status = 'scheduled')::int as interviews`);

@@ -89,3 +89,27 @@ export function isTaskDueOn(rule: TaskRule, date: string): boolean {
   }
   return rule.weekdays.includes(weekdayOf(date));
 }
+
+/** The Monday of the week a date falls in. */
+export function weekStart(date: string): string {
+  return addDays(date, -((weekdayOf(date) + 6) % 7));
+}
+
+export type Span = { from: string; to: string; percent: number };
+
+/**
+ * Resource allocation: the highest total share (in percent) that a set of allocations adds up to
+ * on any single day between `from` and `to`. Over 100 means the person or machine is double-booked.
+ */
+export function peakLoad(spans: Span[], from: string, to: string): number {
+  // The total only ever rises on a day an allocation starts, so those are the only days worth checking.
+  const days = new Set<string>([from]);
+  for (const s of spans) if (s.from > from && s.from <= to) days.add(s.from);
+  let peak = 0;
+  for (const day of days) {
+    let total = 0;
+    for (const s of spans) if (s.from <= day && s.to >= day) total += s.percent;
+    if (total > peak) peak = total;
+  }
+  return peak;
+}

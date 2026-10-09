@@ -53,6 +53,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
   ] },
   { group: 'Operations', items: [
     { href: '/dashboards/ops', label: 'Operations dashboard', perm: 'ops:read' },
+    { href: '/ops/projects', label: 'Projects', perm: 'ops:read' },
+    { href: '/ops/resources', label: 'Resource allocation', perm: 'ops:read' },
     { href: '/ops/tasks', label: 'Tasks', perm: 'ops:read' },
     { href: '/ops/routines', label: 'Routines', perm: 'ops:read' },
     { href: '/ops/assets', label: 'Assets & maintenance', perm: 'ops:read' },

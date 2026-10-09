@@ -250,3 +250,34 @@ h2.section { margin: 18px 0 8px; color: var(--muted); font-size: 12px; text-tran
 .checklist input { width: auto; margin-top: 3px; }
 .checklist label.done { color: var(--muted); text-decoration: line-through; }
 @media print { .steps, .flow, .viz-table { display: none; } }
+
+/* ---- project plan against the calendar ---- */
+.timeline { display: grid; gap: 6px; }
+.timeline-row { display: grid; grid-template-columns: minmax(160px, 34%) 1fr; column-gap: 12px; align-items: center; }
+.timeline-label { overflow-wrap: anywhere; font-size: 13px; }
+.timeline-track { position: relative; height: 18px; background: #f1f3f7; border-radius: 4px; }
+.timeline-head { font-size: 11px; color: var(--muted); }
+.timeline-head .timeline-track { background: none; display: flex; justify-content: space-between; height: 16px; }
+.timeline-today-label { position: absolute; top: 0; transform: translateX(-50%); color: var(--text); font-weight: 600; }
+.timeline-today { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--text); opacity: .55; }
+.timeline-bar { position: absolute; top: 3px; height: 12px; border-radius: 4px; background: var(--viz-1); }
+.timeline-mark { position: absolute; top: 4px; width: 10px; height: 10px; border-radius: 50%; transform: translateX(-50%); background: var(--viz-1); box-shadow: 0 0 0 2px var(--panel); }
+.timeline-bar.done, .timeline-mark.done { background: #9aa3b2; }
+.timeline-bar.late, .timeline-mark.late { background: #d03b3b; }
+.timeline-bar.skipped, .timeline-mark.skipped { background: none; border: 1.5px dashed #9aa3b2; box-shadow: none; }
+
+/* ---- resource allocation: people and machines, week by week ---- */
+.load-grid th, .load-grid td { text-align: center; }
+.load-grid th:first-child, .load-grid td:first-child, .load-grid th:nth-child(2), .load-grid td:nth-child(2) { text-align: left; }
+.load-grid td.load { font-variant-numeric: tabular-nums; min-width: 62px; }
+/* One hue, deeper as more of the week is promised; text stays in ink. Over 100% switches to the alert colour and says so in words. */
+.load.l0 { color: var(--muted); }
+.load.l1 { background: #e6f0fc; }
+.load.l2 { background: #c4dbf8; }
+.load.l3 { background: #9cc2f2; }
+.load.over { background: #fbe7e5; color: var(--danger); font-weight: 600; }
+.load-key { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.load-key i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 5px; vertical-align: -2px; border: 1px solid var(--line); }
+.progress { height: 8px; background: #e7e9ee; border-radius: 4px; overflow: hidden; min-width: 80px; }
+.progress > span { display: block; height: 8px; background: var(--viz-1); border-radius: 0 4px 4px 0; }
+@media print { .timeline-today-label { display: none; } }

@@ -1,9 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { TASK_STATUSES, istDate } from '@radcore/shared';
-import { TaskCard } from '@/components/ops';
+import { TaskCard, deadlineText } from '@/components/ops';
 import { ActionButton, Badge, CsvLink, Form, Loading, Page, Table, Toggle, date, dateTime, label } from '@/components/ui';
 import { patch, post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -32,7 +33,8 @@ function Tasks() {
             fields={[
               { name: 'title', label: 'What needs doing', required: true },
               { name: 'assignee_id', label: 'Who', type: 'select', required: true, options: people },
-              { name: 'due_date', label: 'By when', type: 'date', required: true },
+              { name: 'due_date', label: 'Deadline', type: 'date', required: true },
+              { name: 'due_time', label: 'By what time', type: 'time', help: 'Blank = any time that day' },
               { name: 'checklist', label: 'Checklist (one step per line)', type: 'textarea' },
               { name: 'description', label: 'Details', type: 'textarea' },
             ]}
@@ -52,12 +54,13 @@ function Tasks() {
       </div>
       <Loading loading={loading} error={error} />
       <Table rows={data?.data} empty="No tasks here." columns={[
-        { key: 'due_date', title: 'Due', render: (r) => <span className={r.overdue ? 'error small' : undefined}>{date(r.due_date)}</span> },
+        { key: 'due_date', title: 'Deadline', render: (r) => <span className={r.overdue ? 'error small' : undefined}>{deadlineText(r)}</span> },
         { key: 'title', title: 'Task', render: (r) => <button type="button" className="link" onClick={() => setOpenId(openId === r.id ? null : r.id)}>{r.title}</button> },
         { key: 'assignee_name', title: 'Who' },
         { key: 'status', title: 'Status', render: (r) => (r.overdue ? <Badge value="overdue" /> : <Badge value={r.status} />) },
         { key: 'checklist', title: 'Checklist', render: (r) => (r.checklist_total ? `${r.checklist_done} of ${r.checklist_total}` : '') },
-        { key: 'frequency', title: 'From', render: (r) => (!r.frequency ? 'One-off' : r.frequency === 'need_based' ? 'Routine, raised by hand' : `${label(r.frequency)} routine`) },
+        { key: 'frequency', title: 'From', render: (r) => (r.project_id ? <Link href={`/ops/projects/${r.project_id}`}>{r.project_no} · {r.project_name}</Link>
+          : !r.frequency ? 'One-off' : r.frequency === 'need_based' ? 'Routine, raised by hand' : `${label(r.frequency)} routine`) },
         { key: 'completed_at', title: 'Closed', render: (r) => (r.completed_at ? `${dateTime(r.completed_at)}${r.completed_by_name ? ` · ${r.completed_by_name}` : ''}` : '') },
         { key: 'note', title: 'Note', render: (r) => <span style={{ whiteSpace: 'normal' }}>{r.note}</span> },
         { key: 'actions', title: '', render: (r) => (manage && r.status !== 'open'
@@ -70,11 +73,12 @@ function Tasks() {
           <TaskCard task={selected} onChange={reload} showAssignee />
           {manage && selected.status === 'open' && (
             <div className="toggle-body">
-              <Form key={`${selected.id}${selected.assignee_id}${selected.due_date}`} submit="Save" inline
-                initial={{ assignee_id: selected.assignee_id, due_date: selected.due_date }}
+              <Form key={`${selected.id}${selected.assignee_id}${selected.due_date}${selected.due_time}`} submit="Save" inline
+                initial={{ assignee_id: selected.assignee_id, due_date: selected.due_date, due_time: selected.due_time ?? '' }}
                 fields={[
                   { name: 'assignee_id', label: 'Give to', type: 'select', required: true, options: people },
-                  { name: 'due_date', label: 'Move to', type: 'date', required: true },
+                  { name: 'due_date', label: 'Deadline', type: 'date', required: true },
+                  { name: 'due_time', label: 'By what time', type: 'time' },
                 ]}
                 onSubmit={(v) => patch(`/ops/tasks/${selected.id}`, v)}
                 onDone={reload} />

@@ -54,6 +54,8 @@ export const zGstRate = z.union([z.string(), z.number()]).transform((v, c) => {
   return n.toFixed(2);
 });
 export const zDate = z.string().refine(isIsoDate, 'must be a date (YYYY-MM-DD)');
+/** A time of day as HH:MM (24-hour). */
+export const zClock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be a time like 09:30');
 export const zPhone = z.string().transform((v, c) => {
   const p = normalisePhone(v);
   if (!p) {

@@ -331,3 +331,49 @@ export function Flow({ title, steps, arrows = true }: { title: string; steps: Fl
     </section>
   );
 }
+
+// ---------------------------------------------------------------------------
+// A plan against the calendar: one row per piece of work, a bar from its start to its
+// deadline (or a marker on the deadline when no start was given), and a line for today.
+// ---------------------------------------------------------------------------
+export type TimelineRow = { label: string; from: string | null; to: string; state: 'open' | 'done' | 'late' | 'skipped'; note?: string; href?: string | null };
+
+const dayNumber = (d: string) => Date.parse(`${d}T00:00:00Z`) / 86400000;
+const STATE_WORDS: Record<TimelineRow['state'], string> = { open: 'To do', done: 'Done', late: 'Late', skipped: 'Not done' };
+
+export function Timeline({ rows, from, to, today, empty = 'Nothing planned yet.' }: { rows: TimelineRow[]; from: string; to: string; today: string; empty?: string }) {
+  if (rows.length === 0) return <p className="muted">{empty}</p>;
+  const start = dayNumber(from);
+  const span = Math.max(dayNumber(to) - start + 1, 1);
+  // Positions as a share of the whole period, clamped so nothing is drawn outside the track.
+  const at = (d: string) => Math.min(100, Math.max(0, ((dayNumber(d) - start) / span) * 100));
+  const todayAt = dayNumber(today) >= start && dayNumber(today) <= start + span ? at(today) + 50 / span : null;
+  return (
+    <div className="timeline" role="table" aria-label="Plan against the calendar">
+      <div className="timeline-row timeline-head" role="row">
+        <span role="columnheader">Work</span>
+        <span className="timeline-track" role="columnheader">
+          <span>{shortDate(from)}</span>
+          {todayAt !== null ? <span className="timeline-today-label" style={{ left: `${todayAt}%` }}>Today</span> : null}
+          <span>{shortDate(to)}</span>
+        </span>
+      </div>
+      {rows.map((r, i) => {
+        const left = r.from ? at(r.from) : at(r.to);
+        const right = Math.min(100, at(r.to) + 100 / span);
+        const name = r.href ? <Link href={r.href}>{r.label}</Link> : r.label;
+        return (
+          <div className="timeline-row" role="row" key={i}>
+            <span role="cell" className="timeline-label">{name}<span className="muted small"> · {STATE_WORDS[r.state]}{r.note ? ` · ${r.note}` : ''}</span></span>
+            <span className="timeline-track" role="cell">
+              {todayAt !== null ? <span className="timeline-today" style={{ left: `${todayAt}%` }} /> : null}
+              {r.from
+                ? <span className={`timeline-bar ${r.state}`} style={{ left: `${left}%`, width: `${Math.max(right - left, 1)}%` }} title={`${shortDate(r.from)} to ${shortDate(r.to)}`} />
+                : <span className={`timeline-mark ${r.state}`} style={{ left: `${Math.min(99, left + 50 / span)}%` }} title={`Deadline ${shortDate(r.to)}`} />}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

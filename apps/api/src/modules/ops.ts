@@ -10,9 +10,9 @@ import { requireAuth, requirePerm } from '../core/auth';
 import { nextNumber } from '../core/numbering';
 import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
-import { assets, maintenanceLogs, maintenanceSchedules, settings, taskTemplates, tasks, users } from '../db/schema';
+import { assets, maintenanceLogs, maintenanceSchedules, projects, settings, taskTemplates, tasks, users } from '../db/schema';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zText, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zClock, zDate, zId, zListQuery, zMoney, zText, type Ctx } from '../lib/http';
 
 type Template = typeof taskTemplates.$inferSelect;
 type Task = typeof tasks.$inferSelect;
@@ -21,7 +21,7 @@ type Schedule = typeof maintenanceSchedules.$inferSelect;
 /** After a long gap (holidays, a server that was off) only this many days of missed tasks are created. */
 const BACKFILL_DAYS = 31;
 
-async function activeUser(tx: DB, id: string): Promise<{ id: string; name: string }> {
+export async function activeUser(tx: DB, id: string): Promise<{ id: string; name: string }> {
   const [u] = await tx.select({ id: users.id, name: users.name, active: users.active }).from(users).where(eq(users.id, id));
   if (!u || !u.active) throw badRequest('Pick a person who has an active sign-in');
   return u;
@@ -39,7 +39,7 @@ async function createDueTasks(tx: DB, templates: Template[], from: string, throu
       if (!isTaskDueOn({ frequency: t.frequency, weekdays: t.weekdays, monthDay: t.monthDay }, day)) continue;
       values.push({
         templateId: t.id, scheduledFor: day, title: t.title, description: t.description, assigneeId: t.assigneeId, dueDate: day,
-        checklist: t.checklist.map((text) => ({ text, done: false })),
+        dueTime: t.dueTime, checklist: t.checklist.map((text) => ({ text, done: false })),
       });
     }
   }
@@ -85,6 +85,8 @@ const zTemplate = z.object({
   month_day: emptyToNull(z.coerce.number().int().min(1).max(31)).optional(),
   assignee_id: zId,
   checklist: z.array(zText(200)).max(30).default([]),
+  /** Finish by this time on the day; blank means any time that day. */
+  due_time: emptyToNull(zClock).optional(),
   start_date: emptyToNull(zDate).optional(),
   active: z.boolean().optional(),
 });
@@ -107,7 +109,16 @@ function scheduleOf(frequency: Template['frequency'], weekdays: number[] | undef
   return { weekdays: [], monthDay: null };
 }
 
-async function lockTask(tx: DB, id: string): Promise<Task> {
+/** A project's task cannot be due after the project itself. */
+export async function deadlineFitsProject(tx: DB, projectId: string | null, dueDate: string): Promise<void> {
+  if (!projectId) return;
+  const [p] = await tx.select({ name: projects.name, deadline: projects.deadline }).from(projects).where(eq(projects.id, projectId));
+  if (p?.deadline && dueDate > p.deadline) {
+    throw badRequest(`"${p.name}" is due on ${formatDate(p.deadline)}. A task in it cannot be due later than that; move the project's deadline first.`);
+  }
+}
+
+export async function lockTask(tx: DB, id: string): Promise<Task> {
   const [t] = await tx.select().from(tasks).where(eq(tasks.id, id)).for('update');
   return must(t, 'Task');
 }
@@ -188,16 +199,24 @@ function scheduleRows(db: DB, today: string, where: ReturnType<typeof sql>) {
      order by s.active desc, s.next_due_on, a.name`);
 }
 
-const TASK_SELECT = (today: string) => sql`
-  select t.id, t.template_id, t.scheduled_for, t.title, t.description, t.assignee_id, u.name as assignee_name, t.due_date, t.status,
+/**
+ * A task is late once its deadline has passed and it is still open. The deadline is the due
+ * date at the due time, or the end of that day when no time was set. India time.
+ */
+export const LATE = sql`(t.status = 'open' and (t.due_date + coalesce(t.due_time, time '23:59:59')) < (now() at time zone 'Asia/Kolkata'))`;
+
+export const TASK_SELECT = sql`
+  select t.id, t.template_id, t.scheduled_for, t.project_id, p.project_no, p.name as project_name, t.title, t.description,
+         t.assignee_id, u.name as assignee_name, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.status,
          t.checklist, t.completed_at, c.name as completed_by_name, t.note, tt.frequency,
-         (t.status = 'open' and t.due_date < ${today}::date) as overdue,
+         ${LATE} as overdue,
          jsonb_array_length(t.checklist)::int as checklist_total,
          (select count(*)::int from jsonb_array_elements(t.checklist) x where (x->>'done')::boolean) as checklist_done
     from tasks t
     join users u on u.id = t.assignee_id
     left join users c on c.id = t.completed_by
-    left join task_templates tt on tt.id = t.template_id`;
+    left join task_templates tt on tt.id = t.template_id
+    left join projects p on p.id = t.project_id`;
 
 export function opsRouter(db: DB) {
   const r = Router();
@@ -221,7 +240,8 @@ export function opsRouter(db: DB) {
       const schedule = scheduleOf(b.frequency, b.weekdays, b.month_day);
       const [t] = await ctx.tx.insert(taskTemplates).values({
         title: b.title, description: b.description ?? null, frequency: b.frequency, ...schedule, assigneeId: b.assignee_id,
-        checklist: b.checklist, startDate: b.start_date ?? today, active: b.active ?? true, createdBy: ctx.user?.id ?? null,
+        checklist: b.checklist, dueTime: b.due_time ?? null, startDate: b.start_date ?? today, active: b.active ?? true,
+        createdBy: ctx.user?.id ?? null,
       }).returning();
       // If today's run has already happened, today's task for this new template would otherwise wait until tomorrow.
       await createDueTasks(ctx.tx, [t!], today, today);
@@ -250,6 +270,7 @@ export function opsRouter(db: DB) {
       if (b.title !== undefined) patch.title = b.title;
       if (b.description !== undefined) patch.description = b.description;
       if (req.body.checklist !== undefined) patch.checklist = b.checklist;
+      if (b.due_time !== undefined) patch.dueTime = b.due_time;
       if (b.start_date) patch.startDate = b.start_date;
       if (b.active !== undefined) patch.active = b.active;
       const [updated] = await ctx.tx.update(taskTemplates).set(patch).where(eq(taskTemplates.id, id)).returning();
@@ -265,18 +286,21 @@ export function opsRouter(db: DB) {
   /** Raise a task from a template by hand: the way need-based tasks start, and an extra run of any other. */
   r.post('/templates/:id/raise', requirePerm('ops:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ due_date: emptyToNull(zDate).optional(), assignee_id: emptyToNull(zId).optional() }).parse(req.body);
+    const b = z.object({
+      due_date: emptyToNull(zDate).optional(), due_time: emptyToNull(zClock).optional(), assignee_id: emptyToNull(zId).optional(),
+    }).parse(req.body);
     const today = istDate();
     const row = await inTx(db, req, async (ctx) => {
       const [t] = await ctx.tx.select().from(taskTemplates).where(eq(taskTemplates.id, id));
       must(t, 'Task template');
       if (!t!.active) throw conflict('This template is switched off');
       const dueDate = b.due_date ?? today;
-      if (dueDate < today) throw badRequest('The due date cannot be in the past');
+      if (dueDate < today) throw badRequest('The deadline cannot be in the past');
       const assigneeId = b.assignee_id ?? t!.assigneeId;
       await activeUser(ctx.tx, assigneeId);
       const [task] = await ctx.tx.insert(tasks).values({
         templateId: id, scheduledFor: null, title: t!.title, description: t!.description, assigneeId, dueDate,
+        dueTime: b.due_time === undefined ? t!.dueTime : b.due_time,
         checklist: t!.checklist.map((text) => ({ text, done: false })), createdBy: ctx.user?.id ?? null,
       }).returning();
       await audit(ctx, 'task', task!.id, 'raise', null, { templateId: id, assigneeId, dueDate });
@@ -286,15 +310,15 @@ export function opsRouter(db: DB) {
   });
 
   // ---- tasks ---------------------------------------------------------------
-  /** What I have to do: my open tasks up to a week ahead (late ones first), what I closed today, and maintenance I look after that is due. */
+  /** What I have to do: every open task of mine, nearest deadline first, what I closed today, and maintenance I look after that is due. */
   r.get('/my-tasks', requireAuth, async (req, res) => {
     const today = istDate();
     await ensureTasks(db, today);
     const me = req.user!.id;
-    const mine = await rows(db, sql`${TASK_SELECT(today)}
+    const mine = await rows(db, sql`${TASK_SELECT}
        where t.assignee_id = ${me}
-         and ((t.status = 'open' and t.due_date <= ${today}::date + 7) or (t.status <> 'open' and t.due_date = ${today}::date))
-       order by (t.status = 'open') desc, t.due_date, t.title`);
+         and (t.status = 'open' or (t.completed_at at time zone 'Asia/Kolkata')::date = ${today}::date)
+       order by (t.status = 'open') desc, t.due_date, t.due_time nulls last, t.title`);
     const maintenance = await scheduleRows(db, today,
       sql`s.active and s.assignee_id = ${me} and s.next_due_on <= ${today}::date + s.remind_days_before`);
     res.json({ data: { today, tasks: mine, maintenance } });
@@ -303,20 +327,21 @@ export function opsRouter(db: DB) {
   r.get('/tasks', requirePerm('ops:read'), async (req, res) => {
     const q = zListQuery.extend({
       status: z.enum(TASK_STATUSES).optional(), assignee_id: zId.optional(), from: zDate.optional(), to: zDate.optional(),
-      view: z.enum(['today', 'overdue']).optional(),
+      view: z.enum(['today', 'overdue']).optional(), project_id: zId.optional(),
     }).parse(req.query);
     const today = istDate();
     await ensureTasks(db, today);
     const like = q.q ? `%${q.q}%` : null;
-    const data = await rows(db, sql`${TASK_SELECT(today)}
+    const data = await rows(db, sql`${TASK_SELECT}
        where (${q.status ?? null}::text is null or t.status::text = ${q.status ?? null})
          and (${q.assignee_id ?? null}::uuid is null or t.assignee_id = ${q.assignee_id ?? null}::uuid)
          and (${q.from ?? null}::date is null or t.due_date >= ${q.from ?? null}::date)
          and (${q.to ?? null}::date is null or t.due_date <= ${q.to ?? null}::date)
          and (${like}::text is null or t.title ilike ${like})
          and (${q.view ?? null}::text is distinct from 'today' or t.due_date = ${today}::date)
-         and (${q.view ?? null}::text is distinct from 'overdue' or (t.status = 'open' and t.due_date < ${today}::date))
-       order by t.due_date desc, t.title
+         and (${q.view ?? null}::text is distinct from 'overdue' or ${LATE})
+         and (${q.project_id ?? null}::uuid is null or t.project_id = ${q.project_id ?? null}::uuid)
+       order by t.due_date desc, t.due_time nulls last, t.title
        limit ${q.limit} offset ${q.offset}`);
     sendList(req, res, data, 'tasks');
   });
@@ -325,15 +350,16 @@ export function opsRouter(db: DB) {
   r.post('/tasks', requirePerm('ops:manage'), async (req, res) => {
     const b = z.object({
       title: zText(150), description: emptyToNull(z.string().trim().max(2000)).optional(), assignee_id: zId,
-      due_date: emptyToNull(zDate).optional(), checklist: z.array(zText(200)).max(30).default([]),
+      due_date: emptyToNull(zDate).optional(), due_time: emptyToNull(zClock).optional(),
+      checklist: z.array(zText(200)).max(30).default([]),
     }).parse(req.body);
     const today = istDate();
     const row = await inTx(db, req, async (ctx) => {
       await activeUser(ctx.tx, b.assignee_id);
       const dueDate = b.due_date ?? today;
-      if (dueDate < today) throw badRequest('The due date cannot be in the past');
+      if (dueDate < today) throw badRequest('The deadline cannot be in the past');
       const [task] = await ctx.tx.insert(tasks).values({
-        title: b.title, description: b.description ?? null, assigneeId: b.assignee_id, dueDate,
+        title: b.title, description: b.description ?? null, assigneeId: b.assignee_id, dueDate, dueTime: b.due_time ?? null,
         checklist: b.checklist.map((text) => ({ text, done: false })), createdBy: ctx.user?.id ?? null,
       }).returning();
       await audit(ctx, 'task', task!.id, 'create', null, { title: b.title, assigneeId: b.assignee_id, dueDate });
@@ -344,7 +370,7 @@ export function opsRouter(db: DB) {
 
   r.get('/tasks/:id', requireAuth, async (req, res) => {
     const id = zId.parse(req.params.id);
-    const [task] = await rows<{ assignee_id: string }>(db, sql`${TASK_SELECT(istDate())} where t.id = ${id}`);
+    const [task] = await rows<{ assignee_id: string }>(db, sql`${TASK_SELECT} where t.id = ${id}`);
     must(task, 'Task');
     if (task!.assignee_id !== req.user!.id && !can(req.user!.role, 'ops:read')) throw forbidden('This task is assigned to someone else');
     res.json({ data: task });
@@ -403,10 +429,13 @@ export function opsRouter(db: DB) {
     res.json({ data: row });
   });
 
-  /** Give an open task to someone else, or move its date. */
+  /** Give an open task to someone else, or move its deadline. */
   r.patch('/tasks/:id', requirePerm('ops:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ assignee_id: zId.optional(), due_date: zDate.optional() }).parse(req.body);
+    const b = z.object({
+      assignee_id: zId.optional(), due_date: zDate.optional(), due_time: emptyToNull(zClock).optional(),
+      start_date: emptyToNull(zDate).optional(),
+    }).parse(req.body);
     const row = await inTx(db, req, async (ctx) => {
       const task = await lockTask(ctx.tx, id);
       if (task.status !== 'open') throw conflict(`This task is already ${task.status}`);
@@ -416,8 +445,14 @@ export function opsRouter(db: DB) {
         patch.assigneeId = b.assignee_id;
       }
       if (b.due_date && b.due_date !== task.dueDate) {
-        if (b.due_date < istDate()) throw badRequest('The due date cannot be moved into the past');
+        if (b.due_date < istDate()) throw badRequest('The deadline cannot be moved into the past');
+        await deadlineFitsProject(ctx.tx, task.projectId, b.due_date);
         patch.dueDate = b.due_date;
+      }
+      if (b.due_time !== undefined) patch.dueTime = b.due_time;
+      if (b.start_date !== undefined) {
+        if (b.start_date && b.start_date > (patch.dueDate ?? task.dueDate)) throw badRequest('The start date cannot be after the deadline');
+        patch.startDate = b.start_date;
       }
       const [updated] = await ctx.tx.update(tasks).set(patch).where(eq(tasks.id, id)).returning();
       await audit(ctx, 'task', id, 'update', { assigneeId: task.assigneeId, dueDate: task.dueDate }, { assigneeId: updated!.assigneeId, dueDate: updated!.dueDate });
@@ -611,21 +646,21 @@ export function opsRouter(db: DB) {
     const since = addDays(today, -13);
     const [todayTotals] = await rows(db, sql`
       select count(*)::int as total, count(*) filter (where t.status = 'done')::int as done,
-             count(*) filter (where t.status = 'open')::int as open, count(*) filter (where t.status = 'skipped')::int as skipped
+             count(*) filter (where t.status = 'open' and not ${LATE})::int as open, count(*) filter (where t.status = 'skipped')::int as skipped
         from tasks t where t.due_date = ${today}::date`);
     const [overdue] = await rows(db, sql`
-      select count(*)::int as count, min(t.due_date) as oldest from tasks t where t.status = 'open' and t.due_date < ${today}::date`);
+      select count(*)::int as count, min(t.due_date) as oldest from tasks t where ${LATE}`);
     const byDay = await rows(db, sql`
       select t.due_date as day, count(*) filter (where t.status = 'done')::int as done,
              count(*) filter (where t.status = 'skipped')::int as skipped, count(*) filter (where t.status = 'open')::int as open
         from tasks t where t.due_date between ${since}::date and ${today}::date group by t.due_date order by t.due_date`);
     const byPerson = await rows(db, sql`
       select u.id as user_id, u.name,
-             count(*) filter (where t.status = 'open' and t.due_date = ${today}::date)::int as open_today,
-             count(*) filter (where t.status = 'open' and t.due_date < ${today}::date)::int as overdue,
+             count(*) filter (where t.status = 'open' and t.due_date = ${today}::date and not ${LATE})::int as open_today,
+             count(*) filter (where ${LATE})::int as overdue,
              count(*) filter (where t.status = 'done' and t.due_date >= ${addDays(today, -29)}::date)::int as done_30_days,
              count(*) filter (where t.status = 'done' and t.due_date >= ${addDays(today, -29)}::date
-                                and (t.completed_at at time zone 'Asia/Kolkata')::date <= t.due_date)::int as on_time_30_days,
+                                and (t.completed_at at time zone 'Asia/Kolkata') <= (t.due_date + coalesce(t.due_time, time '23:59:59')))::int as on_time_30_days,
              count(*) filter (where t.due_date between ${addDays(today, -29)}::date and ${today}::date)::int as assigned_30_days
         from tasks t join users u on u.id = t.assignee_id
        where t.due_date >= ${addDays(today, -29)}::date or t.status = 'open'

@@ -8,7 +8,7 @@ import {
   ATTENDANCE_STATUSES, BILL_DOC_TYPES, BILL_STATUSES, CHANNELS, EMPLOYEE_STATUSES, EMPLOYMENT_TYPES, GRN_STATUSES,
   INTERVAL_UNITS, INTERVIEW_MODES, INTERVIEW_RESULTS, INTERVIEW_STATUSES, INVOICE_DOC_TYPES, INVOICE_STATUSES, ITEM_TYPES,
   LEAD_ACTIVITY_TYPES, LEAD_STAGES, LOCATION_TYPES, MOVEMENT_TYPES, OPENING_STATUSES, ORDER_STATUSES, PARTY_TYPES,
-  PAYMENT_DIRECTIONS, PAYMENT_MODES, PO_STATUSES, REJECT_REASONS, ROLES, TASK_FREQUENCIES, TASK_STATUSES,
+  PAYMENT_DIRECTIONS, PAYMENT_MODES, PO_STATUSES, PROJECT_STATUSES, REJECT_REASONS, ROLES, TASK_FREQUENCIES, TASK_STATUSES,
 } from '@radcore/shared';
 
 // Money is numeric(12,2) in INR, quantities numeric(12,3) (PRD section 8).
@@ -924,6 +924,8 @@ export const taskTemplates = pgTable('task_templates', {
   monthDay: smallint('month_day'),
   assigneeId: uuid('assignee_id').notNull().references(() => users.id),
   checklist: jsonb('checklist').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  /** Finish-by time on the day; null means any time that day. */
+  dueTime: time('due_time'),
   startDate: date('start_date').notNull(),
   active: boolean('active').notNull().default(true),
   ...stamps,
@@ -938,10 +940,16 @@ export const tasks = pgTable('tasks', {
   templateId: uuid('template_id').references(() => taskTemplates.id),
   /** The day of the schedule this task was created for. Null for tasks raised by hand. */
   scheduledFor: date('scheduled_for'),
+  /** Set for tasks that belong to a project. */
+  projectId: uuid('project_id').references((): AnyPgColumn => projects.id),
   title: text('title').notNull(),
   description: text('description'),
   assigneeId: uuid('assignee_id').notNull().references(() => users.id),
+  /** When work is planned to begin (project tasks); null means whenever. */
+  startDate: date('start_date'),
+  /** The deadline: this day, by `dueTime` if one is set, otherwise by the end of the day. */
   dueDate: date('due_date').notNull(),
+  dueTime: time('due_time'),
   status: taskStatusEnum('status').notNull().default('open'),
   checklist: jsonb('checklist').$type<{ text: string; done: boolean }[]>().notNull().default(sql`'[]'::jsonb`),
   completedAt: ts('completed_at'),
@@ -953,7 +961,59 @@ export const tasks = pgTable('tasks', {
   unique('tasks_template_day_uq').on(t.templateId, t.scheduledFor),
   index('tasks_assignee_idx').on(t.assigneeId, t.status, t.dueDate),
   index('tasks_due_idx').on(t.dueDate),
+  index('tasks_project_idx').on(t.projectId),
   check('tasks_closed_chk', sql`(${t.status} = 'open') = (${t.completedAt} is null)`),
+  check('tasks_start_chk', sql`${t.startDate} is null or ${t.startDate} <= ${t.dueDate}`),
+]);
+
+// ----------------------------------------------------------------------------
+// Projects and resource allocation (Operations)
+// ----------------------------------------------------------------------------
+export const projectStatusEnum = pgEnum('project_status', PROJECT_STATUSES);
+
+export const projects = pgTable('projects', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectNo: text('project_no').notNull().unique(),
+  name: text('name').notNull(),
+  description: text('description'),
+  /** The person answerable for the project. */
+  ownerId: uuid('owner_id').notNull().references(() => users.id),
+  startDate: date('start_date').notNull(),
+  deadline: date('deadline'),
+  status: projectStatusEnum('status').notNull().default('planned'),
+  completedOn: date('completed_on'),
+  ...stamps,
+}, (t) => [
+  check('projects_deadline_chk', sql`${t.deadline} is null or ${t.deadline} >= ${t.startDate}`),
+  check('projects_done_chk', sql`(${t.status} = 'done') = (${t.completedOn} is not null)`),
+]);
+
+/**
+ * Who and what is committed to which work, for which dates, and for how much of their time.
+ * A resource is a person (employee) or a machine or vehicle (asset). The work is a project,
+ * or a short label for anything that is not a project ("Showroom duty", "Diwali stall").
+ */
+export const allocations = pgTable('allocations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').references(() => projects.id),
+  label: text('label'),
+  employeeId: uuid('employee_id').references(() => employees.id),
+  assetId: uuid('asset_id').references(() => assets.id),
+  fromDate: date('from_date').notNull(),
+  toDate: date('to_date').notNull(),
+  /** Share of the resource's time, 1 to 100. */
+  percent: integer('percent').notNull().default(100),
+  role: text('role'),
+  notes: text('notes'),
+  ...stamps,
+}, (t) => [
+  index('allocations_employee_idx').on(t.employeeId, t.fromDate),
+  index('allocations_asset_idx').on(t.assetId, t.fromDate),
+  index('allocations_project_idx').on(t.projectId),
+  check('allocations_one_resource_chk', sql`(${t.employeeId} is not null) <> (${t.assetId} is not null)`),
+  check('allocations_work_chk', sql`${t.projectId} is not null or ${t.label} is not null`),
+  check('allocations_dates_chk', sql`${t.toDate} >= ${t.fromDate}`),
+  check('allocations_percent_chk', sql`${t.percent} between 1 and 100`),
 ]);
 
 export const assets = pgTable('assets', {

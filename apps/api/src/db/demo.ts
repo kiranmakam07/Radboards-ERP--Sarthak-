@@ -7,7 +7,7 @@ import { createApplicant, createEmployee, hireApplicant, moveApplicant, saveAtte
 import { captureLead, sourceIdByName } from '../modules/leads';
 import { createParty } from '../modules/parties';
 import { rows, sql, type DB } from './client';
-import { assets, items, jobOpenings, maintenanceSchedules, taskTemplates, tasks, users } from './schema';
+import { allocations, assets, items, jobOpenings, maintenanceSchedules, projects, taskTemplates, tasks, users } from './schema';
 
 /**
  * Sample data for trying the system out. Used ONLY by `npm run demo`, which runs on a
@@ -153,6 +153,31 @@ async function seedPeopleAndOperations(ctx: Ctx): Promise<void> {
     { assetNo: 'AST003', name: 'Air Compressor', category: 'Machine', location: 'Workshop', purchaseDate: '2024-01-20', purchaseCost: '65000.00' },
   ]).returning({ id: assets.id });
   await tx.execute(sql`insert into number_series (doc_type, fy, prefix, next_value) values ('asset', 'ALL', 'AST', 4)`);
+
+  // ---- a project with its tasks, and who is allocated where ----
+  const [stall] = await tx.insert(projects).values([
+    { projectNo: 'PRJ001', name: 'Diwali exhibition stall', description: 'Stall at the Pune sports expo: 40 display boards, banners and a demo corner.', ownerId: user('sales'), startDate: addDays(today, -6), deadline: addDays(today, 24), status: 'active' },
+    { projectNo: 'PRJ002', name: 'New product photos for the website', ownerId: user('marketing'), startDate: addDays(today, 5), deadline: addDays(today, 35), status: 'planned' },
+  ]).returning({ id: projects.id });
+  await tx.execute(sql`insert into number_series (doc_type, fy, prefix, next_value) values ('project', 'ALL', 'PRJ', 3)`);
+  await tx.insert(tasks).values([
+    { projectId: stall!.id, title: 'Book the stall and pay the deposit', assigneeId: user('sales'), startDate: addDays(today, -6), dueDate: addDays(today, -3), status: 'done', completedAt: new Date(`${addDays(today, -4)}T09:00:00Z`), completedBy: user('sales') },
+    { projectId: stall!.id, title: 'Order banners and standees', assigneeId: user('marketing'), startDate: addDays(today, -4), dueDate: addDays(today, -1), checklist: [{ text: 'Artwork approved', done: true }, { text: 'Printer paid', done: false }] },
+    { projectId: stall!.id, title: 'Build 40 display boards', assigneeId: user('stores'), startDate: addDays(today, -2), dueDate: addDays(today, 14), dueTime: '18:00' },
+    { projectId: stall!.id, title: 'Arrange the transport', assigneeId: user('operations'), dueDate: addDays(today, 20) },
+    { projectId: stall!.id, title: 'Set up the stall', assigneeId: user('store'), startDate: addDays(today, 22), dueDate: addDays(today, 24), dueTime: '09:00' },
+  ]);
+  const [sunita, amit, ganesh] = people;
+  await tx.insert(allocations).values([
+    { projectId: stall!.id, employeeId: ganesh!.id, fromDate: addDays(today, -2), toDate: addDays(today, 14), percent: 60, role: 'Building the display boards' },
+    { label: 'Stores and dispatch', employeeId: ganesh!.id, fromDate: addDays(today, -2), toDate: addDays(today, 30), percent: 40 },
+    { projectId: stall!.id, employeeId: amit!.id, fromDate: addDays(today, -6), toDate: addDays(today, 24), percent: 30, role: 'Runs the project' },
+    { label: 'Dealer visits', employeeId: amit!.id, fromDate: addDays(today, 0), toDate: addDays(today, 40), percent: 70 },
+    { projectId: stall!.id, employeeId: sunita!.id, fromDate: addDays(today, 22), toDate: addDays(today, 24), percent: 100, role: 'Sets up and runs the stall' },
+    { label: 'Showroom', employeeId: sunita!.id, fromDate: addDays(today, -6), toDate: addDays(today, 40), percent: 100 },
+    { projectId: stall!.id, assetId: router!.id, fromDate: addDays(today, -2), toDate: addDays(today, 14), percent: 100, role: 'Cutting the boards' },
+    { projectId: stall!.id, assetId: van!.id, fromDate: addDays(today, 22), toDate: addDays(today, 24), percent: 100, role: 'Moving the stall' },
+  ]);
   await tx.insert(maintenanceSchedules).values([
     { assetId: router!.id, title: 'Full service', intervalCount: 6, intervalUnit: 'months', lastDoneOn: addMonths(addDays(today, -4), -6), nextDueOn: addDays(today, -4), assigneeId: user('operations'), remindDaysBefore: 14, instructions: 'Call the vendor engineer. Check spindle bearings and rails.' },
     { assetId: van!.id, title: 'Insurance renewal', intervalCount: 12, intervalUnit: 'months', nextDueOn: addDays(today, 9), assigneeId: user('accounts'), remindDaysBefore: 30 },

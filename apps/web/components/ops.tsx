@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { WEEKDAY_LABELS, istDate } from '@radcore/shared';
 import { ActionButton, Badge, ErrorBox, Form, date, dateTime } from '@/components/ui';
@@ -30,6 +31,12 @@ export function Due({ schedule: s }: { schedule: Record<string, any> }) {
   return <><Badge value={s.state === 'ok' ? 'on_track' : s.state} /> <span className="small">{far}</span></>;
 }
 
+/** "Today", "Today by 18:00", "12-10-2026 by 18:00": a task's deadline in words. */
+export function deadlineText(task: Record<string, any>): string {
+  const day = task.due_date === istDate() ? 'Today' : date(task.due_date);
+  return task.due_time ? `${day} by ${task.due_time}` : day;
+}
+
 /** One task, workable in place: tick the checklist, then finish it or say why it could not be done. */
 export function TaskCard({ task, onChange, showAssignee }: { task: any; onChange: () => void; showAssignee?: boolean }) {
   const [busy, setBusy] = useState(false);
@@ -57,9 +64,10 @@ export function TaskCard({ task, onChange, showAssignee }: { task: any; onChange
         <div className="actions">
           {task.overdue ? <Badge value="overdue" /> : null}
           {!open ? <Badge value={task.status} /> : null}
-          <span className="muted small">{task.due_date === istDate() ? 'Today' : `Due ${date(task.due_date)}`}{showAssignee ? ` · ${task.assignee_name}` : ''}</span>
+          <span className="muted small">Deadline: {deadlineText(task)}{showAssignee ? ` · ${task.assignee_name}` : ''}</span>
         </div>
       </div>
+      {task.project_id ? <p className="small">Project: <Link href={`/ops/projects/${task.project_id}`}>{task.project_no} · {task.project_name}</Link></p> : null}
       {task.description ? <p className="muted small">{task.description}</p> : null}
       {task.checklist.length > 0 && (
         <ul className="checklist">

@@ -13,7 +13,7 @@ import { rows, type DB } from '../db/client';
 import { applicantActivities, applicants, attendance, employees, interviews, jobOpenings, users } from '../db/schema';
 import { parseBankDate, parseCsv } from '../lib/bank-csv';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zHttpUrl, zId, zListQuery, zMoney, zPhone, zText, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zClock, zDate, zHttpUrl, zId, zListQuery, zMoney, zPhone, zText, type Ctx } from '../lib/http';
 
 export type Applicant = typeof applicants.$inferSelect;
 export type Employee = typeof employees.$inferSelect;
@@ -21,7 +21,6 @@ type Interview = typeof interviews.$inferSelect;
 
 const words = (v: string) => v.replace(/_/g, ' ');
 const zWhen = z.coerce.date();
-const zClock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be a time like 09:30');
 const zYears = z.coerce.number().min(0).max(60).transform((n) => n.toFixed(1));
 const when = (d: Date) =>
   d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
