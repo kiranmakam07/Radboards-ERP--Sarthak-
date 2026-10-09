@@ -150,7 +150,8 @@ export default function AttendancePage() {
       <Card title="The month, by employee" actions={
         <>
           <label>Month <input type="month" value={month} max={today.slice(0, 7)} onChange={(e) => e.target.value && setMonth(e.target.value)} style={{ width: 'auto' }} /></label>
-          <a className="button" href={`/api/hr/attendance/summary?month=${month}&format=csv`}>Export CSV</a>
+          <a className="button" href={`/api/hr/attendance/summary?month=${month}&format=xlsx`}>Excel</a>
+          <a className="button" href={`/api/hr/attendance/summary?month=${month}&format=csv`}>CSV</a>
         </>
       }>
         <Loading loading={summary.loading} error={summary.error} />

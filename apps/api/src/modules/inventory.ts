@@ -13,7 +13,7 @@ import {
 } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
 import {
-  emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSignedQty, zText, type Ctx,
+  emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSignedQty, zText, wantsFile, type Ctx,
 } from '../lib/http';
 
 async function activeLocation(tx: DB, id: string) {
@@ -196,7 +196,7 @@ export function inventoryRouter(db: DB) {
       select i.id as item_id, i.sku, i.name, i.item_type, i.unit, v.qty, v.avg_cost, v.value
         from v_item_valuation v join items i on i.id = v.item_id
        where v.qty <> 0 or v.value <> 0 order by i.name`);
-    if (req.query.format === 'csv') return sendList(req, res, data, 'stock-valuation');
+    if (wantsFile(req)) return sendList(req, res, data, 'stock-valuation');
     res.json({ data, total_value: money(data.reduce((a, d) => a.plus(d.value), D(0))) });
   });
 

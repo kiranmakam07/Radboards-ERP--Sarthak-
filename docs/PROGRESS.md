@@ -75,14 +75,14 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.9 | HSN/SAC + rate on every item; place-of-supply rule in one tested function | ✅ | `packages/shared/src/gst.ts` |
 | 7.9 | Invoice numbering (consecutive per FY, ≤ 16 chars, separate series) | ✅ | `INV/26-27/00001`, `CN/…`, `DN/…` |
 | 7.9 | Tax invoice content (B2B and B2C) | ✅ | Total in words, HSN summary, tax split |
-| 7.9 | GSTR-1 (B2B, B2CL, B2CS, CDNR, CDNUR, HSN, documents issued) | 🟡 | JSON + CSV per section. **Not yet the portal's exact upload file** — CA must check the first filing |
+| 7.9 | GSTR-1 (B2B, B2CL, B2CS, CDNR, CDNUR, HSN, documents issued) | 🟡 | On screen, CSV and Excel per section, and **a file for the GST portal** (GST → "File for the GST portal"): the JSON layout of the portal's offline tool, with the HSN table in its two parts (B2B / B2C) as filed since 2025, portal unit codes and document codes. Tested to agree with the on-screen return and with GSTR-3B. **Not yet uploaded to the real portal**: the first real upload is the proof, and the layout was taken from published descriptions of the offline tool, not from GSTN's own schema file |
 | 7.9 | GSTR-3B summary | ✅ | Ties to the GST ledger balances (tested) |
 | 7.9 | E-invoice / e-way bill | ⬜ | V1.3; `irn`, `eway_bill_no` columns exist |
 | 7.10 | Sales, marketing, accounts dashboards (live, date range) | ✅ | Charts with the figures on them and a table behind each ("Show as table"): sales and leads per day, sales by channel, leads by stage and source, top items and dealers, dealer outstanding against credit limit, walk-ins by hour, receivables by age, expenses by category. Click-through to lists is partial |
 | 7.10 | Home screen: the business as a flow | ✅ | Enquiry → lead → quote → delivery → invoice → money in, and purchase order → QC → stock → bill, each step showing how many are waiting and linking to that list. Each role sees only its own steps |
 | 7.10 | Cost per lead (ad spend) | ✅ | CRM → Ad spend: entries by source and, if wanted, by campaign. The marketing dashboard divides it by the leads of the same days: cost per lead and per conversion, by source and by campaign. A record for marketing only; the payment is still booked under Expenses |
 | 7.10 | Stores dashboard and the owner's one-page summary | ✅ | Stores: stock value by location and kind, running low, orders with suppliers, waiting QC, goods in and out per day, fastest sellers, stock not moving for 90 days. Owner: sales, collections, profit, cash, receivables, payables, stock, GST, and what needs attention across customers, stores, people and operations. Both checked against the books in tests |
-| 7.11 | Export every list/report | 🟡 | CSV everywhere (`?format=csv`). Excel/PDF export not built |
+| 7.11 | Export every list/report | ✅ | Excel (`?format=xlsx`) and CSV on every list and report. The Excel files have real numbers and dates, and were opened with an independent Excel reader to check them. PDF is by printing from the browser |
 | 7.11 | Print formats | 🟡 | Tax invoice + credit note (A4, thermal), delivery challan, payment receipt / voucher. Quote, PO and purchase bill print as plain pages |
 | 7.12 | Vyapar migration, dry run, parallel run | ⬜ | Needs sample Vyapar exports |
 | 7.13 | Company profile, users, roles, masters, period lock | ✅ | |
@@ -213,7 +213,6 @@ Items 6 and 7 below are covered by the approval above.
 Vyapar data and the user list only when deployment is close.** Do not ask for those before then.
 
 Still to build in the app, in rough order:
-5. Portal-format GSTR-1 file; Excel export of lists.
 6. Matching one bank line to several book entries (card-machine payouts).
 7. Shopify orders coming in automatically, then Amazon and Flipkart.
 8. CRM, once real leads flow (Sarthak: basic structure first, optimise later): sending WhatsApp replies from
@@ -266,6 +265,7 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |
 | 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. |
 | 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
+| 2026-10-10 | Excel export on every list and report (`lib/xlsx.ts`, no library); GSTR-1 file for the GST portal (`/api/gst/gstr1/portal-file`). |
 | 2026-10-10 | Credit note credit against another invoice: `credit_applications` (migration `0008`, which also extends `v_invoice_outstanding`), `credits.ts`, invoice page, 6 tests. No journal entry is involved: it only changes which invoice is open. |
 | 2026-10-10 | Stores dashboard and owner's summary (`/api/dashboards/stores`, `/owner`); ad spend with cost per lead (`ad_spends`, migration `0007_ad_spend`, CRM → Ad spend). |
 | 2026-10-10 | Year-end close: `fiscal_closes` table (migration `0006_year_end_close`), `closeYear` / `reopenYear` in `accounting.ts`, Financial years tab, 5 tests. |

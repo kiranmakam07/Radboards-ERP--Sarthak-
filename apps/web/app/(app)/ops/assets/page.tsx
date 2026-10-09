@@ -19,7 +19,7 @@ export default function AssetsPage() {
 
   return (
     <Page title="Assets & maintenance" actions={<CsvLink href={path} />}>
-      <Card title="Maintenance due now or soon" actions={<a href="/api/ops/maintenance?format=csv">Export all schedules</a>}>
+      <Card title="Maintenance due now or soon" actions={<a href="/api/ops/maintenance?format=xlsx">Export all schedules</a>}>
         <Loading loading={due.loading} error={due.error} />
         <Table rows={due.data?.data} empty="Nothing is due. Reminders appear here ahead of each due date." columns={[
           { key: 'asset_name', title: 'Asset', render: (r) => <Link href={`/ops/assets/${r.asset_id}`}>{r.asset_name}</Link> },
