@@ -11,7 +11,9 @@ export const sub = (a: unknown, b: unknown) => Number((Number(a ?? 0) - Number(b
 export const date = (v: unknown) => formatDate(v ? String(v) : '');
 export const dateTime = (v: unknown) =>
   v ? new Date(String(v)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-export const label = (v: unknown) => String(v ?? '').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+const SHORT_FORMS = /\b(hr|upi|gst|qc|neft|rtgs|imps|emi)\b/gi;
+export const label = (v: unknown) =>
+  String(v ?? '').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()).replace(SHORT_FORMS, (w) => w.toUpperCase());
 
 export function Page({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
   return (
@@ -44,6 +46,7 @@ const TONES: Record<string, string> = {
   issued: 'green', paid: 'green', partly_paid: 'amber', unpaid: 'red', posted: 'green',
   sent: 'blue', partly_received: 'amber', received: 'amber', inwarded: 'green', closed: 'grey',
   pending: 'amber', approved: 'green', rejected: 'red',
+  matched: 'green', unmatched: 'amber', ignored: 'grey', switched_off: 'grey',
   applied: 'blue', shortlisted: 'blue', interview: 'amber', offered: 'amber', hired: 'green',
   open: 'blue', on_hold: 'amber', done: 'green', skipped: 'red', scheduled: 'blue', completed: 'green', no_show: 'red',
   pass: 'green', hold: 'amber', fail: 'red', active: 'green', left: 'grey', planned: 'grey',

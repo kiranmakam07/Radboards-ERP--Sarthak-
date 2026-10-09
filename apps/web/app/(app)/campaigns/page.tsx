@@ -33,7 +33,7 @@ export default function CampaignsPage() {
           { key: 'name', title: 'Campaign' },
           { key: 'source_name', title: 'Source' },
           { key: 'link', title: 'Public enquiry link', render: (r) => <a href={`/enquiry/${r.token}`} target="_blank" rel="noreferrer">{origin}/enquiry/{r.token}</a> },
-          { key: 'active', title: 'Status', render: (r) => <Badge value={r.active ? 'approved' : 'closed'} /> },
+          { key: 'active', title: 'Status', render: (r) => <Badge value={r.active ? 'active' : 'switched_off'} /> },
           { key: 'x', title: '', render: (r) => (
             <>
               <button type="button" onClick={() => setQrFor(qrFor === r.id ? null : r.id)}>QR code</button>{' '}
