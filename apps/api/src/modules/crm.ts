@@ -10,7 +10,7 @@ import { getSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { adSpends, campaigns, channelEvents, items, leadActivities, leadSources, leads, messageTemplates } from '../db/schema';
 import { AppError, badRequest, conflict, forbidden, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zText, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zText, wantsFile, type Ctx } from '../lib/http';
 import { captureLead, moveLead, sourceIdByName } from './leads';
 
 /**
@@ -411,7 +411,7 @@ export function crmRouter(db: DB, deps: CrmDeps = defaultDeps) {
        where (${q.from ?? null}::date is null or a.spend_date >= ${q.from ?? null}::date)
          and (${q.to ?? null}::date is null or a.spend_date <= ${q.to ?? null}::date)
        order by a.spend_date desc, a.created_at desc limit 2000`);
-    if (req.query.format === 'csv') return sendList(req, res, data, 'ad-spend');
+    if (wantsFile(req)) return sendList(req, res, data, 'ad-spend');
     const names = await rows(db, sql`
       select distinct l.source_id, l.source_detail as detail from leads l where l.source_detail is not null order by 2`);
     res.json({ data, campaign_names: names });

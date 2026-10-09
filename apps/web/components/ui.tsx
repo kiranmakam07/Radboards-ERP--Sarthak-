@@ -257,7 +257,13 @@ export function KV({ rows }: { rows: [string, ReactNode][] }) {
   );
 }
 
+/** Download what is on screen (with the same filters) as an Excel file or as CSV. */
 export function CsvLink({ href }: { href: string }) {
   const sep = href.includes('?') ? '&' : '?';
-  return <a className="button" href={`/api${href}${sep}format=csv&limit=5000`}>Export CSV</a>;
+  return (
+    <>
+      <a className="button" href={`/api${href}${sep}format=xlsx&limit=5000`}>Excel</a>
+      <a className="button" href={`/api${href}${sep}format=csv&limit=5000`}>CSV</a>
+    </>
+  );
 }

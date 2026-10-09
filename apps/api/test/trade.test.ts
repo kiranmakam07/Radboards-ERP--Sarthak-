@@ -595,6 +595,67 @@ describe('GST returns', () => {
     expect(docs.to_no).toMatch(/00006$/);
     const hsnCsv = await accounts.get('/api/gst/gstr1?section=hsn&format=csv').expect(200);
     expect(hsnCsv.text).toContain('950699');
+    // The same lists come out as Excel files too (an .xlsx is a zip, which starts with "PK").
+    for (const path of ['/api/gst/gstr1?section=b2b&format=xlsx', '/api/sales/invoices?format=xlsx', '/api/accounting/reports/trial-balance?format=xlsx']) {
+      const xlsx = await accounts.get(path).buffer(true).parse((res, done) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => done(null, Buffer.concat(chunks)));
+      }).expect(200);
+      expect(xlsx.headers['content-type']).toContain('spreadsheetml');
+      expect(xlsx.headers['content-disposition']).toMatch(/\.xlsx"$/);
+      expect((xlsx.body as Buffer).subarray(0, 2).toString()).toBe('PK');
+      expect((xlsx.body as Buffer).length).toBeGreaterThan(1000);
+    }
+  });
+
+  it('writes the month as the file the GST portal takes, agreeing with the return on screen', async () => {
+    const accounts = await w.as('accounts');
+    const month = TODAY.slice(0, 7);
+    const res = await accounts.get(`/api/gst/gstr1/portal-file?month=${month}`).expect(200);
+    const f = res.body;
+    expect(res.headers['content-disposition']).toContain(`GSTR1_${gstin('27', 'AAPFU0939F')}_${month.slice(5)}${month.slice(0, 4)}.json`);
+    expect(f).toMatchObject({ gstin: gstin('27', 'AAPFU0939F'), fp: `${month.slice(5)}${month.slice(0, 4)}` });
+
+    // B2B: one buyer, the dealer in Karnataka, with both invoices; another state, so IGST only.
+    expect(f.b2b).toHaveLength(1);
+    expect(f.b2b[0].ctin).toBe(gstin('29', 'DEALR1234B'));
+    expect(f.b2b[0].inv).toHaveLength(2);
+    const all = f.b2b[0].inv.flatMap((i: { itms: { num: number; itm_det: Record<string, number> }[] }) => i.itms);
+    expect(f.b2b[0].inv[0]).toMatchObject({ pos: '29', rchrg: 'N', inv_typ: 'R' });
+    expect(f.b2b[0].inv[0].idt).toBe(`${TODAY.slice(8)}-${TODAY.slice(5, 7)}-${TODAY.slice(0, 4)}`);
+    expect(all.reduce((sum: number, i: { itm_det: { txval: number } }) => sum + i.itm_det.txval, 0)).toBe(31500);
+    expect(all.every((i: { itm_det: Record<string, number> }) => 'iamt' in i.itm_det && !('camt' in i.itm_det))).toBe(true);
+    expect(all.map((i: { num: number }) => i.num).sort()).toEqual(expect.arrayContaining([1201, 1801]));
+    // The dealer's credit note.
+    expect(f.cdnr[0].nt[0]).toMatchObject({ ntty: 'C', pos: '29' });
+    expect(f.cdnr[0].nt[0].itms.reduce((sum: number, i: { itm_det: { iamt: number } }) => sum + i.itm_det.iamt, 0)).toBe(720);
+    // Counter sales inside the state: CGST and SGST, summarised by rate.
+    expect(f.b2cs.find((r: { rt: number }) => r.rt === 18)).toEqual({ sply_ty: 'INTRA', pos: '27', typ: 'OE', txval: 5200, rt: 18, camt: 468, samt: 468, csamt: 0 });
+
+    // The HSN summary is filed in two parts; together they are the whole of it. A service carries no quantity.
+    const screen = (await accounts.get('/api/gst/gstr1').expect(200)).body.data;
+    const taxable = (list: { txval: number }[]) => Math.round(list.reduce((sum, r) => sum + r.txval, 0) * 100);
+    expect(taxable(f.hsn.hsn_b2b) + taxable(f.hsn.hsn_b2c))
+      .toBe(Math.round(screen.hsn.reduce((sum: number, r: { taxable_value: string }) => sum + Number(r.taxable_value), 0) * 100));
+    expect(f.hsn.hsn_b2c.find((r: { hsn_sc: string }) => r.hsn_sc === '998729')).toMatchObject({ uqc: 'NA', qty: 0 });
+    expect(f.hsn.hsn_b2b[0]).toMatchObject({ num: 1, hsn_sc: '950699' });
+    expect(['NOS', 'PCS', 'SET', 'OTH']).toContain(f.hsn.hsn_b2b[0].uqc);
+
+    // Documents issued, under the portal's own codes: 1 = invoices, 5 = credit notes.
+    expect(f.doc_issue.doc_det.find((d: { doc_num: number }) => d.doc_num === 1).docs[0]).toMatchObject({ totnum: 6, cancel: 1, net_issue: 5 });
+    expect(f.doc_issue.doc_det.some((d: { doc_num: number }) => d.doc_num === 5)).toBe(true);
+
+    // Every rupee of output tax in the file is the output tax of GSTR-3B.
+    const tax = (d: Record<string, number>) => (d.iamt ?? 0) + (d.camt ?? 0) + (d.samt ?? 0);
+    const sold = [...all.map((i: { itm_det: Record<string, number> }) => i.itm_det), ...(f.b2cl ?? []).flatMap((p: any) => p.inv.flatMap((i: any) => i.itms.map((x: any) => x.itm_det))), ...f.b2cs];
+    const returned = [...f.cdnr.flatMap((c: any) => c.nt.flatMap((n: any) => n.itms.map((x: any) => x.itm_det))), ...(f.cdnur ?? []).flatMap((n: any) => n.itms.map((x: any) => x.itm_det))];
+    const fileTax = sold.reduce((sum, d) => sum + tax(d), 0) - returned.reduce((sum, d) => sum + tax(d), 0);
+    const g3b = (await accounts.get('/api/gst/gstr3b').expect(200)).body.data;
+    expect(Math.round(fileTax * 100)).toBe(Math.round(Number(g3b.outward.total_tax) * 100));
+
+    await accounts.get('/api/gst/gstr1/portal-file?month=2026-13').expect(400);
+    await (await w.as('store')).get(`/api/gst/gstr1/portal-file?month=${month}`).expect(403);
   });
 
   it('GSTR-3B ties to the GST ledgers', async () => {

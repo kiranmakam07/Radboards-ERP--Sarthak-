@@ -9,7 +9,7 @@ import { rows, type DB } from '../db/client';
 import { parties } from '../db/schema';
 import { badRequest, must } from '../lib/errors';
 import {
-  emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zMoney, zPhone, zStateCode, zText, type Ctx,
+  emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zMoney, zPhone, zStateCode, zText, wantsFile, type Ctx,
 } from '../lib/http';
 
 export type Party = typeof parties.$inferSelect;
@@ -167,7 +167,7 @@ export function partiesRouter(db: DB) {
          and (${q.from ?? null}::date is null or e.entry_date >= ${q.from ?? null}::date)
          and (${q.to ?? null}::date is null or e.entry_date <= ${q.to ?? null}::date)
        order by e.entry_date, e.entry_no, l.id`);
-    if (req.query.format === 'csv') return sendList(req, res, data, 'party-ledger');
+    if (wantsFile(req)) return sendList(req, res, data, 'party-ledger');
     res.json({ data, opening_balance: opening?.balance ?? '0.00', closing_balance: await partyBalance(db, id) });
   });
   return r;

@@ -10,7 +10,7 @@ import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { accounts, expenseCategories, expenses, fiscalCloses, journalEntries } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zHttpUrl, zId, zListQuery, zMoney, zMoneyPos, zText, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zDate, zHttpUrl, zId, zListQuery, zMoney, zMoneyPos, zText, wantsFile, type Ctx } from '../lib/http';
 
 /**
  * Expense (PRD 7.8): Dr expense account - Dr Input GST (when claimable) - Cr the cash/bank
@@ -368,7 +368,7 @@ export function accountingRouter(db: DB) {
          and (${q.from ?? null}::date is null or e.entry_date >= ${q.from ?? null}::date)
          and (${q.to ?? null}::date is null or e.entry_date <= ${q.to ?? null}::date)
        order by e.entry_date, e.entry_no, l.id`);
-    if (req.query.format === 'csv') return sendList(req, res, data, `ledger-${account!.code}`);
+    if (wantsFile(req)) return sendList(req, res, data, `ledger-${account!.code}`);
     res.json({ data, account, opening_balance: opening?.balance ?? '0.00', closing_balance: data.at(-1)?.balance ?? opening?.balance ?? '0.00' });
   });
 
@@ -381,7 +381,7 @@ export function accountingRouter(db: DB) {
         return { code: a.code, name: a.name, type: a.type, debit: net.gt(0) ? money(net) : '0.00', credit: net.lt(0) ? money(net.neg()) : '0.00' };
       })
       .filter((a) => a.debit !== '0.00' || a.credit !== '0.00');
-    if (req.query.format === 'csv') return sendList(req, res, data, 'trial-balance');
+    if (wantsFile(req)) return sendList(req, res, data, 'trial-balance');
     const totalDebit = data.reduce((s, a) => s.plus(a.debit), D(0));
     const totalCredit = data.reduce((s, a) => s.plus(a.credit), D(0));
     res.json({ data, as_of: q.as_of, total_debit: money(totalDebit), total_credit: money(totalCredit), balanced: totalDebit.eq(totalCredit) });
@@ -395,7 +395,7 @@ export function accountingRouter(db: DB) {
     const expense = totals.filter((a) => a.type === 'expense').map((a) => ({ code: a.code, name: a.name, amount: money(D(a.debit).minus(a.credit)) })).filter((a) => a.amount !== '0.00');
     const totalIncome = income.reduce((s, a) => s.plus(a.amount), D(0));
     const totalExpense = expense.reduce((s, a) => s.plus(a.amount), D(0));
-    if (req.query.format === 'csv') {
+    if (wantsFile(req)) {
       return sendList(req, res, [...income.map((a) => ({ section: 'Income', ...a })), ...expense.map((a) => ({ section: 'Expense', ...a }))], 'profit-and-loss');
     }
     res.json({ from: q.from, to: q.to, income, expense, total_income: money(totalIncome), total_expense: money(totalExpense), net_profit: money(totalIncome.minus(totalExpense)) });
@@ -420,7 +420,7 @@ export function accountingRouter(db: DB) {
     const sum = (list: { amount: string }[]) => list.reduce((s, a) => s.plus(a.amount), D(0));
     const totalAssets = sum(assets);
     const totalLE = sum(liabilities).plus(sum(equity));
-    if (req.query.format === 'csv') {
+    if (wantsFile(req)) {
       return sendList(req, res, [
         ...assets.map((a) => ({ section: 'Assets', ...a })), ...liabilities.map((a) => ({ section: 'Liabilities', ...a })),
         ...equity.map((a) => ({ section: 'Equity', ...a })),

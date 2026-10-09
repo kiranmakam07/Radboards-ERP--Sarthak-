@@ -10,7 +10,7 @@ import { rows, type DB } from '../db/client';
 import { accounts, bankStatementLines } from '../db/schema';
 import { parseStatement, StatementFormatError } from '../lib/bank-csv';
 import { badRequest, conflict, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zId, zText, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zDate, zId, zText, wantsFile, type Ctx } from '../lib/http';
 import { createExpense } from './accounting';
 import { createPayment } from './payments';
 
@@ -250,7 +250,7 @@ export function bankRouter(db: DB) {
          and (${q.to ?? null}::date is null or b.txn_date <= ${q.to ?? null}::date)
          and (${q.status ?? null}::text is null or b.status::text = ${q.status ?? null})
        order by b.txn_date desc, b.seq desc limit 2000`);
-    if (req.query.format === 'csv') return sendList(req, res, lines, 'bank-statement');
+    if (wantsFile(req)) return sendList(req, res, lines, 'bank-statement');
     const book = await unmatchedBookEntries(db, q.account_id, q.to ?? null);
     const [totals] = await rows<{ book_balance: string; unmatched_in: string; unmatched_out: string; unmatched_count: number }>(db, sql`
       select coalesce((select sum(l.debit) - sum(l.credit) from journal_lines l join journal_entries e on e.id = l.entry_id

@@ -62,7 +62,13 @@ export default function GstPage() {
           </Card>
         </>
       )}
-      <Card title="GSTR-1" actions={<a className="button" href={`/api/gst/gstr1?month=${month}&section=${section}&format=csv`}>Export this section (CSV)</a>}>
+      <Card title="GSTR-1" actions={
+        <>
+          <a className="button primary" href={`/api/gst/gstr1/portal-file?month=${month}`}>File for the GST portal</a>
+          <a className="button" href={`/api/gst/gstr1?month=${month}&section=${section}&format=xlsx`}>This section (Excel)</a>
+          <a className="button" href={`/api/gst/gstr1?month=${month}&section=${section}&format=csv`}>CSV</a>
+        </>
+      }>
         <div className="filters">
           {SECTIONS.map(([k, l]) => <button key={k} type="button" className={section === k ? 'primary' : undefined} onClick={() => setSection(k)}>{l}{g1.data?.data?.[k]?.length ? ` (${g1.data.data[k].length})` : ''}</button>)}
         </div>

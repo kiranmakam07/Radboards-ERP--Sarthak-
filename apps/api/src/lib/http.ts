@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { D, isIsoDate, isValidGstin, normaliseGstin, normalisePhone, type Permission, type Role } from '@radcore/shared';
 import type { DB } from '../db/client';
+import { toXlsx } from './xlsx';
 
 export type AuthUser = { id: string; name: string; role: Role; phone: string };
 
@@ -91,7 +92,7 @@ export const zListQuery = z.object({
   q: z.string().trim().max(100).optional(),
   limit: z.coerce.number().int().min(1).max(5000).default(100),
   offset: z.coerce.number().int().min(0).default(0),
-  format: z.enum(['json', 'csv']).default('json'),
+  format: z.enum(['json', 'csv', 'xlsx']).default('json'),
 });
 
 // ---- responses --------------------------------------------------------------
@@ -110,8 +111,17 @@ export function toCsv(data: Record<string, unknown>[], columns?: string[]): stri
   return lines.join('\r\n');
 }
 
-/** Every list/report can be exported with ?format=csv (PRD 7.11). */
+/** True when the caller asked for a file to download rather than JSON. */
+export const wantsFile = (req: Request): boolean => req.query.format === 'csv' || req.query.format === 'xlsx';
+
+/** Every list/report can be exported with ?format=csv or ?format=xlsx (PRD 7.11). */
 export function sendList(req: Request, res: Response, data: Record<string, unknown>[], name = 'export') {
+  if (req.query.format === 'xlsx') {
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${name}.xlsx"`);
+    res.send(toXlsx(data, undefined, name));
+    return;
+  }
   if (req.query.format === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${name}.csv"`);

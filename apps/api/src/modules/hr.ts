@@ -13,7 +13,7 @@ import { rows, type DB } from '../db/client';
 import { applicantActivities, applicants, attendance, employees, interviews, jobOpenings, users } from '../db/schema';
 import { parseBankDate, parseCsv } from '../lib/bank-csv';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zClock, zDate, zHttpUrl, zId, zListQuery, zMoney, zPhone, zText, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zClock, zDate, zHttpUrl, zId, zListQuery, zMoney, zPhone, zText, wantsFile, type Ctx } from '../lib/http';
 
 export type Applicant = typeof applicants.$inferSelect;
 export type Employee = typeof employees.$inferSelect;
@@ -856,7 +856,7 @@ export function hrRouter(db: DB) {
         left join attendance a on a.employee_id = e.id and a.date = ${day}::date
        where e.join_date <= ${day}::date and (e.left_on is null or e.left_on >= ${day}::date)
        order by e.department, e.name`);
-    if (req.query.format === 'csv') return sendList(req, res, data, `attendance-${day}`);
+    if (wantsFile(req)) return sendList(req, res, data, `attendance-${day}`);
     res.json({ data, date: day });
   });
 
@@ -902,7 +902,7 @@ export function hrRouter(db: DB) {
        where e.join_date <= span.d2 and (e.left_on is null or e.left_on >= span.d1)
        group by e.id, span.d1, span.d2
        order by e.department, e.name`);
-    if (req.query.format === 'csv') return sendList(req, res, data, `attendance-${month}`);
+    if (wantsFile(req)) return sendList(req, res, data, `attendance-${month}`);
     res.json({ data, month, from, to });
   });
 
