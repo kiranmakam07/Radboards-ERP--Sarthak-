@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import { PERMISSIONS, ROLES, setPermissionOverrides, type Permission, type PermissionOverrides, type Role } from '@radcore/shared';
 import type { DB } from '../db/client';
 import { settings } from '../db/schema';
 import { badRequest } from '../lib/errors';
@@ -30,6 +31,8 @@ export type SettingsMap = {
   lead_round_robin_last: string | null;
   /** YYYY-MM-DD: recurring tasks have been created up to and including this day. */
   tasks_generated_through: string | null;
+  /** Changes an admin has made to who holds which permission: { 'hr:read': ['owner', 'hr', 'accounts'] }. */
+  permission_overrides: Record<string, string[]>;
   /** Leave days a year for anyone without their own figure. */
   annual_leave_days: number;
   /** True when this database was filled with sample data (the demo, or a review copy). Shown as a banner. */
@@ -49,6 +52,7 @@ export const SETTING_DEFAULTS: SettingsMap = {
   default_follow_up_days: 1,
   lead_round_robin_last: null,
   tasks_generated_through: null,
+  permission_overrides: {},
   annual_leave_days: 12,
   sample_data: false,
 };
@@ -68,6 +72,17 @@ export async function setSetting<K extends keyof SettingsMap>(
     .insert(settings)
     .values({ key, value: value as unknown as object, updatedBy })
     .onConflictDoUpdate({ target: settings.key, set: { value: value as unknown as object, updatedBy, updatedAt: new Date() } });
+}
+
+/** Apply the admin's saved permission changes. Called when the API starts and after each change. */
+export async function loadPermissionOverrides(tx: DB): Promise<void> {
+  const saved = await getSetting(tx, 'permission_overrides');
+  const valid: PermissionOverrides = {};
+  for (const [key, roles] of Object.entries(saved ?? {})) {
+    // Ignore anything that no longer exists, so an old entry cannot break sign-in after an upgrade.
+    if (key in PERMISSIONS && Array.isArray(roles)) valid[key as Permission] = roles.filter((r): r is Role => (ROLES as readonly string[]).includes(r));
+  }
+  setPermissionOverrides(valid);
 }
 
 export async function getCompany(tx: DB): Promise<CompanyProfile> {
