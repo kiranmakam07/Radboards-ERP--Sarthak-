@@ -43,6 +43,13 @@
       "when": 1791546423367,
       "tag": "0005_crm_integrations",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791575133959,
+      "tag": "0006_year_end_close",
+      "breakpoints": true
     }
   ]
 }

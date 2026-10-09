@@ -2,11 +2,11 @@
 
 import { istDate } from '@radcore/shared';
 import { useState } from 'react';
-import { Card, CsvLink, Form, Loading, Page, Table, date, inr, label } from '@/components/ui';
-import { put, qs, useGet } from '@/lib/api';
+import { ActionButton, Badge, Card, CsvLink, Form, Loading, Page, Table, date, inr, label } from '@/components/ui';
+import { post, put, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
-const TABS = ['Trial balance', 'Profit & loss', 'Balance sheet', 'Receivables', 'Payables', 'Ledger / cash & bank book', 'Health check'] as const;
+const TABS = ['Trial balance', 'Profit & loss', 'Balance sheet', 'Receivables', 'Payables', 'Ledger / cash & bank book', 'Financial years', 'Health check'] as const;
 type Tab = (typeof TABS)[number];
 const today = () => istDate();
 
@@ -26,9 +26,11 @@ export default function ReportsPage() {
     Receivables: '/accounting/reports/receivables-ageing',
     Payables: '/accounting/reports/payables-ageing',
     'Ledger / cash & bank book': accountId ? `/accounting/reports/ledger${qs({ account_id: accountId, from, to })}` : null,
+    'Financial years': '/accounting/years',
     'Health check': '/accounting/reports/integrity',
   };
-  const { data, loading, error } = useGet<any>(paths[tab]);
+  const { data, loading, error, reload } = useGet<any>(paths[tab]);
+  const can = useCan();
   const amountList = (rows: any[]) => (
     <Table rows={rows} empty="Nothing to show." columns={[
       { key: 'code', title: 'Code' }, { key: 'name', title: 'Account' }, { key: 'amount', title: 'Amount', align: 'right', render: (r) => inr(r.amount) },
@@ -47,13 +49,13 @@ export default function ReportsPage() {
   );
 
   return (
-    <Page title="Books & reports" actions={paths[tab] && tab !== 'Health check' ? <CsvLink href={paths[tab]!} /> : null}>
+    <Page title="Books & reports" actions={paths[tab] && tab !== 'Health check' && tab !== 'Financial years' ? <CsvLink href={paths[tab]!} /> : null}>
       <div className="filters">
         {TABS.map((t) => <button key={t} type="button" className={tab === t ? 'primary' : undefined} onClick={() => setTab(t)}>{t}</button>)}
       </div>
       <div className="filters">
         {(tab === 'Profit & loss' || tab === 'Ledger / cash & bank book') && <label>From <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>}
-        {!['Receivables', 'Payables', 'Health check'].includes(tab) && <label>{tab === 'Profit & loss' || tab.startsWith('Ledger') ? 'To' : 'As of'} <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>}
+        {!['Receivables', 'Payables', 'Health check', 'Financial years'].includes(tab) && <label>{tab === 'Profit & loss' || tab.startsWith('Ledger') ? 'To' : 'As of'} <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>}
         {tab === 'Ledger / cash & bank book' && (
           <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
             <option value="">Pick an account…</option>
@@ -103,6 +105,29 @@ export default function ReportsPage() {
             { key: 'balance', title: 'Balance', align: 'right', render: (r) => inr(r.balance) },
           ]} />
         </>
+      )}
+
+      {tab === 'Financial years' && data?.data && (
+        <Card title="Closing the year">
+          <p className="muted small">
+            Closing a year moves its profit or loss into Retained Earnings with one entry on 31 March, and locks the year so nothing
+            more can be posted into it. Years are closed in order, after they have ended. The latest closed year can be reopened to correct something.
+          </p>
+          <Table rows={data.data} columns={[
+            { key: 'fy', title: 'Year' },
+            { key: 'from', title: 'From', render: (r) => date(r.from) }, { key: 'to', title: 'To', render: (r) => date(r.to) },
+            { key: 'income', title: 'Income', align: 'right', render: (r) => inr(r.income) },
+            { key: 'expense', title: 'Expenses', align: 'right', render: (r) => inr(r.expense) },
+            { key: 'profit', title: 'Profit / (loss)', align: 'right', render: (r) => <strong>{Number(r.profit) < 0 ? `(${inr(Math.abs(Number(r.profit)))})` : inr(r.profit)}</strong> },
+            { key: 'status', title: 'Status', render: (r) => (r.status === 'closed' ? <Badge value="closed" /> : r.status === 'current' ? <span className="badge blue">In progress</span> : <span className="badge amber">Ended, not closed</span>) },
+            { key: 'actions', title: '', render: (r) => (!can('accounts:write') ? null : r.can_close ? (
+              <ActionButton kind="primary" onClick={() => post(`/accounting/years/${r.fy}/close`)} onDone={reload}
+                confirm={`Close ${r.fy}? Its profit of ₹${inr(r.profit)} moves to Retained Earnings and the year is locked.`}>Close year</ActionButton>
+            ) : r.can_reopen ? (
+              <ActionButton onClick={() => post(`/accounting/years/${r.fy}/reopen`)} onDone={reload} confirm={`Reopen ${r.fy}? The closing entry will be reversed.`}>Reopen</ActionButton>
+            ) : null) },
+          ]} />
+        </Card>
       )}
 
       {tab === 'Health check' && <PeriodLock />}

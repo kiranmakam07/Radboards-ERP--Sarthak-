@@ -69,7 +69,7 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.8 | Bank statement import (CSV) and reconciliation | ✅ | Reads the usual Indian bank CSV layouts, skips rows already imported, matches automatically only when unambiguous, and can book the missing entry (expense, party receipt or payment, other account) from a statement line. One statement line matches one book entry: a single card-machine payout covering several receipts cannot be matched to all of them yet |
 | 7.8 | Immutable issued documents, period lock | ✅ | |
 | 7.8 | Opening balances | 🟡 | By manual journal (parties/accounts) and opening-stock entry. No import tool |
-| 7.8 | Year-end close voucher | ⬜ | Not needed for reports (balance sheet shows profit to date); needed before the first year end |
+| 7.8 | Year-end close | ✅ | Books & reports → Financial years. One entry on 31 March moves the year's income and expenses to Retained Earnings and locks the year; years close in order, only after they end; the latest closed year can be reopened. A closed year's own profit and loss still reads as it was |
 | 7.8 | Reports: day book, party ledger, receivables/payables ageing, cash/bank book, trial balance, P&L, balance sheet, stock valuation | ✅ | Plus a "health check" (books vs stock ledger) |
 | 7.9 | GSTIN format + checksum, state from GSTIN | ✅ | |
 | 7.9 | HSN/SAC + rate on every item; place-of-supply rule in one tested function | ✅ | `packages/shared/src/gst.ts` |
@@ -212,7 +212,6 @@ Items 6 and 7 below are covered by the approval above.
 Vyapar data and the user list only when deployment is close.** Do not ask for those before then.
 
 Still to build in the app, in rough order:
-1. Year-end close.
 2. Stores dashboard and the owner's one-page summary (PRD 7.10, "later").
 3. Ad spend per campaign, giving cost per lead and per conversion.
 4. A credit note's credit set against another invoice.
@@ -269,6 +268,7 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |
 | 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. |
 | 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
+| 2026-10-10 | Year-end close: `fiscal_closes` table (migration `0006_year_end_close`), `closeYear` / `reopenYear` in `accounting.ts`, Financial years tab, 5 tests. |
 | 2026-10-09 | **CRM lead capture** (Sarthak: a connected CRM like Privyr, which the team uses today; basic structure first). Webhooks for Meta lead ads, Google Ads lead forms, WhatsApp and website forms, all ending in the same `captureLead`; event log with reasons and retry; quick replies with one-tap WhatsApp contact; Lead sources and Quick replies screens; CRM section in the menu. Migration `0005_crm_integrations`, module `crm.ts`, 17 new API tests, README section. Tested with the documented payloads and a live run in the demo; not yet connected to real Meta / Google / WhatsApp accounts. |
 | 2026-10-09 | Founder's requests (via Sarthak): **task deadlines** (every task has a deadline date and an optional time; late is to the minute; routines can carry a finish-by time), **project management** under Operations (projects with an owner, deadline, tasks, progress and a plan against the calendar; the owner can run their own project without operations access), and a **Resource allocation** tab (people and machines committed to projects or other work by period and share of time, week-by-week board, over-allocation refused unless confirmed). Migration `0004_projects_and_allocation`, module `projects.ts`, 11 new API tests. Screens checked on demo data. |
 | 2026-10-09 | Visuals (founder's request): charts on the sales, marketing and accounts dashboards (`apps/web/components/charts.tsx`, no chart library), the home screen as a flow of what is waiting at each step (`GET /api/dashboards/overview`), and progress steps on leads, sales orders, purchase orders and goods receipts. Chart colours checked for colour-blind separation; every chart has a table behind it. |

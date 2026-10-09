@@ -1,13 +1,14 @@
 import { asc, eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { ACCOUNT_TYPES, D, fyOf, fyRange, isValidGstin, istDate, money, normaliseGstin } from '@radcore/shared';
+import { ACCOUNT_TYPES, D, addDays, formatDate, fyOf, fyRange, isValidGstin, istDate, money, normaliseGstin } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requireAuth, requirePerm } from '../core/auth';
-import { assertMoneyAccount, postJournal, reverseJournals } from '../core/journal';
+import { assertMoneyAccount, postJournal, reverseJournals, type JLine } from '../core/journal';
 import { nextNumber } from '../core/numbering';
+import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
-import { accounts, expenseCategories, expenses, journalEntries } from '../db/schema';
+import { accounts, expenseCategories, expenses, fiscalCloses, journalEntries } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zDate, zHttpUrl, zId, zListQuery, zMoney, zMoneyPos, zText, type Ctx } from '../lib/http';
 
@@ -62,7 +63,12 @@ export async function createExpense(
 /** Signed balance of each account for a period, in the account's natural direction. */
 type AccountTotal = { id: string; code: string; name: string; type: (typeof ACCOUNT_TYPES)[number]; debit: string; credit: string };
 
-async function accountTotals(db: DB, from: string | null, to: string | null): Promise<AccountTotal[]> {
+/**
+ * `withClosing` decides whether year-end closing entries count. A balance as of a date includes
+ * them (that is how a closed year's profit sits in Retained Earnings); what was earned and spent
+ * in a period leaves them out (otherwise a closed year would always show zero).
+ */
+async function accountTotals(db: DB, from: string | null, to: string | null, withClosing = true): Promise<AccountTotal[]> {
   return rows<AccountTotal>(db, sql`
     select a.id, a.code, a.name, a.type,
            coalesce(sum(l.debit), 0)::numeric(16,2)::text as debit, coalesce(sum(l.credit), 0)::numeric(16,2)::text as credit
@@ -70,9 +76,97 @@ async function accountTotals(db: DB, from: string | null, to: string | null): Pr
       left join (
         select jl.account_id, jl.debit, jl.credit from journal_lines jl join journal_entries e on e.id = jl.entry_id
          where (${from}::date is null or e.entry_date >= ${from}::date) and (${to}::date is null or e.entry_date <= ${to}::date)
+           and (${withClosing} or e.ref_type <> 'year_close')
       ) l on l.account_id = a.id
      where not a.is_group
      group by a.id order by a.code`);
+}
+
+// ---------------------------------------------------------------------------
+// Year-end close
+// ---------------------------------------------------------------------------
+const isFy = (fy: string) => /^\d{4}-\d{2}$/.test(fy) && fyOf(fyRange(fy).from) === fy;
+
+/**
+ * Year-end entries are dated on the last day of the year, which is normally already locked.
+ * They are the one kind of posting that belongs there, so the lock is stepped back for this
+ * transaction only and put back before it ends; nobody else ever sees it moved.
+ */
+async function insideLockedPeriod<T>(ctx: Ctx, date: string, fn: () => Promise<T>): Promise<T> {
+  const lock = await getSetting(ctx.tx, 'period_lock_date');
+  if (!lock || date > lock) return fn();
+  await setSetting(ctx.tx, 'period_lock_date', addDays(date, -1), ctx.user?.id ?? null);
+  const result = await fn();
+  await setSetting(ctx.tx, 'period_lock_date', lock, ctx.user?.id ?? null);
+  return result;
+}
+
+/** Income, expense and profit of a period, leaving closing entries out. */
+async function profitOf(db: DB, from: string, to: string) {
+  const totals = await accountTotals(db, from, to, false);
+  const income = totals.filter((a) => a.type === 'income').reduce((s, a) => s.plus(a.credit).minus(a.debit), D(0));
+  const expense = totals.filter((a) => a.type === 'expense').reduce((s, a) => s.plus(a.debit).minus(a.credit), D(0));
+  return { income, expense, profit: income.minus(expense) };
+}
+
+/** Income and expense accounts that still carry a balance on a date (closing entries counted). */
+async function openResultAccounts(db: DB, asOf: string) {
+  return (await accountTotals(db, null, asOf)).filter((a) => (a.type === 'income' || a.type === 'expense') && !D(a.debit).eq(a.credit));
+}
+
+/**
+ * Close a financial year (PRD 7.8): one journal entry on its last day empties every income and
+ * expense account into Retained Earnings, so the new year's profit starts from zero. Years are
+ * closed in order, only after they have ended, and the books are then locked up to that day.
+ */
+export async function closeYear(ctx: Ctx, fy: string) {
+  const { tx } = ctx;
+  if (!isFy(fy)) throw badRequest('Give the financial year as 2026-27');
+  const { from, to } = fyRange(fy);
+  // One close at a time, and no posting can slip in between reading the balances and locking.
+  await tx.execute(sql`select 1 from settings where key = 'period_lock_date' for update`);
+  if (to >= istDate()) throw conflict(`${fy} ends on ${formatDate(to)}. It can be closed from the day after.`);
+  const [already] = await tx.select().from(fiscalCloses).where(eq(fiscalCloses.fy, fy));
+  if (already) throw conflict(`${fy} is already closed`);
+  if ((await openResultAccounts(tx, addDays(from, -1))).length > 0) {
+    throw conflict(`An earlier year still has income or expenses that were never closed. Close the years in order, oldest first.`);
+  }
+
+  const year = await profitOf(tx, from, to);
+  const [close] = await tx.insert(fiscalCloses).values({
+    fy, fromDate: from, toDate: to, income: money(year.income), expense: money(year.expense), profit: money(year.profit),
+    createdBy: ctx.user?.id ?? null,
+  }).returning();
+
+  const balances = await openResultAccounts(tx, to);
+  // Each account gets the mirror of its balance; what is left over is the year's profit (or loss).
+  const lines: JLine[] = balances.map((a) => ({ account: { id: a.id }, debit: a.credit, credit: a.debit }));
+  const net = balances.reduce((s, a) => s.plus(a.credit).minus(a.debit), D(0));
+  lines.push({ account: 'retained_earnings', credit: net });
+  const entryId = await insideLockedPeriod(ctx, to, () => postJournal(ctx, {
+    date: to, refType: 'year_close', refId: close!.id, narration: `Year-end close ${fy}: profit and loss to Retained Earnings`, lines,
+  }));
+  if (entryId) await tx.update(fiscalCloses).set({ entryId }).where(eq(fiscalCloses.id, close!.id));
+
+  const lock = await getSetting(tx, 'period_lock_date');
+  if (!lock || lock < to) await setSetting(tx, 'period_lock_date', to, ctx.user?.id ?? null);
+  await audit(ctx, 'fiscal_year', fy, 'close', null, { income: money(year.income), expense: money(year.expense), profit: money(year.profit), entryId });
+  return { ...close!, entryId };
+}
+
+/** Undo a close, to correct something in that year. Only the most recently closed year can be reopened. */
+export async function reopenYear(ctx: Ctx, fy: string): Promise<void> {
+  const { tx } = ctx;
+  await tx.execute(sql`select 1 from settings where key = 'period_lock_date' for update`);
+  const [close] = await tx.select().from(fiscalCloses).where(eq(fiscalCloses.fy, fy));
+  if (!close) throw conflict(`${fy} is not closed`);
+  const [later] = await rows<{ fy: string }>(tx, sql`select fy from fiscal_closes where from_date > ${close.fromDate}::date order by from_date limit 1`);
+  if (later) throw conflict(`${later.fy} was closed after it. Reopen that year first.`);
+  await insideLockedPeriod(ctx, close.toDate, () =>
+    reverseJournals(ctx, 'year_close', close.id, close.toDate, `Reopened ${fy}: closing entry reversed`));
+  await tx.update(fiscalCloses).set({ entryId: null }).where(eq(fiscalCloses.id, close.id));
+  await tx.delete(fiscalCloses).where(eq(fiscalCloses.id, close.id));
+  await audit(ctx, 'fiscal_year', fy, 'reopen', { profit: close.profit }, null);
 }
 
 export function accountingRouter(db: DB) {
@@ -296,7 +390,7 @@ export function accountingRouter(db: DB) {
   r.get('/reports/profit-and-loss', requirePerm('accounts:read'), async (req, res) => {
     const today = istDate();
     const q = z.object({ from: zDate.default(() => fyRange(fyOf(today)).from), to: zDate.default(() => today) }).parse(req.query);
-    const totals = await accountTotals(db, q.from, q.to);
+    const totals = await accountTotals(db, q.from, q.to, false);
     const income = totals.filter((a) => a.type === 'income').map((a) => ({ code: a.code, name: a.name, amount: money(D(a.credit).minus(a.debit)) })).filter((a) => a.amount !== '0.00');
     const expense = totals.filter((a) => a.type === 'expense').map((a) => ({ code: a.code, name: a.name, amount: money(D(a.debit).minus(a.credit)) })).filter((a) => a.amount !== '0.00');
     const totalIncome = income.reduce((s, a) => s.plus(a.amount), D(0));
@@ -391,6 +485,42 @@ export function accountingRouter(db: DB) {
         debtors_gl: money(debtorsGl!.b), debtors_with_party: money(debtorsParties!.b),
       },
     });
+  });
+
+  // ---- financial years ----
+  /** Every financial year the books touch, newest first, with its profit and whether it can be closed. */
+  r.get('/years', requirePerm('accounts:read'), async (_req, res) => {
+    const today = istDate();
+    const [first] = await rows<{ d: string | null }>(db, sql`select min(entry_date) as d from journal_entries`);
+    const closes = await db.select().from(fiscalCloses);
+    const current = fyOf(today);
+    const years: Record<string, unknown>[] = [];
+    let earlierOpen = false;
+    for (let fy = fyOf(first?.d ?? today); ; fy = fyOf(addDays(fyRange(fy).to, 1))) {
+      const { from, to } = fyRange(fy);
+      const closed = closes.find((c) => c.fy === fy);
+      const p = closed ? { income: D(closed.income), expense: D(closed.expense), profit: D(closed.profit) } : await profitOf(db, from, to);
+      const ended = to < today;
+      years.push({
+        fy, from, to, status: closed ? 'closed' : ended ? 'ended' : 'current',
+        income: money(p.income), expense: money(p.expense), profit: money(p.profit), closed_at: closed?.createdAt ?? null,
+        can_close: !closed && ended && !earlierOpen,
+        can_reopen: Boolean(closed) && !closes.some((c) => c.fromDate > from),
+      });
+      // A year that ended with income or expenses and was never closed holds up the ones after it.
+      if (!closed && (!p.income.isZero() || !p.expense.isZero())) earlierOpen = true;
+      if (fy === current) break;
+    }
+    res.json({ data: years.reverse() });
+  });
+
+  r.post('/years/:fy/close', requirePerm('accounts:write'), async (req, res) => {
+    res.status(201).json({ data: await inTx(db, req, (ctx) => closeYear(ctx, String(req.params.fy))) });
+  });
+
+  r.post('/years/:fy/reopen', requirePerm('accounts:write'), async (req, res) => {
+    await inTx(db, req, (ctx) => reopenYear(ctx, String(req.params.fy)));
+    res.json({ ok: true });
   });
 
   r.get('/money-accounts', requireAuth, async (_req, res) => {

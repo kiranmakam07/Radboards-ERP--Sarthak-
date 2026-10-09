@@ -309,7 +309,8 @@ export function dashboardsRouter(db: DB) {
                  coalesce(sum(l.debit - l.credit) filter (where a.type = 'expense'), 0) as expense,
                  coalesce(sum(l.credit - l.debit), 0) as net_profit
             from journal_lines l join journal_entries e on e.id = l.entry_id join accounts a on a.id = l.account_id
-           where a.type in ('income', 'expense') and e.entry_date between ${from}::date and ${to}::date`))[0],
+           where a.type in ('income', 'expense') and e.entry_date between ${from}::date and ${to}::date
+             and e.ref_type <> 'year_close'`))[0],
       },
     });
   });
