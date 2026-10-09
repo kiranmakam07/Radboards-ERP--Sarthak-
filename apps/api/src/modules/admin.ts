@@ -31,7 +31,7 @@ export function authRouter(db: DB) {
     const body = z.object({ identifier: z.string().min(1), password: z.string().min(1) }).parse(req.body);
     const { token, user } = await login(db, body.identifier, body.password);
     setSessionCookie(res, token);
-    res.json({ user, permissions: permissionsFor(user.role) });
+    res.json({ user, permissions: permissionsFor(user.role), sample_data: await getSetting(db, 'sample_data') });
   });
 
   r.post('/logout', async (req, res) => {
@@ -41,7 +41,7 @@ export function authRouter(db: DB) {
   });
 
   r.get('/me', requireAuth, async (req, res) => {
-    res.json({ user: req.user, permissions: permissionsFor(req.user!.role) });
+    res.json({ user: req.user, permissions: permissionsFor(req.user!.role), sample_data: await getSetting(db, 'sample_data') });
   });
 
   r.post('/change-password', requireAuth, async (req, res) => {

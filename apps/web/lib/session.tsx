@@ -5,6 +5,8 @@ import { createContext, useContext } from 'react';
 export type Session = {
   user: { id: string; name: string; role: string; phone: string };
   permissions: string[];
+  /** True on the demo and on a review copy: everything on screen is sample data. */
+  sample_data?: boolean;
 };
 
 export const SessionContext = createContext<Session | null>(null);

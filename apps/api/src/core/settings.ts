@@ -30,6 +30,8 @@ export type SettingsMap = {
   lead_round_robin_last: string | null;
   /** YYYY-MM-DD: recurring tasks have been created up to and including this day. */
   tasks_generated_through: string | null;
+  /** True when this database was filled with sample data (the demo, or a review copy). Shown as a banner. */
+  sample_data: boolean;
 };
 
 export const SETTING_DEFAULTS: SettingsMap = {
@@ -45,6 +47,7 @@ export const SETTING_DEFAULTS: SettingsMap = {
   default_follow_up_days: 1,
   lead_round_robin_last: null,
   tasks_generated_through: null,
+  sample_data: false,
 };
 
 export async function getSetting<K extends keyof SettingsMap>(tx: DB, key: K): Promise<SettingsMap[K]> {

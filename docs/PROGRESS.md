@@ -19,7 +19,7 @@ the way they were**. Update it with every change (add a line to the change log a
 | Lead capture (Meta lead ads, Google Ads lead forms, WhatsApp, website) | Receiving side built and tested with the payloads those services send. **Not connected to real accounts yet** (needs the Meta app, the WhatsApp Cloud API number and the Google Ads form, at go-live) |
 | Other integrations (Shopify, Amazon, Flipkart, GSP) | Not built — data model and idempotency keys are ready |
 | Vyapar migration | Not built — needs sample export files |
-| Deployment / hosting / backups | Packaged for one server (Docker, HTTPS, daily backups) and verified in CI. **Not deployed**: needs a server and a domain |
+| Deployment / hosting / backups | Packaged for one server (Docker, HTTPS, daily backups) and verified in CI. A **review copy** can be started with sample data and its own sign-ins (`SEED_DEMO_DATA=true`, see README). **Not deployed**: needs a server and a domain |
 
 Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 
@@ -264,6 +264,7 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |
 | 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. |
 | 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
+| 2026-10-10 | Review copy for "go live for review" (Sarthak, 10 Oct): `SEED_DEMO_DATA=true` + `DEMO_PASSWORD` loads the sample data once into an empty database on a real server, with a sign-in per role and a banner saying it is sample data. The sample data seed is now covered by a test. Waiting on Sarthak for where to host it. |
 | 2026-10-10 | Bank reconciliation: one statement line to several book entries, with the bank's fee booked in the same step (`bank_line_matches`, migration `0009`, which carries existing matches over; upgrade checked on PostgreSQL 18). |
 | 2026-10-10 | Excel export on every list and report (`lib/xlsx.ts`, no library); GSTR-1 file for the GST portal (`/api/gst/gstr1/portal-file`). |
 | 2026-10-10 | Credit note credit against another invoice: `credit_applications` (migration `0008`, which also extends `v_invoice_outstanding`), `credits.ts`, invoice page, 6 tests. No journal entry is involved: it only changes which invoice is open. |

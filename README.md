@@ -83,6 +83,31 @@ docker compose --env-file .env.production -f compose.prod.yml up -d --build
 CI builds these images and starts the stack on every push, so a broken build is caught
 before it reaches the server.
 
+### A review copy
+
+To let people try the system before it holds real data, set `SEED_DEMO_DATA=true` and your own
+`DEMO_PASSWORD` in `.env.production` before the first start. The empty database is then filled
+with sample customers, stock, leads, staff, tasks and a project, and one sign-in per role:
+
+| Role | Phone | Role | Phone |
+| --- | --- | --- | --- |
+| Owner | 9000000000 | Accounts | 9000000005 |
+| Marketing | 9000000001 | Admin | 9000000006 |
+| Store | 9000000002 | HR | 9000000007 |
+| Sales | 9000000003 | Operations | 9000000008 |
+| Stores | 9000000004 | | |
+
+All use `DEMO_PASSWORD`. A banner on every screen says it is sample data. Everything works as in
+the real system and is saved, so reviewers can enter things and see them the next day.
+
+Sample data is only ever loaded into an empty database. **To go from the review copy to the real
+system**, stop the stack, remove the database (this deletes everything entered during the review),
+set `SEED_DEMO_DATA=false`, and start again; the first admin from `.env.production` is then created:
+
+```bash
+docker compose --env-file .env.production -f compose.prod.yml down -v
+```
+
 ## Connecting lead sources
 
 Every outside source ends in the same lead list (same phone check, owner and first follow-up as
