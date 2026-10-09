@@ -1,11 +1,13 @@
 import { createApp } from './app';
 import { config } from './config';
+import { loadPermissionOverrides } from './core/settings';
 import { createDb } from './db/client';
 import { seedReviewCopy } from './db/demo';
 import { ensureAdmin, seedDefaults } from './db/seed';
 
 const handle = await createDb(config.databaseUrl, config.migrationsFolder);
 await seedDefaults(handle.db);
+await loadPermissionOverrides(handle.db);
 // A review copy starts with sample data and its own sign-ins instead of a single empty admin.
 const review = process.env.SEED_DEMO_DATA === 'true' ? await seedReviewCopy(handle.db) : null;
 const admin = review ? null : await ensureAdmin(handle.db);

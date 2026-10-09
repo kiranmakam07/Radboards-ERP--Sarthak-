@@ -23,7 +23,7 @@ export default function OrderPage() {
   return (
     <Page title={`${o.status === 'draft' ? 'Quote' : 'Order'} ${o.order_no}`} actions={
       <>
-        <button type="button" onClick={() => window.print()}>Print {o.status === 'draft' ? 'quote' : 'order'}</button>
+        <Link className="button" href={`/sales/orders/${id}/print`}>Print {o.status === 'draft' ? 'quotation' : 'order'}</Link>
         {write && o.status === 'draft' && (
           <>
             <ActionButton kind="primary" onClick={() => post(`/sales/orders/${id}/confirm`, {})} onDone={reload}>Confirm order</ActionButton>

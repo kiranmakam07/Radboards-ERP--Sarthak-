@@ -4,19 +4,19 @@ import { asc, desc, eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
-import { PERMISSIONS, ROLES, STATE_CODES, isIsoDate } from '@radcore/shared';
+import { PERMISSIONS, ROLES, STATE_CODES, can, isIsoDate, rolesFor, type Permission } from '@radcore/shared';
 import { config } from '../config';
 import { audit } from '../core/audit';
 import {
   clearSessionCookie, hashPassword, login, logout, requireAuth, requirePerm, revokeUserSessions, setSessionCookie,
 } from '../core/auth';
-import { getSetting, setSetting, type CompanyProfile } from '../core/settings';
+import { getSetting, loadPermissionOverrides, setSetting, type CompanyProfile } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import {
   campaigns, expenseCategories, itemCategories, leadSources, locations, lostReasons, numberSeries, priceListItems,
   priceLists, users,
 } from '../db/schema';
-import { badRequest, must } from '../lib/errors';
+import { badRequest, forbidden, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zAddress, zGstin, zHttpUrl, zId, zMoney, zPhone, zStateCode, zText } from '../lib/http';
 
 const zPassword = z.string().min(8, 'must be at least 8 characters').max(200);
@@ -57,9 +57,7 @@ export function authRouter(db: DB) {
 }
 
 function permissionsFor(role: (typeof ROLES)[number]): string[] {
-  return Object.entries(PERMISSIONS)
-    .filter(([, roles]) => role === 'admin' || (roles as readonly string[]).includes(role))
-    .map(([p]) => p);
+  return (Object.keys(PERMISSIONS) as Permission[]).filter((p) => can(role, p));
 }
 
 const publicUser = {
@@ -152,6 +150,42 @@ export function settingsRouter(db: DB) {
       ifsc: z.string().max(20).optional(), bank_name: z.string().max(200).optional(), upi_id: z.string().max(100).optional(),
     }).optional(),
     invoice_terms: z.string().max(2000).optional(),
+  });
+
+  /** The permission matrix as it stands: who holds what, and what the built-in default is. */
+  r.get('/permissions', requirePerm('settings:manage'), async (_req, res) => {
+    res.json({
+      roles: ROLES,
+      data: (Object.keys(PERMISSIONS) as Permission[]).map((key) => {
+        const defaults = [...PERMISSIONS[key]] as string[];
+        const roles = [...rolesFor(key)] as string[];
+        return { key, roles, default_roles: defaults, changed: [...roles].sort().join() !== [...defaults].sort().join() };
+      }),
+    });
+  });
+
+  /**
+   * Change which roles hold one permission. Only an admin, whatever else has been granted; the
+   * admin role itself always holds everything, so nobody can lock the system shut from here.
+   */
+  r.put('/permissions/:key', requireAuth, async (req, res) => {
+    if (req.user!.role !== 'admin') throw forbidden('Only an admin can change permissions');
+    const key = String(req.params.key);
+    if (!(key in PERMISSIONS)) throw must(null, 'Permission');
+    const b = z.object({ roles: z.array(z.enum(ROLES)).max(ROLES.length) }).parse(req.body);
+    const roles = [...new Set(b.roles)].filter((r) => r !== 'admin');
+    const defaults = (PERMISSIONS[key as Permission] as readonly string[]).filter((r) => r !== 'admin');
+    await inTx(db, req, async (ctx) => {
+      const saved = { ...(await getSetting(ctx.tx, 'permission_overrides')) };
+      const before = saved[key] ?? [...PERMISSIONS[key as Permission]];
+      // Back to the built-in set: drop the override, so later changes to the defaults apply again.
+      if ([...roles].sort().join() === [...defaults].sort().join()) delete saved[key];
+      else saved[key] = roles;
+      await setSetting(ctx.tx, 'permission_overrides', saved, ctx.user!.id);
+      await audit(ctx, 'permission', key, 'update', { roles: before }, { roles });
+    });
+    await loadPermissionOverrides(db);
+    res.json({ data: { key, roles: [...rolesFor(key as Permission)] } });
   });
 
   r.put('/company', requirePerm('settings:manage'), async (req, res) => {

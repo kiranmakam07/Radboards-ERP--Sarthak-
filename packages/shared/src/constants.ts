@@ -214,8 +214,24 @@ export const PERMISSIONS = {
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
+export type PermissionOverrides = Partial<Record<Permission, readonly Role[]>>;
+
+// The table above is the starting point. An admin can change who holds a permission on the
+// Permissions screen; those changes are kept in the database and applied here when the API starts
+// and whenever one is saved.
+let overrides: PermissionOverrides = {};
+
+/** Replace the admin's changes to the matrix. Pass {} to go back to the defaults. */
+export function setPermissionOverrides(next: PermissionOverrides): void {
+  overrides = { ...next };
+}
+
+/** The roles that hold a permission right now (admin always does, whatever this says). */
+export function rolesFor(permission: Permission): readonly Role[] {
+  return overrides[permission] ?? PERMISSIONS[permission];
+}
 
 export function can(role: Role, permission: Permission): boolean {
   if (role === 'admin') return true;
-  return (PERMISSIONS[permission] as readonly Role[]).includes(role);
+  return rolesFor(permission).includes(role);
 }

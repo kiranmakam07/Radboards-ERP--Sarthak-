@@ -251,3 +251,51 @@ describe('walk-in capture', () => {
     expect(res.body.data.leads).toHaveLength(1);
   });
 });
+
+describe('the permission matrix can be changed by an admin', () => {
+  const put = async (key: string, roles: string[], status: number) =>
+    (await w.as('admin')).put(`/api/settings/permissions/${key}`).send({ roles }).expect(status);
+
+  it('gives a role something new, takes something away, and goes back to the default', async () => {
+    const accounts = await w.as('accounts');
+    const marketing = await w.as('marketing');
+    await accounts.get('/api/hr/employees').expect(403);
+    await marketing.get('/api/leads').expect(200);
+
+    // Let Accounts see HR (for salaries), and take the lead list away from Marketing.
+    await put('hr:read', ['owner', 'hr', 'accounts'], 200);
+    await put('leads:read', ['owner', 'store', 'sales'], 200);
+    await accounts.get('/api/hr/employees').expect(200);
+    await marketing.get('/api/leads').expect(403);
+    expect((await accounts.get('/api/auth/me').expect(200)).body.permissions).toContain('hr:read');
+    expect((await marketing.get('/api/auth/me').expect(200)).body.permissions).not.toContain('leads:read');
+
+    const matrix = (await (await w.as('admin')).get('/api/settings/permissions').expect(200)).body;
+    const row = (key: string) => matrix.data.find((p: { key: string }) => p.key === key);
+    expect(row('hr:read')).toMatchObject({ roles: ['owner', 'hr', 'accounts'], default_roles: ['owner', 'hr', 'admin'], changed: true });
+    expect(row('items:read').changed).toBe(false);
+
+    // Setting it back to the built-in roles removes the change altogether.
+    await put('hr:read', ['owner', 'hr'], 200);
+    await put('leads:read', ['owner', 'marketing', 'store', 'sales'], 200);
+    await accounts.get('/api/hr/employees').expect(403);
+    await marketing.get('/api/leads').expect(200);
+    const [saved] = await rows<{ value: Record<string, string[]> }>(w.db, sql`select value from settings where key = 'permission_overrides'`);
+    expect(saved!.value).toEqual({});
+  });
+
+  it('is for admins only, and an admin can never be shut out', async () => {
+    const owner = await w.as('owner');
+    await owner.get('/api/settings/permissions').expect(403);
+    await owner.put('/api/settings/permissions/leads:read').send({ roles: ['owner'] }).expect(403);
+    await put('no:such', ['owner'], 404);
+    await put('leads:read', ['janitor'], 400);
+
+    // Even with every role removed from user management, the admin still gets in.
+    await put('users:manage', [], 200);
+    await (await w.as('admin')).get('/api/users').expect(200);
+    await put('users:manage', [], 200);
+    const log = await rows<{ n: number }>(w.db, sql`select count(*)::int as n from audit_log where entity = 'permission'`);
+    expect(log[0]!.n).toBeGreaterThanOrEqual(6);
+  });
+});

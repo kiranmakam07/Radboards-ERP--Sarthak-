@@ -24,7 +24,7 @@ export default function PurchaseOrderPage() {
   return (
     <Page title={`PO ${po.po_no}`} actions={
       <>
-        <button type="button" onClick={() => window.print()}>Print / PDF</button>
+        <Link className="button" href={`/purchasing/orders/${id}/print`}>Print / PDF</Link>
         {waPhone && <a className="button" target="_blank" rel="noreferrer" href={`https://wa.me/${waPhone}?text=${encodeURIComponent(waText)}`}>Share on WhatsApp</a>}
         {can('po:write') && po.status === 'draft' && <ActionButton kind="primary" onClick={() => post(`/purchasing/orders/${id}/send`)} onDone={reload}>Mark as sent</ActionButton>}
         {can('po:write') && ['draft', 'sent'].includes(po.status) && <ActionButton kind="danger" confirm="Cancel this PO?" onClick={() => post(`/purchasing/orders/${id}/cancel`)} onDone={reload}>Cancel</ActionButton>}

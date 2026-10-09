@@ -67,6 +67,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Admin', items: [
     { href: '/admin', label: 'Setup', perm: 'settings:manage' },
     { href: '/admin/users', label: 'Users', perm: 'users:manage' },
+    { href: '/admin/permissions', label: 'Permissions', perm: 'settings:manage' },
   ] },
 ];
 

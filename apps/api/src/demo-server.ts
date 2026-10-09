@@ -16,6 +16,7 @@ const { seedDemo } = await import('./db/demo');
 const handle = await createDb('memory://', config.migrationsFolder);
 await seedDefaults(handle.db);
 await seedDemo(handle.db);
+await (await import('./core/settings')).loadPermissionOverrides(handle.db);
 createApp(handle.db).listen(config.port, () => {
   console.log(`RadCore DEMO API on http://localhost:${config.port} (in-memory database, sample data)`);
 });
