@@ -36,6 +36,13 @@
       "when": 1791545707414,
       "tag": "0004_projects_and_allocation",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791546423367,
+      "tag": "0005_crm_integrations",
+      "breakpoints": true
     }
   ]
 }

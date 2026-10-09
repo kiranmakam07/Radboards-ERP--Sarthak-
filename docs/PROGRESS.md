@@ -14,9 +14,10 @@ the way they were**. Update it with every change (add a line to the change log a
 | Area | State |
 | --- | --- |
 | Backend (API, database, posting engine) | MVP **and** most of V1.1 built and tested |
-| Frontend | Simple working screens for every built flow (53 screens, plain styling), with charts on the dashboards, a "what is waiting where" picture on the home screen and progress steps on documents |
-| Automated tests | 135 passing: 21 shared, 106 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
-| Integrations (Meta, Google, Shopify, GSP) | Not built — data model and idempotency keys are ready |
+| Frontend | Simple working screens for every built flow (58 screens, plain styling), with charts on the dashboards, a "what is waiting where" picture on the home screen and progress steps on documents |
+| Automated tests | 164 passing: 22 shared, 134 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
+| Lead capture (Meta lead ads, Google Ads lead forms, WhatsApp, website) | Receiving side built and tested with the payloads those services send. **Not connected to real accounts yet** (needs the Meta app, the WhatsApp Cloud API number and the Google Ads form, at go-live) |
+| Other integrations (Shopify, Amazon, Flipkart, GSP) | Not built — data model and idempotency keys are ready |
 | Vyapar migration | Not built — needs sample export files |
 | Deployment / hosting / backups | Packaged for one server (Docker, HTTPS, daily backups) and verified in CI. **Not deployed**: needs a server and a domain |
 
@@ -39,7 +40,11 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.1 | Dedupe on normalised phone | ✅ | Repeat enquiry becomes an activity on the existing lead |
 | 7.1 | Owner + first follow-up on every lead | ✅ | Explicit → source rule → the sales/store user who took it → round-robin over sales users |
 | 7.1 | Public form per campaign (QR / short link / website) | 🟡 | Token link + rate limit + honeypot. **No captcha yet.** QR image not generated (print the link with any QR tool) |
-| 7.1 | Meta lead ads / Google Ads webhooks | ⬜ | V1.2. `leads.external_ref` (unique) and `channel_events` are ready |
+| 7.1 | Meta lead ads / Google Ads webhooks | 🟡 | Built: `POST /api/hooks/meta` (signature checked, lead read from the Graph API), `POST /api/hooks/google-ads` (key = a campaign link's key; test leads create nothing). Each delivery is stored first, repeats are recognised, and what cannot become a lead is kept with the reason and a retry. **Not yet tried against the real services** |
+| 7.1 | WhatsApp enquiries | 🟡 | Built: `POST /api/hooks/whatsapp` (Cloud API). First message from a new number starts a lead; later messages go on its timeline; a Click-to-WhatsApp ad's name is kept. Receiving only: replies are sent by opening WhatsApp with a quick reply. Needs the business number on the Cloud API. Numbers outside India are set aside |
+| 7.1 | Website / any form tool | ✅ | `POST /api/hooks/form/<campaign key>` takes JSON or an ordinary form post |
+| 7.3 | Quick replies and one-tap contact (as in Privyr) | ✅ | Ready-made messages with the lead's details filled in; one tap opens WhatsApp with the message, logs the contact, moves New to Contacted and sets the next follow-up. "Leads waiting for me" on the home screen and My work |
+| 7.3 | Lead sources screen | ✅ | Each source's address, whether it is connected, leads per source, and everything that arrived with its result |
 | 7.2 | Walk-in tablet form with repeat-customer lookup | ✅ | "Buying now" converts and jumps to quick bill. Offline queue (nice-to-have) not built |
 | 7.3 | Pipeline: kanban, list, owner, activity log, WhatsApp link, lost reasons, saved views | ✅ | Kanban is read-only columns (stage is changed on the lead page; no drag-and-drop) |
 | 7.3 | Conversion by source and owner | ✅ | On the dashboards |
@@ -90,9 +95,9 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | --- | --- | --- |
 | Auth + roles from day one | ✅ | HttpOnly SameSite cookie, bcrypt, session revoked on deactivate/password change, login rate limit, cross-site POSTs refused |
 | One transaction per multi-step action; double-entry invariant; gap-free numbering; immutability | ✅ | All covered by tests |
-| Idempotent integrations | 🟡 | Keys and tables exist and lead capture is idempotent; the webhook endpoints themselves are not built |
+| Idempotent integrations | 🟡 | Lead webhooks (Meta, Google, WhatsApp) store each delivery once and create each lead once (tested with repeat deliveries). Shopify and the marketplaces are not built |
 | Audit trail | ✅ | Append-only `audit_log` |
-| HTTPS, webhook signatures, secrets encrypted at rest, captcha | ⬜ | Deployment / integration work |
+| HTTPS, webhook signatures, secrets encrypted at rest, captcha | 🟡 | Meta and WhatsApp webhooks are signature-checked; Google's by key. The Meta secrets are server settings, never in the database or shown on screen. HTTPS comes with deployment. No captcha yet |
 | Backups, Indian-region hosting, retention | ⬜ | Hosting decision pending |
 | Performance targets (50,000 rows < 1 s, bill < 2 s) | ⬜ | Not load-tested. Indexes are in place |
 | Locale (INR grouping, DD-MM-YYYY, IST, FY Apr–Mar) | ✅ | |
@@ -213,7 +218,13 @@ Still to build in the app, in rough order:
 4. A credit note's credit set against another invoice.
 5. Portal-format GSTR-1 file; Excel export of lists.
 6. Matching one bank line to several book entries (card-machine payouts).
-7. Shopify orders and Meta / Google leads coming in automatically, then Amazon and Flipkart.
+7. Shopify orders coming in automatically, then Amazon and Flipkart.
+8. CRM, once real leads flow (Sarthak: basic structure first, optimise later): sending WhatsApp replies from
+   inside the app, an alert the moment a lead arrives, lead scoring, files shared with view tracking.
+
+For go-live, the CRM connections also need (not before then): a Meta developer app with the Page and
+`leads_retrieval`, the WhatsApp Business number moved to the Cloud API, and the webhook set on each
+Google Ads lead form. The steps are in the README under "Connecting lead sources".
 8. HR and operations follow-ups, if wanted: resume and bill file upload, leave balances,
    WhatsApp reminders for tasks and maintenance.
 
@@ -258,5 +269,6 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |
 | 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. |
 | 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
+| 2026-10-09 | **CRM lead capture** (Sarthak: a connected CRM like Privyr, which the team uses today; basic structure first). Webhooks for Meta lead ads, Google Ads lead forms, WhatsApp and website forms, all ending in the same `captureLead`; event log with reasons and retry; quick replies with one-tap WhatsApp contact; Lead sources and Quick replies screens; CRM section in the menu. Migration `0005_crm_integrations`, module `crm.ts`, 17 new API tests, README section. Tested with the documented payloads and a live run in the demo; not yet connected to real Meta / Google / WhatsApp accounts. |
 | 2026-10-09 | Founder's requests (via Sarthak): **task deadlines** (every task has a deadline date and an optional time; late is to the minute; routines can carry a finish-by time), **project management** under Operations (projects with an owner, deadline, tasks, progress and a plan against the calendar; the owner can run their own project without operations access), and a **Resource allocation** tab (people and machines committed to projects or other work by period and share of time, week-by-week board, over-allocation refused unless confirmed). Migration `0004_projects_and_allocation`, module `projects.ts`, 11 new API tests. Screens checked on demo data. |
 | 2026-10-09 | Visuals (founder's request): charts on the sales, marketing and accounts dashboards (`apps/web/components/charts.tsx`, no chart library), the home screen as a flow of what is waiting at each step (`GET /api/dashboards/overview`), and progress steps on leads, sales orders, purchase orders and goods receipts. Chart colours checked for colour-blind separation; every chart has a table behind it. |

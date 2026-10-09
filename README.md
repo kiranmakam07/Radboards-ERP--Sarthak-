@@ -83,6 +83,31 @@ docker compose --env-file .env.production -f compose.prod.yml up -d --build
 CI builds these images and starts the stack on every push, so a broken build is caught
 before it reaches the server.
 
+## Connecting lead sources
+
+Every outside source ends in the same lead list (same phone check, owner and first follow-up as
+a lead typed in by hand). The screen **CRM → Lead sources** shows each address to copy, whether
+it is connected, and everything that has come in.
+
+| Source | Address | What proves the request |
+| --- | --- | --- |
+| Meta lead ads (Facebook, Instagram) | `https://<domain>/api/hooks/meta` | Meta's signature, checked with `META_APP_SECRET` |
+| WhatsApp Business (Cloud API) | `https://<domain>/api/hooks/whatsapp` | the same signature |
+| Google Ads lead forms | `https://<domain>/api/hooks/google-ads` | the form's key = the key of a campaign link |
+| Website or any form tool | `https://<domain>/api/hooks/form/<campaign key>` | the campaign key in the address |
+
+- **Meta lead ads:** in the Meta app, add the Webhooks product, subscribe the *Page* object's
+  `leadgen` field with the address above and `META_VERIFY_TOKEN`, then subscribe the Facebook Page
+  to the app. `META_PAGE_ACCESS_TOKEN` must be a long-lived Page token with `leads_retrieval`.
+- **WhatsApp:** the business number has to be on the WhatsApp Cloud API. Subscribe the
+  *WhatsApp Business Account* object's `messages` field with the address above. Messages are
+  received; replies are sent from a lead's page, which opens WhatsApp with the message written.
+- **Google Ads:** make a campaign link with the source *Google Ads*, then in the lead form asset
+  choose *Webhook*, and enter the address and that link's key. Google's "send test data" shows up
+  on the Lead sources screen as a test and creates no lead.
+- Anything that could not become a lead (no phone number, a number outside India, Meta refusing
+  to hand the lead over) stays on that screen with the reason and a retry button.
+
 ## Commands
 
 | Command | What it does |

@@ -15,17 +15,19 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/walk-in', label: 'Walk-in', perm: 'leads:write' },
     { href: '/quick-bill', label: 'Quick bill', perm: 'quickbill:create' },
   ] },
-  { group: 'Sales', items: [
-    { href: '/dashboards/sales', label: 'Sales dashboard', perm: 'dashboard:sales' },
+  { group: 'CRM', items: [
     { href: '/leads/pipeline', label: 'Pipeline', perm: 'leads:read' },
     { href: '/leads', label: 'Leads', perm: 'leads:read' },
+    { href: '/crm/sources', label: 'Lead sources', perm: 'crm:manage' },
+    { href: '/campaigns', label: 'Campaign links', perm: 'leads:write' },
+    { href: '/crm/replies', label: 'Quick replies', perm: 'leads:read' },
+    { href: '/dashboards/marketing', label: 'Marketing dashboard', perm: 'dashboard:marketing' },
+  ] },
+  { group: 'Sales', items: [
+    { href: '/dashboards/sales', label: 'Sales dashboard', perm: 'dashboard:sales' },
     { href: '/sales/orders', label: 'Quotes & orders', perm: 'sales:read' },
     { href: '/invoices', label: 'Invoices', perm: 'invoices:read' },
     { href: '/parties', label: 'Parties', perm: 'parties:read' },
-  ] },
-  { group: 'Marketing', items: [
-    { href: '/dashboards/marketing', label: 'Marketing dashboard', perm: 'dashboard:marketing' },
-    { href: '/campaigns', label: 'Campaign links', perm: 'leads:write' },
   ] },
   { group: 'Stores', items: [
     { href: '/purchasing/orders', label: 'Purchase orders', perm: 'purchasing:read' },

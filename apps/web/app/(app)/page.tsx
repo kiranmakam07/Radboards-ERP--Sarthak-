@@ -89,6 +89,10 @@ export default function Home() {
 
   // What is sitting with the person signed in. Shown to everyone, first.
   const mine: FlowStep[] = [];
+  if (o?.my_leads) {
+    mine.push({ label: 'New leads for me', value: o.my_leads.fresh, note: 'not yet contacted', href: '/leads?stage=new&mine=true', alert: o.my_leads.fresh > 0 });
+    mine.push({ label: 'My follow-ups due', value: o.my_leads.follow_ups_due, href: '/leads?view=followups_due&mine=true', alert: o.my_leads.follow_ups_due > 0 });
+  }
   if (o?.mine) {
     mine.push({ label: 'My tasks today', value: o.mine.tasks_today, href: '/my-work' });
     mine.push({ label: 'My late tasks', value: o.mine.tasks_overdue, href: '/my-work', alert: o.mine.tasks_overdue > 0 });

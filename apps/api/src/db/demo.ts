@@ -7,7 +7,9 @@ import { createApplicant, createEmployee, hireApplicant, moveApplicant, saveAtte
 import { captureLead, sourceIdByName } from '../modules/leads';
 import { createParty } from '../modules/parties';
 import { rows, sql, type DB } from './client';
-import { allocations, assets, items, jobOpenings, maintenanceSchedules, projects, taskTemplates, tasks, users } from './schema';
+import {
+  allocations, assets, channelEvents, items, jobOpenings, maintenanceSchedules, projects, taskTemplates, tasks, users,
+} from './schema';
 
 /**
  * Sample data for trying the system out. Used ONLY by `npm run demo`, which runs on a
@@ -73,6 +75,15 @@ export async function seedDemo(db: DB): Promise<void> {
     await lead('Vikram Shah', '+919820022222', 'Google Ads', 'Longboard search', 'BRD-LONG');
     await lead('Neha Kulkarni', '+919820033333', 'Instagram Collab', '@skate.pune', 'HLM-01');
     await lead('Imran Khan', '+919820044444', 'Website', null, 'BRD-CRUISER');
+
+    // What the Lead sources screen looks like once the connections are live: three arrivals and one that could not be used.
+    const byPhone = await rows<{ id: string; phone: string }>(ctx.tx, sql`select id, phone from leads`);
+    const leadId = (phone: string) => byPhone.find((l) => l.phone === phone)!.id;
+    await ctx.tx.insert(channelEvents).values([
+      { channel: 'meta', eventType: 'leadgen', externalId: 'demo-1001', payload: {}, status: 'processed', leadId: leadId('+919820011111'), summary: 'Asha Rao, +919820011111 · Diwali campaign', attempts: 1, processedAt: new Date() },
+      { channel: 'google', eventType: 'lead', externalId: 'demo-g-1', payload: {}, status: 'processed', leadId: leadId('+919820022222'), summary: 'Vikram Shah, +919820022222 · Longboard search', attempts: 1, processedAt: new Date() },
+      { channel: 'whatsapp', eventType: 'message', externalId: 'demo-wamid-1', payload: {}, status: 'ignored', summary: 'Sam, +14155550123', error: '+14155550123 is not an Indian mobile number', attempts: 1 },
+    ]);
 
     await seedPeopleAndOperations(ctx);
   });
