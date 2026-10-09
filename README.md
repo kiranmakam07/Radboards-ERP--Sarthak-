@@ -133,7 +133,9 @@ What is different from a server:
 | Attached files | A folder on a volume, up to 10 MB each | In the database, up to 4 MB each (Vercel caps the size of a request) |
 | Backups | `deploy/backup.sh`, nightly | The database provider's own (Neon keeps a history to restore from) |
 
-`DATABASE_URL` comes from the database connection; nothing else needs setting. To try the same
+`DATABASE_URL` comes from the database connection; nothing else needs setting. `apps/web/vercel.json`
+tells Vercel to install from the top of the repository (the API's packages are needed too), to
+build with `vercel-build`, and to run in Singapore. To try the same
 build on your own machine: `EMBED_API=true DATABASE_URL=postgres://... npm run vercel-build -w @radcore/web`,
 then `EMBED_API=true DATABASE_URL=postgres://... npm run start -w @radcore/web`.
 
