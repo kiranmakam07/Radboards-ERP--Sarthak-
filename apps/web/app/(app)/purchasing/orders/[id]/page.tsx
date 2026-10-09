@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, Table, Toggle, date, dateTime, inr, num, sub } from '@/components/ui';
+import { Steps } from '@/components/charts';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -30,6 +31,9 @@ export default function PurchaseOrderPage() {
         {can('po:write') && ['partly_received', 'received'].includes(po.status) && <ActionButton confirm="Close this PO? Nothing more can be received against it." onClick={() => post(`/purchasing/orders/${id}/close`)} onDone={reload}>Close PO</ActionButton>}
       </>
     }>
+      <Steps steps={['Draft', 'Sent to supplier', 'Goods arriving', 'All received']}
+        current={{ draft: 0, sent: 1, partly_received: 2, received: 4, closed: 4 }[po.status as string] ?? 0}
+        stopped={po.status === 'cancelled' ? 'Cancelled' : null} />
       <Card>
         <KV rows={[
           ['Status', <Badge value={po.status} />], ['Supplier', <Link href={`/parties/${po.supplier_id}`}>{po.supplier_name}</Link>],

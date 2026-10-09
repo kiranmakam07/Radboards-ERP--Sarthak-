@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { LEAD_STAGE_LABELS, LEAD_TRANSITIONS, type LeadStage } from '@radcore/shared';
+import { Steps } from '@/components/charts';
 import { Badge, Card, Form, KV, Loading, Page, Table, dateTime, label } from '@/components/ui';
 import { patch, post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -31,6 +32,9 @@ export default function LeadPage() {
         <a className="button" target="_blank" rel="noreferrer" href={wa}>WhatsApp</a>
       </>
     }>
+      <Steps steps={['New', 'Contacted', 'Interested', 'Meeting booked', 'Converted']}
+        current={lead.stage === 'converted' ? 5 : ['new', 'contacted', 'interested', 'meeting_booked'].indexOf(lead.stage)}
+        stopped={lead.stage === 'lost' ? `Lost${lead.lost_reason ? `: ${lead.lost_reason}` : ''}` : null} />
       <Card>
         <KV rows={[
           ['Stage', <><Badge value={lead.stage} /> {lead.lost_reason}</>],

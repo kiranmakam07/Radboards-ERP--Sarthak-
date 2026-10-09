@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, Table, dateTime, inr, num, sub } from '@/components/ui';
+import { Steps } from '@/components/charts';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -14,6 +15,7 @@ export default function ReceiptPage() {
   const { data, loading, error, reload } = useGet<{ data: any }>(`/purchasing/receipts/${id}`);
   const grn = data?.data;
   if (!grn) return <Page title="Goods receipt"><Loading loading={loading} error={error} /></Page>;
+  const rejected = grn.lines.reduce((s: number, l: any) => s + Number(l.rejected_qty ?? 0), 0);
   const toReturn = grn.lines.reduce((s: number, l: any) => sub(s + Number(l.rejected_qty ?? 0), l.returned_qty), 0);
 
   return (
@@ -30,6 +32,9 @@ export default function ReceiptPage() {
         )}
       </>
     }>
+      <Steps steps={rejected > 0 ? ['Goods received', 'QC done, accepted stock inwarded', 'Rejects returned to supplier'] : ['Goods received', 'QC done, accepted stock inwarded']}
+        current={grn.status === 'received' ? 0 : toReturn > 0 ? 1 : 3}
+        stopped={grn.status === 'cancelled' ? 'Cancelled' : null} />
       <Card>
         <KV rows={[
           ['Status', <Badge value={grn.status} />], ['Supplier', <Link href={`/parties/${grn.supplier_id}`}>{grn.supplier_name}</Link>],

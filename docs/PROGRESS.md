@@ -14,8 +14,8 @@ the way they were**. Update it with every change (add a line to the change log a
 | Area | State |
 | --- | --- |
 | Backend (API, database, posting engine) | MVP **and** most of V1.1 built and tested |
-| Frontend | Simple working screens for every built flow (39 screens, no charts, plain styling) |
-| Automated tests | 93 passing: 17 shared, 68 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
+| Frontend | Simple working screens for every built flow (39 screens, plain styling), with charts on the dashboards, a "what is waiting where" picture on the home screen and progress steps on documents |
+| Automated tests | 94 passing: 17 shared, 69 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
 | Integrations (Meta, Google, Shopify, GSP) | Not built — data model and idempotency keys are ready |
 | Vyapar migration | Not built — needs sample export files |
 | Deployment / hosting / backups | Packaged for one server (Docker, HTTPS, daily backups) and verified in CI. **Not deployed**: needs a server and a domain |
@@ -73,7 +73,8 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.9 | GSTR-1 (B2B, B2CL, B2CS, CDNR, CDNUR, HSN, documents issued) | 🟡 | JSON + CSV per section. **Not yet the portal's exact upload file** — CA must check the first filing |
 | 7.9 | GSTR-3B summary | ✅ | Ties to the GST ledger balances (tested) |
 | 7.9 | E-invoice / e-way bill | ⬜ | V1.3; `irn`, `eway_bill_no` columns exist |
-| 7.10 | Sales, marketing, accounts dashboards (live, date range) | ✅ | Numbers and tables, no charts. Click-through to lists is partial |
+| 7.10 | Sales, marketing, accounts dashboards (live, date range) | ✅ | Charts with the figures on them and a table behind each ("Show as table"): sales and leads per day, sales by channel, leads by stage and source, top items and dealers, dealer outstanding against credit limit, walk-ins by hour, receivables by age, expenses by category. Click-through to lists is partial |
+| 7.10 | Home screen: the business as a flow | ✅ | Enquiry → lead → quote → delivery → invoice → money in, and purchase order → QC → stock → bill, each step showing how many are waiting and linking to that list. Each role sees only its own steps |
 | 7.10 | Cost per lead (ad spend) | ⬜ | V1.2 |
 | 7.11 | Export every list/report | 🟡 | CSV everywhere (`?format=csv`). Excel/PDF export not built |
 | 7.11 | Print formats | 🟡 | Tax invoice + credit note (A4, thermal), delivery challan, payment receipt / voucher. Quote, PO and purchase bill print as plain pages |
@@ -247,3 +248,4 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | Direction (Sarthak): build the whole app first; server, real data and user lists only when close to deployment. |
 | 2026-10-09 | Printouts: delivery challan and payment receipt / voucher. |
 | 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |
+| 2026-10-09 | Visuals (founder's request): charts on the sales, marketing and accounts dashboards (`apps/web/components/charts.tsx`, no chart library), the home screen as a flow of what is waiting at each step (`GET /api/dashboards/overview`), and progress steps on leads, sales orders, purchase orders and goods receipts. Chart colours checked for colour-blind separation; every chart has a table behind it. |

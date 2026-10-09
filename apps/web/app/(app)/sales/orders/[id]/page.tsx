@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, Table, Toggle, date, dateTime, inr, label, num, sub } from '@/components/ui';
+import { Steps } from '@/components/charts';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -42,6 +43,9 @@ export default function OrderPage() {
         )}
       </>
     }>
+      <Steps steps={['Quote', 'Confirmed', 'Delivered', 'Invoiced']}
+        current={{ draft: 0, confirmed: 1, delivered: 2, invoiced: 4 }[o.status as string] ?? 0}
+        stopped={o.status === 'cancelled' ? 'Cancelled' : null} />
       <Card>
         <KV rows={[
           ['Status', <Badge value={o.status} />],

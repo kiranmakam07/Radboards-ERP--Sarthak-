@@ -164,3 +164,77 @@ td input, td select { padding: 4px 6px; }
   .doc { border: 0; padding: 0; max-width: none; }
   .card { border: 0; padding: 0; }
 }
+
+/* ---- charts (see components/charts.tsx). Colours checked with the palette validator on a white surface. ---- */
+:root {
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-3: #1baf7a;
+  --viz-grid: #e7e9ee;
+  --viz-axis: #c3c7d0;
+}
+.viz { position: relative; width: 100%; }
+.viz svg { display: block; outline: none; }
+.viz svg:focus-visible { outline: 2px solid #b9cdf5; border-radius: 4px; }
+.viz-grid { stroke: var(--viz-grid); stroke-width: 1; }
+.viz-axis { stroke: var(--viz-axis); stroke-width: 1; }
+.viz-tick { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.viz-hit { fill: transparent; outline: none; }
+.viz-hit:hover, .viz-hit:focus { fill: rgba(31, 95, 214, 0.07); }
+.viz-tip {
+  position: absolute; transform: translate(-50%, -100%); background: #1c2430; color: #fff; padding: 6px 9px;
+  border-radius: 6px; font-size: 12px; pointer-events: none; white-space: nowrap; z-index: 5;
+}
+.viz-tip-title { color: #c9d1dd; }
+.viz-tip-row strong { font-weight: 600; }
+.viz-key { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin-right: 5px; }
+.viz-legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.viz-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+/* Name and value on one line, the bar underneath at full width: nothing is squeezed or cut off in a narrow card. */
+.viz-bars { display: grid; gap: 12px; }
+.viz-bar-row { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; row-gap: 4px; align-items: baseline; }
+.viz-bar-label { overflow-wrap: anywhere; }
+.viz-bar-track, .viz-meter { grid-column: 1 / -1; grid-row: 2; }
+.viz-bar-track { height: 14px; }
+.viz-bar { height: 14px; background: var(--viz-1); border-radius: 0 4px 4px 0; }
+.viz-bar-row:hover .viz-bar { filter: brightness(1.12); }
+.viz-bar-value { font-variant-numeric: tabular-nums; text-align: right; }
+.viz-meter { height: 10px; background: #cde2fb; border-radius: 5px; overflow: hidden; }
+.viz-meter-fill { height: 10px; background: var(--viz-1); }
+.viz-meter-fill.warning { background: #fab219; }
+.viz-meter-fill.critical { background: #d03b3b; }
+.viz-table { margin-top: 10px; }
+.viz-table summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+
+/* ---- where a document is in its life ---- */
+.steps { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 0; padding: 0; margin: 0 0 14px; }
+.steps li { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.steps li + li::before { content: ""; width: 28px; height: 1px; background: var(--viz-axis); margin: 0 8px; }
+.steps .dot {
+  width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--viz-axis); display: inline-flex;
+  align-items: center; justify-content: center; font-size: 12px; background: #fff;
+}
+.steps .done { color: var(--text); }
+.steps .done .dot { background: var(--accent); border-color: var(--accent); color: #fff; }
+.steps .now { color: var(--text); font-weight: 600; }
+.steps .now .dot { border-color: var(--accent); color: var(--accent); border-width: 2px; }
+.steps .stopped { color: var(--danger); font-weight: 600; }
+.steps .stopped .dot { border-color: var(--danger); color: var(--danger); }
+
+/* ---- home screen: what is waiting at each step ---- */
+.flow { margin-bottom: 18px; }
+.flow h2 { margin-bottom: 8px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.flow-row { display: flex; flex-wrap: wrap; gap: 8px 0; align-items: stretch; }
+.flow-row.loose { gap: 8px; }
+.flow-cell { display: flex; align-items: stretch; }
+.flow-arrow { color: var(--viz-axis); padding: 0 8px; font-size: 18px; align-self: center; }
+.flow-step {
+  display: flex; flex-direction: column; min-width: 128px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 14px; color: var(--text);
+}
+.flow-step:hover { border-color: var(--accent); text-decoration: none; }
+.flow-step.alert { border-left: 3px solid var(--danger); }
+.flow-value { font-size: 22px; font-weight: 600; }
+.flow-label { font-size: 13px; }
+.flow-note { font-size: 12px; color: var(--muted); }
+@media print { .steps, .flow, .viz-table { display: none; } }
