@@ -66,7 +66,7 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.8 | Expenses with input GST | 🟡 | Bill photo is a link (URL); no file upload yet |
 | 7.8 | Credit notes (stock back in) and debit notes (stock out) | ✅ | A credit note on an already-paid invoice leaves the customer in credit; that credit can be set against another of their invoices (on the invoice page), in full or in part, and taken back. It cannot be used twice, on another customer, or after it was refunded in cash; the receipt and credit note behind used credit cannot be cancelled |
 | 7.8 | Multiple cash/bank accounts | ✅ | |
-| 7.8 | Bank statement import (CSV) and reconciliation | ✅ | Reads the usual Indian bank CSV layouts, skips rows already imported, matches automatically only when unambiguous, and can book the missing entry (expense, party receipt or payment, other account) from a statement line. One statement line matches one book entry: a single card-machine payout covering several receipts cannot be matched to all of them yet |
+| 7.8 | Bank statement import (CSV) and reconciliation | ✅ | Reads the usual Indian bank CSV layouts, skips rows already imported, matches automatically only when unambiguous, and can book the missing entry (expense, party receipt or payment, other account) from a statement line. One statement line can be matched to several book entries that add up to it (a card-machine payout covering a day's receipts); if the bank kept a fee, it is booked as an expense in the same step. Cancelling any entry in a match undoes the whole match |
 | 7.8 | Immutable issued documents, period lock | ✅ | |
 | 7.8 | Opening balances | 🟡 | By manual journal (parties/accounts) and opening-stock entry. No import tool |
 | 7.8 | Year-end close | ✅ | Books & reports → Financial years. One entry on 31 March moves the year's income and expenses to Retained Earnings and locks the year; years close in order, only after they end; the latest closed year can be reopened. A closed year's own profit and loss still reads as it was |
@@ -213,7 +213,6 @@ Items 6 and 7 below are covered by the approval above.
 Vyapar data and the user list only when deployment is close.** Do not ask for those before then.
 
 Still to build in the app, in rough order:
-6. Matching one bank line to several book entries (card-machine payouts).
 7. Shopify orders coming in automatically, then Amazon and Flipkart.
 8. CRM, once real leads flow (Sarthak: basic structure first, optimise later): sending WhatsApp replies from
    inside the app, an alert the moment a lead arrives, lead scoring, files shared with view tracking.
@@ -265,6 +264,7 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |
 | 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. |
 | 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
+| 2026-10-10 | Bank reconciliation: one statement line to several book entries, with the bank's fee booked in the same step (`bank_line_matches`, migration `0009`, which carries existing matches over; upgrade checked on PostgreSQL 18). |
 | 2026-10-10 | Excel export on every list and report (`lib/xlsx.ts`, no library); GSTR-1 file for the GST portal (`/api/gst/gstr1/portal-file`). |
 | 2026-10-10 | Credit note credit against another invoice: `credit_applications` (migration `0008`, which also extends `v_invoice_outstanding`), `credits.ts`, invoice page, 6 tests. No journal entry is involved: it only changes which invoice is open. |
 | 2026-10-10 | Stores dashboard and owner's summary (`/api/dashboards/stores`, `/owner`); ad spend with cost per lead (`ad_spends`, migration `0007_ad_spend`, CRM → Ad spend). |

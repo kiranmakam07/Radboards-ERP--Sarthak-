@@ -153,7 +153,7 @@ describe('bank reconciliation', () => {
       book_balance: '104180.00', statement_balance: '105081.00', unmatched_statement_lines: 3,
       unmatched_statement_in: '960.00', unmatched_statement_out: '59.00', unmatched_book_entries: 0,
     });
-    expect(r.lines.find((l: { description: string }) => l.description === 'RENT OCT').matched_ref_type).toBe('expense');
+    expect(r.lines.find((l: { description: string }) => l.description === 'RENT OCT').matches[0].ref_type).toBe('expense');
   });
 
   it('importing the same file again adds nothing', async () => {
@@ -249,5 +249,61 @@ describe('bank reconciliation', () => {
     await accounts.post(`/api/bank/lines/${neft.id}/unignore`).send({}).expect(200);
     expect((await recon()).summary.unmatched_statement_lines).toBe(1);
     await expectBooksHealthy(w);
+  });
+
+  it('matches one payout to the several receipts it covers, booking the fee the bank kept', async () => {
+    const accounts = await w.as('accounts');
+    // Three card receipts in the books: 500 + 700 + 800 = 2,000. The card company pays out 1,960 in one line, keeping 40.
+    const receipts: string[] = [];
+    for (const amount of [500, 700, 800]) {
+      receipts.push((await accounts.post('/api/payments').send({ direction: 'in', party_id: id.dealer, mode: 'card', amount, reference: `CARD-${amount}` }).expect(201)).body.data.id);
+    }
+    await accounts.post('/api/bank/statements/import').send({ account_id: bank, csv: `Date,Narration,Debit,Credit\n${D},CARD SETTLEMENT TID 4412,,1960.00` }).expect(201);
+    const payout = await lineByText('CARD SETTLEMENT');
+    expect(payout.status).toBe('unmatched'); // no single entry of 1,960, so nothing was guessed
+    const entries = (await recon()).unmatched_book_entries.filter((e: { payment_reference: string | null }) => e.payment_reference?.startsWith('CARD-'));
+    expect(entries.map((e: { amount: string }) => e.amount).sort()).toEqual(['500.00', '700.00', '800.00']);
+    const picked = entries.map((e: { journal_line_id: number }) => e.journal_line_id);
+
+    // Two of the three do not add up, and the three together are 40 more than the bank paid.
+    await accounts.post(`/api/bank/lines/${payout.id}/match`).send({ journal_line_ids: picked.slice(0, 2) }).expect(409);
+    const short = await accounts.post(`/api/bank/lines/${payout.id}/match`).send({ journal_line_ids: picked }).expect(409);
+    expect(short.body.error.message).toBe('Amounts differ: the statement says 1960.00, the 3 entries add up to 2000.00');
+    expect(short.body.error.details).toMatchObject({ difference: '40.00', could_be_bank_charge: true });
+
+    const before = (await recon()).summary.book_balance;
+    await accounts.post(`/api/bank/lines/${payout.id}/match`).send({ journal_line_ids: picked, fee_category_id: m.expenseCategory('Bank Charges') }).expect(200);
+    const matched = await lineByText('CARD SETTLEMENT');
+    expect(matched.status).toBe('matched');
+    expect(matched.matches.map((x: { amount: string; ref_type: string }) => [x.ref_type, x.amount]).sort())
+      .toEqual([['expense', '-40.00'], ['payment', '500.00'], ['payment', '700.00'], ['payment', '800.00']]);
+    const after = await recon();
+    expect(Number(after.summary.book_balance)).toBe(Number(before) - 40); // only the fee is new in the books
+    expect(after.unmatched_book_entries.filter((e: { payment_reference: string | null }) => e.payment_reference?.startsWith('CARD-'))).toEqual([]);
+    const [fee] = await rows<{ amount: string; notes: string }>(w.db, sql`select amount::text, notes from expenses order by created_at desc limit 1`);
+    expect(fee).toEqual({ amount: '40.00', notes: 'Kept by the bank from: CARD SETTLEMENT TID 4412' });
+    // An entry already in a match cannot be used for another line.
+    const neft = await lineByText('NEFT12345');
+    await accounts.post(`/api/bank/lines/${neft.id}/match`).send({ journal_line_ids: [picked[0]] }).expect(409);
+
+    // Cancelling one of the receipts undoes the whole match: what is left no longer adds up to the payout.
+    await accounts.post(`/api/payments/${receipts[0]}/cancel`).send({ reason: 'Card charged twice' }).expect(200);
+    const undone = await lineByText('CARD SETTLEMENT');
+    expect(undone).toMatchObject({ status: 'unmatched', matches: [] });
+    const left = (await recon()).unmatched_book_entries.map((e: { amount: string }) => e.amount).sort();
+    expect(left).toEqual(expect.arrayContaining(['-40.00', '700.00', '800.00']));
+    expect(left).not.toContain('500.00'); // the cancelled receipt is gone from the candidates
+    await expectBooksHealthy(w);
+  });
+
+  it('a bank line that is more than the entries cannot be explained away as a fee', async () => {
+    const accounts = await w.as('accounts');
+    const payout = await lineByText('CARD SETTLEMENT'); // 1,960 in
+    const small = (await recon()).unmatched_book_entries.filter((e: { amount: string }) => e.amount === '700.00' || e.amount === '800.00');
+    const res = await accounts.post(`/api/bank/lines/${payout.id}/match`)
+      .send({ journal_line_ids: small.map((e: { journal_line_id: number }) => e.journal_line_id), fee_category_id: m.expenseCategory('Bank Charges') }).expect(409);
+    expect(res.body.error.details).toMatchObject({ difference: '-460.00', could_be_bank_charge: false });
+    // 700 + 800 + the 500 less 40 that is already booked would be the right set: -40 + 700 + 800 = 1,460, still not 1,960.
+    await accounts.post(`/api/bank/lines/${payout.id}/match`).send({ journal_line_ids: [] }).expect(400);
   });
 });

@@ -64,6 +64,13 @@
       "when": 1791576019572,
       "tag": "0008_credit_applications",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791576724501,
+      "tag": "0009_bank_many_to_one",
+      "breakpoints": true
     }
   ]
 }

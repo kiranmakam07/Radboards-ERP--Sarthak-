@@ -783,19 +783,27 @@ export const bankStatementLines = pgTable('bank_statement_lines', {
   /** Identifies the statement row, so importing the same or an overlapping file adds nothing twice. */
   lineHash: text('line_hash').notNull(),
   status: bankLineStatusEnum('status').notNull().default('unmatched'),
-  matchedJournalLineId: bigint('matched_journal_line_id', { mode: 'number' }).references(() => journalLines.id),
   matchedAt: ts('matched_at'),
   matchedBy: uuid('matched_by').references(() => users.id),
   ignoreReason: text('ignore_reason'),
   ...stamps,
 }, (t) => [
   unique('bank_statement_lines_hash_uq').on(t.accountId, t.lineHash),
-  // A book entry explains at most one statement line.
-  uniqueIndex('bank_statement_lines_match_uq').on(t.matchedJournalLineId).where(sql`${t.matchedJournalLineId} is not null`),
   index('bank_statement_lines_account_date_idx').on(t.accountId, t.txnDate),
   check('bank_statement_lines_amount_nonzero', sql`${t.amount} <> 0`),
-  check('bank_statement_lines_match_chk', sql`(${t.status} = 'matched') = (${t.matchedJournalLineId} is not null)`),
 ]);
+
+/**
+ * Which book entries explain a statement line. Usually one, but one bank line can stand for
+ * several entries: a card-machine payout that covers a day's receipts, less the bank's fee.
+ * A book entry explains at most one statement line.
+ */
+export const bankLineMatches = pgTable('bank_line_matches', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  statementLineId: uuid('statement_line_id').notNull().references(() => bankStatementLines.id),
+  journalLineId: bigint('journal_line_id', { mode: 'number' }).notNull().unique().references(() => journalLines.id),
+  createdAt: ts('created_at').notNull().defaultNow(),
+}, (t) => [index('bank_line_matches_statement_idx').on(t.statementLineId)]);
 
 // ----------------------------------------------------------------------------
 // Integrations

@@ -19,6 +19,7 @@ export default function BankPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [booking, setBooking] = useState<string | null>(null);
+  const [combining, setCombining] = useState<string | null>(null);
 
   useEffect(() => {
     if (!accountId && accounts.data?.data[0]) setAccountId(accounts.data.data[0].id);
@@ -27,7 +28,7 @@ export default function BankPage() {
   const path = accountId ? `/bank/reconciliation${qs({ account_id: accountId, status })}` : null;
   const { data, loading, error, reload } = useGet<{ data: any }>(path);
   const r = data?.data;
-  const refresh = () => { reload(); accounts.reload(); setBooking(null); };
+  const refresh = () => { reload(); accounts.reload(); setBooking(null); setCombining(null); };
 
   async function importFile(file: File | undefined) {
     if (!file) return;
@@ -94,7 +95,10 @@ export default function BankPage() {
               { key: 'status', title: 'Status', render: (l) => (
                 <span style={{ whiteSpace: 'normal' }}>
                   <Badge value={l.status === 'unmatched' ? 'pending' : l.status === 'matched' ? 'approved' : 'closed'} />
-                  {l.status === 'matched' && <span className="small muted"> {label(l.matched_ref_type)} · {date(l.matched_entry_date)} · {l.matched_narration}</span>}
+                  {l.status === 'matched' && l.matches.length === 1 && <span className="small muted"> {label(l.matches[0].ref_type)} · {date(l.matches[0].entry_date)} · {l.matches[0].narration}</span>}
+                  {l.status === 'matched' && l.matches.length > 1 && (
+                    <span className="small muted"> {l.matches.length} entries: {l.matches.map((x: any) => `${label(x.ref_type)} ${Number(x.amount) < 0 ? '−' : ''}₹${inr(Math.abs(Number(x.amount)))}`).join(', ')}</span>
+                  )}
                   {l.status === 'ignored' && <span className="small muted"> {l.ignore_reason}</span>}
                 </span>
               ) },
@@ -105,7 +109,8 @@ export default function BankPage() {
               ) : (
                 <span className="actions">
                   <MatchPicker line={l} entries={r.unmatched_book_entries} onDone={refresh} />
-                  <button type="button" onClick={() => setBooking(booking === l.id ? null : l.id)}>{booking === l.id ? '× Close' : 'Book it…'}</button>
+                  <button type="button" onClick={() => { setCombining(combining === l.id ? null : l.id); setBooking(null); }}>{combining === l.id ? '× Close' : 'Several entries…'}</button>
+                  <button type="button" onClick={() => { setBooking(booking === l.id ? null : l.id); setCombining(null); }}>{booking === l.id ? '× Close' : 'Book it…'}</button>
                   <ActionButton onClick={async () => {
                     const reason = window.prompt('Why should this line be set aside?');
                     if (reason) await post(`/bank/lines/${l.id}/ignore`, { reason });
@@ -113,6 +118,9 @@ export default function BankPage() {
                 </span>
               )) },
             ]} />
+            {combining && r.lines.some((l: any) => l.id === combining) && (
+              <MatchSeveral key={combining} line={r.lines.find((l: any) => l.id === combining)} entries={r.unmatched_book_entries} onDone={refresh} />
+            )}
             {booking && r.lines.some((l: any) => l.id === booking) && (
               <BookEntry line={r.lines.find((l: any) => l.id === booking)} accountId={accountId} onDone={refresh} />
             )}
@@ -156,6 +164,77 @@ function MatchPicker({ line, entries, onDone }: { line: any; entries: any[]; onD
       </select>
       {error ? <span className="error small">{error}</span> : null}
     </span>
+  );
+}
+
+/**
+ * One bank line that stands for several book entries: a card-machine or payment-gateway payout
+ * covering a day's receipts. Tick the entries; they must add up to the line. If the bank paid
+ * less because it kept its fee, pick where the fee goes and it is booked along with the match.
+ */
+function MatchSeveral({ line, entries, onDone }: { line: any; entries: any[]; onDone: () => void }) {
+  const categories = useGet<{ data: any[] }>('/masters/expense-categories');
+  const [picked, setPicked] = useState<number[]>([]);
+  const [fee, setFee] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const moneyIn = Number(line.amount) > 0;
+  // Receipts for money in, payments for money out; a fee already in the books can be part of either.
+  const offered = entries.filter((e) => (moneyIn ? Number(e.amount) > 0 : Number(e.amount) < 0) || picked.includes(e.journal_line_id));
+  const total = entries.filter((e) => picked.includes(e.journal_line_id)).reduce((sum, e) => sum + Number(e.amount), 0);
+  const short = Math.round((total - Number(line.amount)) * 100) / 100;
+  const toggle = (id: number) => setPicked((old) => (old.includes(id) ? old.filter((x) => x !== id) : [...old, id]));
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await post(`/bank/lines/${line.id}/match`, { journal_line_ids: picked, fee_category_id: short > 0 ? fee : '' });
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="toggle-body" style={{ marginTop: 10 }}>
+      <p style={{ marginTop: 0 }}>
+        <strong>{date(line.txn_date)} · {moneyIn ? 'received' : 'paid out'} ₹{inr(Math.abs(Number(line.amount)))}</strong>{' '}
+        <span className="muted">{line.description}</span>
+      </p>
+      <p className="muted small">Tick the book entries this one line covers.</p>
+      <Table rows={offered} empty="No book entries on this account are waiting to be matched." columns={[
+        { key: 'pick', title: '', render: (e) => <input type="checkbox" checked={picked.includes(e.journal_line_id)} onChange={() => toggle(e.journal_line_id)} aria-label={`Include ${e.narration ?? 'entry'}`} style={{ width: 'auto' }} /> },
+        { key: 'entry_date', title: 'Date', render: (e) => date(e.entry_date) },
+        { key: 'ref_type', title: 'Type', render: (e) => label(e.ref_type) },
+        { key: 'party_name', title: 'Party / narration', render: (e) => <span style={{ whiteSpace: 'normal' }}>{e.party_name ?? e.narration}{e.payment_reference ? <span className="muted small"> · {e.payment_reference}</span> : null}</span> },
+        { key: 'amount', title: 'Amount', align: 'right', render: (e) => inr(e.amount) },
+      ]} />
+      <p>
+        Ticked: <strong>₹{inr(total)}</strong> of ₹{inr(line.amount)} on the statement.{' '}
+        {picked.length === 0 ? null : short === 0 ? <span className="badge green">Adds up</span>
+          : short > 0 ? <span className="badge amber">The bank paid ₹{inr(short)} less</span>
+          : <span className="badge red">₹{inr(Math.abs(short))} short of the statement</span>}
+      </p>
+      {short > 0 && (
+        <div className="form">
+          <label><span>Book the ₹{inr(short)} the bank kept as *</span>
+            <select value={fee} onChange={(e) => setFee(e.target.value)}>
+              <option value="">—</option>
+              {(categories.data?.data ?? []).filter((c) => c.active !== false).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
+      <div className="form-foot">
+        <button type="button" className="primary" disabled={busy || picked.length === 0 || short < 0 || (short > 0 && !fee)} onClick={save}>
+          {short > 0 ? 'Book the fee and match' : `Match ${picked.length} entr${picked.length === 1 ? 'y' : 'ies'}`}
+        </button>
+        <ErrorBox error={error} />
+      </div>
+    </div>
   );
 }
 
