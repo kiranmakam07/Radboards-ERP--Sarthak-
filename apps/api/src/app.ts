@@ -18,6 +18,7 @@ import { leadsRouter, publicLeadsRouter } from './modules/leads';
 import { opsRouter } from './modules/ops';
 import { partiesRouter } from './modules/parties';
 import { paymentsRouter } from './modules/payments';
+import { projectsRouter } from './modules/projects';
 import { purchasingRouter } from './modules/purchasing';
 import { salesRouter } from './modules/sales';
 
@@ -105,6 +106,7 @@ export function createApp(db: DB) {
   app.use('/api/gst', gstRouter(db));
   app.use('/api/hr', hrRouter(db));
   app.use('/api/ops', opsRouter(db));
+  app.use('/api/ops', projectsRouter(db));
   app.use('/api/dashboards', dashboardsRouter(db));
 
   app.use('/api', () => {

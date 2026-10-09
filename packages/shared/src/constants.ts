@@ -144,6 +144,9 @@ export type TaskFrequency = (typeof TASK_FREQUENCIES)[number];
 export const TASK_STATUSES = ['open', 'done', 'skipped'] as const;
 export const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
 
+export const PROJECT_STATUSES = ['planned', 'active', 'on_hold', 'done', 'cancelled'] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
 export const ASSET_STATUSES = ['in_use', 'under_repair', 'retired'] as const;
 export const INTERVAL_UNITS = ['days', 'months'] as const;
 export type IntervalUnit = (typeof INTERVAL_UNITS)[number];

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { addDays } from '@radcore/shared';
 import { plural } from '@/components/charts';
 import { InterviewResult } from '@/components/hr';
 import { MaintenanceDone, TaskCard, Due, everyText } from '@/components/ops';
@@ -21,7 +22,9 @@ export default function MyWorkPage() {
   const open = (d?.tasks ?? []).filter((t) => t.status === 'open');
   const late = open.filter((t) => t.overdue);
   const today = open.filter((t) => !t.overdue && t.due_date === d?.today);
-  const ahead = open.filter((t) => !t.overdue && t.due_date !== d?.today);
+  const weekEnd = d ? addDays(d.today, 7) : '';
+  const ahead = open.filter((t) => !t.overdue && t.due_date !== d?.today && t.due_date <= weekEnd);
+  const later = open.filter((t) => !t.overdue && t.due_date > weekEnd);
   const closed = (d?.tasks ?? []).filter((t) => t.status !== 'open');
 
   return (
@@ -32,7 +35,7 @@ export default function MyWorkPage() {
           <div className="stats">
             <Stat label="To do today" value={today.length} hint={closed.length ? `${closed.length} already closed today` : undefined} />
             <Stat label="Late" value={late.length ? <span style={{ color: 'var(--danger)' }}>{late.length}</span> : 0} />
-            <Stat label="Coming up this week" value={ahead.length} />
+            <Stat label="Coming up this week" value={ahead.length} hint={later.length ? `${later.length} more after that` : undefined} />
             <Stat label="Maintenance due" value={d.maintenance.length} />
             <Stat label="Interviews to take" value={interviews.data?.data.length ?? 0} />
           </div>
@@ -42,8 +45,10 @@ export default function MyWorkPage() {
           {late.map((t) => <TaskCard key={t.id} task={t} onChange={work.reload} />)}
           {today.length > 0 && <h2 className="section">Today</h2>}
           {today.map((t) => <TaskCard key={t.id} task={t} onChange={work.reload} />)}
-          {ahead.length > 0 && <h2 className="section">Coming up</h2>}
+          {ahead.length > 0 && <h2 className="section">Coming up this week</h2>}
           {ahead.map((t) => <TaskCard key={t.id} task={t} onChange={work.reload} />)}
+          {later.length > 0 && <h2 className="section">Later</h2>}
+          {later.map((t) => <TaskCard key={t.id} task={t} onChange={work.reload} />)}
           {closed.length > 0 && <h2 className="section">Closed today ({plural(closed.length, 'task')})</h2>}
           {closed.map((t) => <TaskCard key={t.id} task={t} onChange={work.reload} />)}
 

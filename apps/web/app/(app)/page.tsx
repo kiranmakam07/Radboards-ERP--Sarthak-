@@ -20,6 +20,8 @@ const TILES: [string, string, string][] = [
   ['/hr/pipeline', 'Hiring board', 'hr:read'],
   ['/hr/attendance', 'Attendance', 'hr:read'],
   ['/dashboards/hr', 'HR dashboard', 'hr:read'],
+  ['/ops/projects', 'Projects', 'ops:read'],
+  ['/ops/resources', 'Resource allocation', 'ops:read'],
   ['/ops/tasks', 'Tasks', 'ops:read'],
   ['/ops/assets', 'Assets & maintenance', 'ops:read'],
   ['/dashboards/ops', 'Operations dashboard', 'ops:read'],

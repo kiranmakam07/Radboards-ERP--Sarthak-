@@ -126,8 +126,8 @@ describe('operations: tasks, assets and maintenance', () => {
 
     const oneOff = await ops.post('/api/ops/tasks').send({ title: 'Renew the fire extinguisher certificate', assignee_id: u.accounts, due_date: addDays(today, 20) }).expect(201);
     ids.oneOff = oneOff.body.data.id;
-    // My list looks a week ahead: the task in 3 days is on it, the one in 20 days is not yet.
-    expect((await myTasks('accounts')).tasks.map((t: { id: string }) => t.id)).toEqual([ids.later]);
+    // My list holds everything open, nearest deadline first, however far off.
+    expect((await myTasks('accounts')).tasks.map((t: { id: string }) => t.id)).toEqual([ids.later, ids.oneOff]);
     await ops.post('/api/ops/tasks').send({ title: 'x', assignee_id: '00000000-0000-4000-8000-000000000000' }).expect(400);
   });
 

@@ -29,6 +29,7 @@ export const SERIES = {
   applicant: { prefix: () => 'A', pad: 0, perFy: false, start: 1001 },
   employee: { prefix: () => 'EMP', pad: 3, perFy: false },
   asset: { prefix: () => 'AST', pad: 3, perFy: false },
+  project: { prefix: () => 'PRJ', pad: 3, perFy: false },
 } as const satisfies Record<string, SeriesDef>;
 
 export type SeriesKey = keyof typeof SERIES;

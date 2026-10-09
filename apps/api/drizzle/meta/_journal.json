@@ -29,6 +29,13 @@
       "when": 1791528739041,
       "tag": "0003_hr_and_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791545707414,
+      "tag": "0004_projects_and_allocation",
+      "breakpoints": true
     }
   ]
 }

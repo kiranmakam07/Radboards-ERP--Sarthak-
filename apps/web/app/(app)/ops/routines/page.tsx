@@ -19,6 +19,7 @@ function fields(people: { value: string; label: string }[]): Field[] {
     { name: 'assignee_id', label: 'Who does it', type: 'select', required: true, options: people },
     { name: 'frequency', label: 'How often', type: 'select', required: true, options: TASK_FREQUENCIES.map((f) => ({ value: f, label: FREQUENCY_LABELS[f]! })) },
     { name: 'month_day', label: 'Day of the month', type: 'number', step: '1', help: 'For monthly. 31 means the last day' },
+    { name: 'due_time', label: 'Finish by (time)', type: 'time', help: 'The deadline on the day. Blank = any time that day' },
     ...DAY_ORDER.map((d): Field => ({ name: `d${d}`, label: WEEKDAY_LABELS[d]!, type: 'checkbox' })),
     { name: 'checklist', label: 'Checklist (one step per line)', type: 'textarea' },
     { name: 'description', label: 'Details', type: 'textarea' },
@@ -30,6 +31,7 @@ function body({ checklist, month_day, ...v }: Record<string, any>) {
   const out: Record<string, unknown> = { title: v.title, assignee_id: v.assignee_id, frequency: v.frequency, description: v.description, checklist: lines(checklist) };
   out.weekdays = DAY_ORDER.filter((d) => v[`d${d}`]);
   out.month_day = month_day;
+  out.due_time = v.due_time ?? '';
   return out;
 }
 
@@ -60,7 +62,7 @@ export default function RoutinesPage() {
       <Loading loading={loading} error={error} />
       <Table rows={data?.data} empty="No routines yet." columns={[
         { key: 'title', title: 'Routine', render: (r) => (manage ? <button type="button" className="link" onClick={() => setEditId(editId === r.id ? null : r.id)}>{r.title}</button> : r.title) },
-        { key: 'frequency', title: 'When', render: (r) => scheduleText(r) },
+        { key: 'frequency', title: 'When', render: (r) => `${scheduleText(r)}${r.due_time ? `, by ${String(r.due_time).slice(0, 5)}` : ''}` },
         { key: 'assignee_name', title: 'Who' },
         { key: 'checklist', title: 'Checklist', align: 'right', render: (r) => (r.checklist.length ? plural(r.checklist.length, 'step') : '') },
         { key: 'open_tasks', title: 'Open tasks', align: 'right' },
@@ -83,6 +85,7 @@ export default function RoutinesPage() {
           <Form key={editing.updated_at} submit="Save changes"
             initial={{
               title: editing.title, assignee_id: editing.assignee_id, frequency: editing.frequency, month_day: editing.month_day ?? '',
+              due_time: editing.due_time ? String(editing.due_time).slice(0, 5) : '',
               ...days(editing.weekdays), checklist: editing.checklist.join('\n'), description: editing.description ?? '',
             }}
             fields={fields(people)}

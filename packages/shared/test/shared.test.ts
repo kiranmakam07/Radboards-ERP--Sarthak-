@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ROLES, addMonths, amountInWords, canMoveApplicant, canMoveLead, computeLine, computeTotals, formatINR, fyOf, fyShort, gstinCheckChar,
-  isInterState, isTaskDueOn, isValidGstin, money, normalisePhone, stateCodeFromGstin, can, weekdayOf,
+  isInterState, isTaskDueOn, isValidGstin, money, normalisePhone, peakLoad, stateCodeFromGstin, can, weekStart, weekdayOf,
 } from '../src';
 
 describe('money', () => {
@@ -176,5 +176,21 @@ describe('HR and operations', () => {
     expect(isTaskDueOn(monthEnd, '2026-11-29')).toBe(false);
     expect(isTaskDueOn({ frequency: 'monthly', weekdays: [], monthDay: 5 }, '2026-11-05')).toBe(true);
     expect(isTaskDueOn({ frequency: 'need_based', weekdays: [1], monthDay: 1 }, '2026-11-02')).toBe(false);
+  });
+  it('finds the busiest day of a set of allocations', () => {
+    const spans = [
+      { from: '2026-10-05', to: '2026-10-16', percent: 50 },
+      { from: '2026-10-12', to: '2026-10-23', percent: 40 },
+      { from: '2026-10-14', to: '2026-10-14', percent: 30 },
+    ];
+    expect(peakLoad(spans, '2026-10-05', '2026-10-11')).toBe(50);
+    expect(peakLoad(spans, '2026-10-12', '2026-10-18')).toBe(120); // the 14th: all three overlap
+    expect(peakLoad(spans, '2026-10-15', '2026-10-18')).toBe(90);
+    expect(peakLoad(spans, '2026-10-19', '2026-10-25')).toBe(40);
+    expect(peakLoad(spans, '2026-11-01', '2026-11-07')).toBe(0);
+    expect(peakLoad([], '2026-10-05', '2026-10-11')).toBe(0);
+    expect(weekStart('2026-10-09')).toBe('2026-10-05'); // Friday -> Monday
+    expect(weekStart('2026-10-11')).toBe('2026-10-05'); // Sunday belongs to the week that started on Monday
+    expect(weekStart('2026-10-12')).toBe('2026-10-12');
   });
 });

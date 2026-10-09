@@ -46,7 +46,7 @@ const TONES: Record<string, string> = {
   pending: 'amber', approved: 'green', rejected: 'red',
   applied: 'blue', shortlisted: 'blue', interview: 'amber', offered: 'amber', hired: 'green',
   open: 'blue', on_hold: 'amber', done: 'green', skipped: 'red', scheduled: 'blue', completed: 'green', no_show: 'red',
-  pass: 'green', hold: 'amber', fail: 'red', active: 'green', left: 'grey',
+  pass: 'green', hold: 'amber', fail: 'red', active: 'green', left: 'grey', planned: 'grey',
   present: 'green', half_day: 'amber', absent: 'red', leave: 'blue', weekly_off: 'grey', holiday: 'grey',
   in_use: 'green', under_repair: 'amber', retired: 'grey', overdue: 'red', due_soon: 'amber', on_track: 'green', off: 'grey',
 };
@@ -107,7 +107,7 @@ export function Table<T extends Record<string, any>>({
 export type Field = {
   name: string;
   label: string;
-  type?: 'text' | 'number' | 'date' | 'datetime-local' | 'select' | 'textarea' | 'checkbox' | 'password' | 'tel' | 'email';
+  type?: 'text' | 'number' | 'date' | 'time' | 'datetime-local' | 'select' | 'textarea' | 'checkbox' | 'password' | 'tel' | 'email';
   options?: { value: string; label: string }[];
   required?: boolean;
   placeholder?: string;
