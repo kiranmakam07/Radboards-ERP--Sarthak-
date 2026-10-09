@@ -110,4 +110,28 @@ describe('attached files', () => {
     await hr.patch(`/api/hr/applicants/${applicant.body.data.id}`).send({ resume_url: '/api/files/not-an-id' }).expect(400);
     await (await w.as('owner')).get('/api/files/00000000-0000-4000-8000-000000000000').expect(404);
   });
+
+  it('can keep files in the database instead, for a host with no disk of its own', async () => {
+    const before = fs.readdirSync(dir).length;
+    config.fileStore = 'database';
+    try {
+      const up = await send('accounts', 'bill', PNG, 'Courier bill.png', 'image/png');
+      expect(up.status).toBe(201);
+      expect(fs.readdirSync(dir)).toHaveLength(before); // nothing new on disk
+      const [kept] = await rows<{ n: number }>(w.db, sql`select octet_length(bytes)::int as n from file_contents where file_id = ${up.body.data.id}`);
+      expect(kept!.n).toBe(PNG.length);
+
+      const back = await fetchBytes('accounts', up.body.data.url);
+      expect(back.status).toBe(200);
+      expect((back.body as Buffer).equals(PNG)).toBe(true);
+      expect(back.headers['content-type']).toBe('image/png');
+      await (await w.as('sales')).get(up.body.data.url).expect(403); // the same rules about who may open it
+      expect((await send('accounts', 'bill', HTML, 'bill.pdf', 'application/pdf')).status).toBe(400);
+    } finally {
+      config.fileStore = 'disk';
+    }
+    // Files attached while they were kept on disk are still found there.
+    const old = await rows<{ id: string }>(w.db, sql`select id from files where purpose = 'bill' and original_name = 'Rent bill (Oct).pdf'`);
+    await (await w.as('accounts')).get(`/api/files/${old[0]!.id}`).expect(200);
+  });
 });

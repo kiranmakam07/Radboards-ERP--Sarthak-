@@ -21,6 +21,12 @@ import { emptyToNull, inTx, sendList, zAddress, zGstin, zHttpUrl, zId, zMoney, z
 
 const zPassword = z.string().min(8, 'must be at least 8 characters').max(200);
 
+/** What the screens need to know about this installation, sent along with who is signed in. */
+const sessionExtras = async (db: DB) => ({
+  sample_data: await getSetting(db, 'sample_data'),
+  max_upload_mb: Math.floor(config.maxUploadBytes / 1024 / 1024),
+});
+
 export function authRouter(db: DB) {
   const r = Router();
   // Slow down password guessing.
@@ -31,7 +37,7 @@ export function authRouter(db: DB) {
     const body = z.object({ identifier: z.string().min(1), password: z.string().min(1) }).parse(req.body);
     const { token, user } = await login(db, body.identifier, body.password);
     setSessionCookie(res, token);
-    res.json({ user, permissions: permissionsFor(user.role), sample_data: await getSetting(db, 'sample_data') });
+    res.json({ user, permissions: permissionsFor(user.role), ...(await sessionExtras(db)) });
   });
 
   r.post('/logout', async (req, res) => {
@@ -41,7 +47,7 @@ export function authRouter(db: DB) {
   });
 
   r.get('/me', requireAuth, async (req, res) => {
-    res.json({ user: req.user, permissions: permissionsFor(req.user!.role), sample_data: await getSetting(db, 'sample_data') });
+    res.json({ user: req.user, permissions: permissionsFor(req.user!.role), ...(await sessionExtras(db)) });
   });
 
   r.post('/change-password', requireAuth, async (req, res) => {

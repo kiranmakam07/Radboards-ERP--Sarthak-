@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
-  bigint, bigserial, boolean, char, check, date, index, integer, jsonb, numeric, pgEnum, pgTable, smallint, text, time,
+  bigint, bigserial, boolean, char, check, customType, date, index, integer, jsonb, numeric, pgEnum, pgTable, smallint, text, time,
   timestamp, unique, uniqueIndex, uuid, type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import {
@@ -842,6 +842,20 @@ export const files = pgTable('files', {
   sha256: text('sha256').notNull(),
   ...stamps,
 }, (t) => [check('files_purpose_chk', sql`${t.purpose} in ('resume', 'bill', 'item_image', 'other')`)]);
+
+const bytea = customType<{ data: Buffer; driverData: Uint8Array }>({
+  dataType: () => 'bytea',
+  fromDriver: (value) => Buffer.from(value),
+});
+
+/**
+ * The bytes of an attached file, on a host with no disk of its own (FILE_STORE=database). Kept
+ * apart from `files` so that listing files never drags their contents along.
+ */
+export const fileContents = pgTable('file_contents', {
+  fileId: uuid('file_id').primaryKey().references(() => files.id, { onDelete: 'cascade' }),
+  bytes: bytea('bytes').notNull(),
+});
 
 /**
  * What was spent on advertising, so the marketing dashboard can show cost per lead. An entry is

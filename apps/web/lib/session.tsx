@@ -7,6 +7,8 @@ export type Session = {
   permissions: string[];
   /** True on the demo and on a review copy: everything on screen is sample data. */
   sample_data?: boolean;
+  /** The largest file that can be attached here, in MB. */
+  max_upload_mb?: number;
 };
 
 export const SessionContext = createContext<Session | null>(null);

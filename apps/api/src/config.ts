@@ -21,7 +21,14 @@ export const config = {
    * unset          -> embedded PGlite database stored in apps/api/.data (zero-setup local dev).
    * memory://      -> throwaway in-memory database (tests).
    */
-  databaseUrl: env.DATABASE_URL ?? `file:${path.join(API_ROOT, '.data', 'pglite')}`,
+  databaseUrl: env.DATABASE_URL ?? env.POSTGRES_URL ?? `file:${path.join(API_ROOT, '.data', 'pglite')}`,
+  /**
+   * A connection that does not go through a pooler, for migrations. Hosted databases such as Neon
+   * give two addresses; where there is only one, it is the same as databaseUrl.
+   */
+  directDatabaseUrl: env.DATABASE_URL_UNPOOLED ?? env.POSTGRES_URL_NON_POOLING ?? env.DATABASE_URL ?? env.POSTGRES_URL ?? '',
+  /** True on a host that runs the API once per request instead of as a server (Vercel). */
+  serverless: Boolean(env.VERCEL),
   sessionTtlDays: Number(env.SESSION_TTL_DAYS ?? 14),
   cookieName: 'rc_session',
   cookieSecure: env.COOKIE_SECURE ? env.COOKIE_SECURE === 'true' : env.NODE_ENV === 'production',
@@ -31,6 +38,12 @@ export const config = {
   migrationsFolder: path.join(API_ROOT, 'drizzle'),
   /** Where attached files (resumes, bill photos, item pictures) are kept. On a server this is a volume of its own. */
   uploadDir: env.UPLOAD_DIR ?? path.join(API_ROOT, '.data', 'uploads'),
+  /**
+   * 'disk' keeps attached files in uploadDir; 'database' keeps them in the database, for hosts
+   * with no disk of their own (Vercel). Such hosts also cap the size of a request, hence the limit.
+   */
+  fileStore: (env.FILE_STORE ?? (env.VERCEL ? 'database' : 'disk')) as 'disk' | 'database',
+  maxUploadBytes: Number(env.MAX_UPLOAD_MB ?? (env.VERCEL ? 4 : 10)) * 1024 * 1024,
   /**
    * Lead capture from Meta (Facebook / Instagram lead ads and WhatsApp Business). All blank until
    * the accounts are connected; while blank, those webhooks refuse everything.

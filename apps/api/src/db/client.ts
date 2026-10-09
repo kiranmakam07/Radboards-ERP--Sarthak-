@@ -13,14 +13,20 @@ export type DB = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 export type DbHandle = { db: DB; close: () => Promise<void>; kind: 'postgres' | 'pglite' };
 
-export async function createDb(url: string, migrationsFolder: string): Promise<DbHandle> {
-  if (/^postgres(ql)?:\/\//.test(url)) {
+export const isPostgresUrl = (url: string) => /^postgres(ql)?:\/\//.test(url);
+
+/**
+ * Open the database and bring it up to date. `migrate: false` skips the update, for a host where
+ * that was already done when the app was built; `poolSize` is how many connections to keep.
+ */
+export async function createDb(url: string, migrationsFolder: string, opts: { migrate?: boolean; poolSize?: number } = {}): Promise<DbHandle> {
+  if (isPostgresUrl(url)) {
     const pg = (await import('pg')).default;
     const { drizzle } = await import('drizzle-orm/node-postgres');
     const { migrate } = await import('drizzle-orm/node-postgres/migrator');
-    const pool = new pg.Pool({ connectionString: url, max: 10 });
+    const pool = new pg.Pool({ connectionString: url, max: opts.poolSize ?? 10 });
     const db = drizzle(pool, { schema });
-    await migrate(db, { migrationsFolder });
+    if (opts.migrate !== false) await migrate(db, { migrationsFolder });
     return { db: db as unknown as DB, close: () => pool.end(), kind: 'postgres' };
   }
 

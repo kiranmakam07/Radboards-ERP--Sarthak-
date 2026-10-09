@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useContext, useState, type FormEvent, type ReactNode } from 'react';
 import { formatDate, formatINR } from '@radcore/shared';
+import { SessionContext } from '@/lib/session';
 
 export const inr = (v: unknown) => (v === null || v === undefined || v === '' ? '' : formatINR(v as string));
 export const num = (v: unknown) => (v === null || v === undefined || v === '' ? '' : String(Number(v)));
@@ -191,25 +192,31 @@ export function Form({
 }
 
 /**
- * Attach a file (PDF or picture, up to 10 MB). It is uploaded as soon as it is chosen; the form
- * then carries the link to it. Works on a phone too, where "choose file" offers the camera.
+ * Attach a file (PDF or picture). It is uploaded as soon as it is chosen; the form then carries
+ * the link to it. Works on a phone too, where "choose file" offers the camera.
  */
 export function UploadField({ purpose, value, onChange }: { purpose: string; value: string; onChange: (url: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
+  const limitMb = useContext(SessionContext)?.max_upload_mb ?? 10;
 
   async function upload(file: File | undefined) {
     if (!file) return;
-    setBusy(true);
     setError(null);
+    // Said here, before sending: some hosts turn an oversized file away without a readable reason.
+    if (file.size > limitMb * 1024 * 1024) {
+      setError(`That file is ${(file.size / 1024 / 1024).toFixed(1)} MB. The most that can be attached here is ${limitMb} MB.`);
+      return;
+    }
+    setBusy(true);
     try {
       const res = await fetch(`/api/files?purpose=${encodeURIComponent(purpose)}`, {
         method: 'POST', credentials: 'same-origin', body: file,
         headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
       });
       const json = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(json?.error?.message ?? `Upload failed (${res.status})`);
+      if (!res.ok) throw new Error(json?.error?.message ?? (res.status === 413 ? `That file is too large. The most that can be attached here is ${limitMb} MB.` : `Upload failed (${res.status})`));
       setName(json.data.name);
       onChange(json.data.url);
     } catch (e) {
@@ -231,7 +238,7 @@ export function UploadField({ purpose, value, onChange }: { purpose: string; val
     <>
       <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" disabled={busy}
         onChange={(e) => { void upload(e.target.files?.[0]); e.target.value = ''; }} />
-      {busy ? <small className="muted">Uploading…</small> : null}
+      <small className="muted">{busy ? 'Uploading…' : `PDF or a photo, up to ${limitMb} MB`}</small>
       {error ? <small className="error small">{error}</small> : null}
     </>
   );
