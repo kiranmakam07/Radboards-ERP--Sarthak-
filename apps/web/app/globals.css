@@ -281,3 +281,6 @@ h2.section { margin: 18px 0 8px; color: var(--muted); font-size: 12px; text-tran
 .progress { height: 8px; background: #e7e9ee; border-radius: 4px; overflow: hidden; min-width: 80px; }
 .progress > span { display: block; height: 8px; background: var(--viz-1); border-radius: 0 4px 4px 0; }
 @media print { .timeline-today-label { display: none; } }
+
+/* ---- review copy / demo ---- */
+.sample-banner { background: #fcf1dc; color: #7a5200; border-bottom: 1px solid #f0d9a8; padding: 6px 16px; font-size: 13px; }

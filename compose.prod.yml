@@ -39,6 +39,9 @@ services:
       SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Admin}
       SEED_ADMIN_PHONE: ${SEED_ADMIN_PHONE:?set SEED_ADMIN_PHONE in .env.production}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      # A review copy: load sample data into an empty database, with DEMO_PASSWORD on the review sign-ins.
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-}
       # Lead capture from Meta (Facebook / Instagram lead ads, WhatsApp). Blank = not connected.
       META_APP_SECRET: ${META_APP_SECRET:-}
       META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-}

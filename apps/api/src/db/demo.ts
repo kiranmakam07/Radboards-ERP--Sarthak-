@@ -22,13 +22,14 @@ export const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'radcore-demo';
 
 const gstin = (state: string, pan: string) => `${state}${pan}1Z${gstinCheckChar(`${state}${pan}1Z`)}`;
 
-export async function seedDemo(db: DB): Promise<void> {
-  const hash = await hashPassword(DEMO_PASSWORD);
+export async function seedDemo(db: DB, password: string = DEMO_PASSWORD): Promise<void> {
+  const hash = await hashPassword(password);
   await db.insert(users).values(
     ROLES.map((role, i) => ({ name: role === 'hr' ? 'Demo HR' : `Demo ${role[0]!.toUpperCase()}${role.slice(1)}`, phone: `+91900000000${i}`, passwordHash: hash, role })),
   );
   const [admin] = await rows<{ id: string; name: string; phone: string }>(db, sql`select id, name, phone from users where role = 'admin' limit 1`);
 
+  await setSetting(db, 'sample_data', true, admin!.id);
   await setSetting(db, 'company', {
     name: 'Radboards Pvt Ltd (DEMO)', gstin: gstin('27', 'AAPFU0939F'), state_code: '27',
     address: { line1: '12 Skate Street', city: 'Pune', state: 'Maharashtra', pincode: '411001' },
@@ -96,6 +97,23 @@ export async function seedDemo(db: DB): Promise<void> {
     await seedPeopleAndOperations(ctx);
   });
   console.log(`Demo data loaded (${istDate()}). Sign in with phone 9000000006 (admin) and the demo password.`);
+}
+
+/**
+ * A review copy on a real server (SEED_DEMO_DATA=true): the same sample data, loaded once into
+ * a database that has no users yet, so there is something to click through. It never touches a
+ * database that is already in use, and it will not start with the well-known demo password.
+ * Sign-in is phone 9000000000 to 9000000008 (one per role) with DEMO_PASSWORD.
+ */
+export async function seedReviewCopy(db: DB): Promise<'loaded' | 'already in use'> {
+  const existing = await db.select({ id: users.id }).from(users).limit(1);
+  if (existing.length > 0) return 'already in use';
+  const password = process.env.DEMO_PASSWORD ?? '';
+  if (password.length < 10 || password === 'radcore-demo') {
+    throw new Error('SEED_DEMO_DATA needs DEMO_PASSWORD: your own password of at least 10 characters for the review sign-ins.');
+  }
+  await seedDemo(db, password);
+  return 'loaded';
 }
 
 /** HR and operations sample data: a hiring pipeline at every stage, staff with a week of attendance, routines and machines. */

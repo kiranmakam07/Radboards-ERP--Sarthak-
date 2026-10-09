@@ -107,7 +107,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <button type="button" onClick={async () => { await post('/auth/logout'); window.location.href = '/login'; }}>Sign out</button>
           </div>
         </nav>
-        <main className="main">{children}</main>
+        <main className="main">
+          {data.sample_data ? <div className="sample-banner no-print">Review copy with sample data. Nothing here is real, and it will be cleared before the system goes live.</div> : null}
+          {children}
+        </main>
       </div>
     </SessionContext.Provider>
   );
