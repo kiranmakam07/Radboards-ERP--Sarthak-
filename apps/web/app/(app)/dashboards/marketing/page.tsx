@@ -1,6 +1,7 @@
 'use client';
 
-import { BarList, ChartCard, ColumnChart, LineChart, fillDays } from '@/components/charts';
+import Link from 'next/link';
+import { BarList, ChartCard, ColumnChart, LineChart, fillDays, rupees } from '@/components/charts';
 import { useRange } from '@/components/range';
 import { Card, Loading, Page, Stat, Table, date, inr, num } from '@/components/ui';
 import { useGet } from '@/lib/api';
@@ -42,10 +43,13 @@ export default function MarketingDashboard() {
             <Stat label="Attributed revenue" value={`₹${inr(revenue)}`} />
             <Stat label="Median response time" value={d.response_time.median_hours === null ? '—' : `${num(d.response_time.median_hours)} h`}
               hint={`${d.response_time.not_yet_contacted} not yet contacted`} />
+            <Stat label="Ad spend" value={`₹${inr(d.spend.total)}`} hint={<Link href="/crm/spend">Enter spend</Link>} />
+            <Stat label="Cost per lead" value={d.spend.cost_per_lead === null ? '—' : `₹${inr(d.spend.cost_per_lead)}`}
+              hint={d.spend.cost_per_lead === null ? 'no ad spend entered for this period' : `${d.spend.leads_from_paid_sources} leads from the sources paid for`} />
           </div>
 
           <ChartCard title={`Leads per day, ${date(d.range.from)} to ${date(d.range.to)}`}>
-            <LineChart name="leads" empty="No leads in this period."
+            <LineChart name="leads" singular="lead" empty="No leads in this period."
               points={fillDays([...perDay].map(([day, value]) => ({ day, value })), d.range.from, d.range.to)} />
           </ChartCard>
 
@@ -56,11 +60,21 @@ export default function MarketingDashboard() {
                 { key: 'lost', title: 'Lost', align: 'right' },
                 { key: 'conversion_pct', title: 'Conversion', align: 'right', render: (r) => (r.conversion_pct === null ? '' : `${num(r.conversion_pct)}%`) },
                 { key: 'revenue', title: 'Revenue', align: 'right', render: (r) => inr(r.revenue) },
+                { key: 'spend', title: 'Ad spend', align: 'right', render: (r) => (Number(r.spend) ? inr(r.spend) : '') },
+                { key: 'cost_per_lead', title: 'Per lead', align: 'right', render: (r) => inr(r.cost_per_lead) },
+                { key: 'cost_per_conversion', title: 'Per conversion', align: 'right', render: (r) => inr(r.cost_per_conversion) },
               ]} />
             }>
               <BarList empty="No leads in this period."
                 data={d.by_source.filter((r: any) => r.leads > 0).map((r: any) => ({
                   label: r.source, value: r.leads, note: `${r.converted} converted${Number(r.revenue) > 0 ? `, ₹${inr(r.revenue)}` : ''}`,
+                }))} />
+            </ChartCard>
+
+            <ChartCard title="Cost per lead, by source" actions={<Link href="/crm/spend">Ad spend</Link>}>
+              <BarList format={rupees} empty="Enter what was spent on ads to see what each lead costs."
+                data={d.by_source.filter((r: any) => r.cost_per_lead !== null).map((r: any) => ({
+                  label: r.source, value: Number(r.cost_per_lead), note: `₹${inr(r.spend)} for ${r.leads} lead${r.leads === 1 ? '' : 's'}`,
                 }))} />
             </ChartCard>
 
@@ -81,6 +95,9 @@ export default function MarketingDashboard() {
               <Table rows={d.leads_by_campaign} empty="No leads in this period." columns={[
                 { key: 'source', title: 'Source' }, { key: 'campaign', title: 'Campaign / detail' }, { key: 'leads', title: 'Leads', align: 'right' },
                 { key: 'converted', title: 'Converted', align: 'right' },
+                { key: 'spend', title: 'Ad spend', align: 'right', render: (r) => (Number(r.spend) ? inr(r.spend) : '') },
+                { key: 'cost_per_lead', title: 'Per lead', align: 'right', render: (r) => (Number(r.spend) && r.cost_per_lead === null ? <span className="error small">no leads</span> : inr(r.cost_per_lead)) },
+                { key: 'cost_per_conversion', title: 'Per conversion', align: 'right', render: (r) => inr(r.cost_per_conversion) },
               ]} />
             </Card>
           </div>

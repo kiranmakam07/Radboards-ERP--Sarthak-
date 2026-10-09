@@ -8,7 +8,7 @@ import { captureLead, sourceIdByName } from '../modules/leads';
 import { createParty } from '../modules/parties';
 import { rows, sql, type DB } from './client';
 import {
-  allocations, assets, channelEvents, items, jobOpenings, maintenanceSchedules, projects, taskTemplates, tasks, users,
+  adSpends, allocations, assets, channelEvents, items, jobOpenings, maintenanceSchedules, projects, taskTemplates, tasks, users,
 } from './schema';
 
 /**
@@ -75,6 +75,14 @@ export async function seedDemo(db: DB): Promise<void> {
     await lead('Vikram Shah', '+919820022222', 'Google Ads', 'Longboard search', 'BRD-LONG');
     await lead('Neha Kulkarni', '+919820033333', 'Instagram Collab', '@skate.pune', 'HLM-01');
     await lead('Imran Khan', '+919820044444', 'Website', null, 'BRD-CRUISER');
+
+    // Ad spend, so the marketing dashboard shows what a lead costs.
+    const sourceId = async (name: string) => sourceIdByName(ctx.tx, name);
+    await ctx.tx.insert(adSpends).values([
+      { sourceId: await sourceId('Meta Ads'), detail: 'Diwali campaign', spendDate: istDate(), amount: '1800.00', createdBy: admin!.id },
+      { sourceId: await sourceId('Google Ads'), detail: 'Longboard search', spendDate: istDate(), amount: '1250.00', createdBy: admin!.id },
+      { sourceId: await sourceId('Instagram Collab'), spendDate: istDate(), amount: '3000.00', notes: 'Fee for the reel', createdBy: admin!.id },
+    ]);
 
     // What the Lead sources screen looks like once the connections are live: three arrivals and one that could not be used.
     const byPhone = await rows<{ id: string; phone: string }>(ctx.tx, sql`select id, phone from leads`);

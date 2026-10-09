@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { addDays, can, istDate } from '@radcore/shared';
+import { D, addDays, can, fyOf, fyRange, istDate, money } from '@radcore/shared';
 import { requireAuth, requirePerm } from '../core/auth';
 import { rows, type DB } from '../db/client';
 import { zDate } from '../lib/http';
@@ -203,8 +203,7 @@ export function dashboardsRouter(db: DB) {
 
   r.get('/marketing', requirePerm('dashboard:marketing'), async (req, res) => {
     const { from, to } = range(req.query);
-    res.json({
-      data: {
+    const data: Record<string, any> = {
         range: { from, to },
         leads_by_day: await rows(db, sql`
           select (l.created_at at time zone ${IST})::date as day, s.name as source, count(*)::int as leads
@@ -252,6 +251,180 @@ export function dashboardsRouter(db: DB) {
             from leads l join lead_sources s on s.id = l.source_id
            where s.name = 'Walk-in' and (l.created_at at time zone ${IST})::date between ${from}::date and ${to}::date
            group by 1, 2 order by 1, 2`),
+    };
+
+    // Ad spend in the same period turns the lead counts into cost per lead and per conversion.
+    const each = (spend: string, n: number) => (n > 0 ? money(D(spend).div(n)) : null);
+    const bySource = await rows<{ source_id: string; spend: string }>(db, sql`
+      select source_id, sum(amount)::numeric(14,2)::text as spend from ad_spends
+       where spend_date between ${from}::date and ${to}::date group by source_id`);
+    data.by_source = data.by_source.map((s: { source_id: string; leads: number; converted: number }) => {
+      const spend = bySource.find((x) => x.source_id === s.source_id)?.spend ?? '0.00';
+      return { ...s, spend, cost_per_lead: D(spend).gt(0) ? each(spend, s.leads) : null, cost_per_conversion: D(spend).gt(0) ? each(spend, s.converted) : null };
+    });
+    const byCampaign = await rows<{ source: string; campaign: string; spend: string }>(db, sql`
+      select s.name as source, a.detail as campaign, sum(a.amount)::numeric(14,2)::text as spend
+        from ad_spends a join lead_sources s on s.id = a.source_id
+       where a.detail is not null and a.spend_date between ${from}::date and ${to}::date group by 1, 2`);
+    const campaigns: { source: string; campaign: string; leads: number; converted: number }[] = data.leads_by_campaign;
+    // Money spent on a named campaign that brought no leads still belongs on the list. Spend entered for a source
+    // as a whole is not a campaign; it shows against the source.
+    for (const c of byCampaign) {
+      if (!campaigns.some((r) => r.source === c.source && r.campaign === c.campaign)) campaigns.push({ source: c.source, campaign: c.campaign, leads: 0, converted: 0 });
+    }
+    data.leads_by_campaign = campaigns.map((r) => {
+      const spend = byCampaign.find((c) => c.source === r.source && c.campaign === r.campaign)?.spend ?? '0.00';
+      return { ...r, spend, cost_per_lead: D(spend).gt(0) ? each(spend, r.leads) : null, cost_per_conversion: D(spend).gt(0) ? each(spend, r.converted) : null };
+    });
+    const totalSpend = bySource.reduce((sum, x) => sum.plus(x.spend), D(0));
+    const paidLeads = data.by_source.filter((s: { spend: string }) => D(s.spend).gt(0)).reduce((n: number, s: { leads: number }) => n + s.leads, 0);
+    data.spend = { total: money(totalSpend), leads_from_paid_sources: paidLeads, cost_per_lead: totalSpend.gt(0) ? each(money(totalSpend), paidLeads) : null };
+    res.json({ data });
+  });
+
+  /** Stores: what the stock is worth and where, what is running low, what is stuck, and what has stopped moving. */
+  r.get('/stores', requirePerm('dashboard:stores'), async (req, res) => {
+    const { from, to, today } = range(req.query);
+    res.json({
+      data: {
+        range: { from, to },
+        value_by_location: await rows(db, sql`
+          select l.id, l.name, l.type, coalesce(sum(m.value), 0)::numeric(16,2) as value, count(distinct m.item_id) filter (where m.qty <> 0)::int as items
+            from locations l left join stock_movements m on m.location_id = l.id
+           where l.active group by l.id order by l.name`),
+        value_by_type: await rows(db, sql`
+          select i.item_type, coalesce(sum(m.value), 0)::numeric(16,2) as value
+            from stock_movements m join items i on i.id = m.item_id group by i.item_type order by 2 desc`),
+        // Below the reorder level, counting only stock that can be sold or used (not the rejected bin).
+        low_stock: await rows(db, sql`
+          select i.id, i.sku, i.name, i.unit, i.reorder_level, coalesce(s.qty, 0) as qty
+            from items i
+            left join (select m.item_id, sum(m.qty) as qty from stock_movements m join locations l on l.id = m.location_id
+                        where l.type <> 'rejected' group by m.item_id) s on s.item_id = i.id
+           where i.is_stock_item and i.active and i.reorder_level is not null and coalesce(s.qty, 0) < i.reorder_level
+           order by coalesce(s.qty, 0) / nullif(i.reorder_level, 0), i.name limit 50`),
+        awaiting_goods: await rows(db, sql`
+          select o.id, o.po_no, p.name as supplier, o.order_date, o.expected_date, o.status,
+                 (${today}::date - coalesce(o.expected_date, o.order_date))::int as days_waiting,
+                 (o.expected_date is not null and o.expected_date < ${today}::date) as late
+            from purchase_orders o join parties p on p.id = o.supplier_id
+           where o.status in ('sent','partly_received') order by coalesce(o.expected_date, o.order_date) limit 50`),
+        waiting_qc: await rows(db, sql`
+          select g.id, g.grn_no, p.name as supplier, g.received_at,
+                 (${today}::date - (g.received_at at time zone ${IST})::date)::int as days_waiting
+            from goods_receipts g join parties p on p.id = g.supplier_id
+           where g.status = 'received' order by g.received_at limit 50`),
+        rejects_to_return: (await rows(db, sql`
+          select count(distinct grn_id)::int as receipts, coalesce(sum(coalesce(rejected_qty, 0) - returned_qty), 0) as qty
+            from goods_receipt_lines where coalesce(rejected_qty, 0) > returned_qty`))[0],
+        adjustments_pending: (await rows(db, sql`select count(*)::int as count from stock_adjustments where status = 'pending'`))[0],
+        // Goods in and out by value per day. Transfers only move stock between our own locations, so they are left out.
+        movements_by_day: await rows(db, sql`
+          select (m.posted_at at time zone ${IST})::date as day,
+                 coalesce(sum(m.value) filter (where m.qty > 0), 0)::numeric(16,2) as value_in,
+                 coalesce(-sum(m.value) filter (where m.qty < 0), 0)::numeric(16,2) as value_out
+            from stock_movements m
+           where m.movement_type <> 'transfer' and (m.posted_at at time zone ${IST})::date between ${from}::date and ${to}::date
+           group by 1 order by 1`),
+        fast_movers: await rows(db, sql`
+          select i.id, i.sku, i.name, -sum(m.qty) as qty_out
+            from stock_movements m join items i on i.id = m.item_id
+           where m.movement_type = 'sale_out' and (m.posted_at at time zone ${IST})::date between ${from}::date and ${to}::date
+           group by i.id having -sum(m.qty) > 0 order by 4 desc limit 10`),
+        // Money sitting on the shelf: in stock, and nothing sold or used for 90 days.
+        not_moving: await rows(db, sql`
+          select i.id, i.sku, i.name, v.qty, v.value,
+                 (select max((m.posted_at at time zone ${IST})::date) from stock_movements m where m.item_id = i.id and m.qty < 0 and m.movement_type <> 'transfer') as last_out
+            from items i join v_item_valuation v on v.item_id = i.id
+           where v.qty > 0 and not exists (
+                   select 1 from stock_movements m where m.item_id = i.id and m.qty < 0 and m.movement_type <> 'transfer'
+                      and m.posted_at > now() - interval '90 days')
+             and exists (select 1 from stock_movements m where m.item_id = i.id and m.posted_at <= now() - interval '90 days')
+           order by v.value desc limit 20`),
+      },
+    });
+  });
+
+  /** The owner's one page: the few numbers that say how the whole business is doing today. */
+  r.get('/owner', requirePerm('dashboard:owner'), async (_req, res) => {
+    const today = istDate();
+    const monthStart = `${today.slice(0, 7)}-01`;
+    const lastMonthEnd = addDays(monthStart, -1);
+    const lastMonthStart = `${lastMonthEnd.slice(0, 7)}-01`;
+    // The same number of days into last month, so the comparison is like for like.
+    const lastMonthSameDay = addDays(lastMonthStart, Number(today.slice(8, 10)) - 1) > lastMonthEnd ? lastMonthEnd : addDays(lastMonthStart, Number(today.slice(8, 10)) - 1);
+    const one = async <T>(q: ReturnType<typeof sql>) => (await rows<T>(db, q))[0]!;
+    const netSales = (from: string, to: string) => one<{ value: string; invoices: number }>(sql`
+      select coalesce(sum(case when doc_type = 'credit_note' then -grand_total else grand_total end), 0)::numeric(16,2)::text as value,
+             count(*) filter (where doc_type = 'tax_invoice')::int as invoices
+        from invoices where status = 'issued' and invoice_date between ${from}::date and ${to}::date`);
+    const profit = (from: string, to: string) => one<{ net_profit: string }>(sql`
+      select coalesce(sum(l.credit - l.debit), 0)::numeric(16,2)::text as net_profit
+        from journal_lines l join journal_entries e on e.id = l.entry_id join accounts a on a.id = l.account_id
+       where a.type in ('income', 'expense') and e.entry_date between ${from}::date and ${to}::date and e.ref_type <> 'year_close'`);
+    await ensureTasks(db, today);
+    res.json({
+      data: {
+        today,
+        sales: {
+          today: await netSales(today, today),
+          month_to_date: await netSales(monthStart, today),
+          last_month_same_days: await netSales(lastMonthStart, lastMonthSameDay),
+          by_day: await rows(db, sql`
+            select invoice_date as day, sum(case when doc_type = 'credit_note' then -grand_total else grand_total end) as value
+              from invoices where status = 'issued' and invoice_date between ${addDays(today, -29)}::date and ${today}::date
+             group by invoice_date order by invoice_date`),
+          by_channel: await salesByChannel(db, monthStart, today),
+        },
+        money: {
+          collected_this_month: (await one<{ v: string }>(sql`
+            select coalesce(sum(amount), 0)::numeric(16,2)::text as v from payments
+             where status = 'posted' and direction = 'in' and paid_on between ${monthStart}::date and ${today}::date`)).v,
+          cash_and_bank: (await one<{ v: string }>(sql`
+            select coalesce(sum(l.debit) - sum(l.credit), 0)::numeric(16,2)::text as v
+              from journal_lines l join accounts a on a.id = l.account_id where a.subtype is not null`)).v,
+          receivables: await one(sql`
+            select coalesce(sum(outstanding), 0)::numeric(16,2)::text as total,
+                   coalesce(sum(outstanding) filter (where coalesce(due_date, invoice_date) < ${today}::date), 0)::numeric(16,2)::text as overdue
+              from v_invoice_outstanding where outstanding > 0`),
+          payables: await one(sql`
+            select coalesce(sum(outstanding), 0)::numeric(16,2)::text as total,
+                   coalesce(sum(outstanding) filter (where due_date < ${today}::date), 0)::numeric(16,2)::text as overdue
+              from v_bill_outstanding where outstanding > 0`),
+          stock_value: (await one<{ v: string }>(sql`select coalesce(sum(value), 0)::numeric(16,2)::text as v from stock_movements`)).v,
+          profit_this_month: (await profit(monthStart, today)).net_profit,
+          profit_this_year: (await profit(fyRange(fyOf(today)).from, today)).net_profit,
+          gst_this_month: (await gstSummary(db, monthStart, today)).net_payable.total,
+        },
+        leads: await one(sql`
+          select count(*)::int as this_month,
+                 count(*) filter (where stage = 'converted')::int as converted,
+                 count(*) filter (where stage = 'new')::int as not_contacted,
+                 round(100.0 * count(*) filter (where stage = 'converted') / nullif(count(*), 0), 1) as conversion_pct
+            from leads where (created_at at time zone ${IST})::date between ${monthStart}::date and ${today}::date`),
+        orders: await one(sql`
+          select count(*) filter (where o.status = 'draft')::int as quotes,
+                 count(*) filter (where o.status = 'confirmed')::int as to_deliver,
+                 count(*) filter (where o.status = 'delivered')::int as to_invoice
+            from sales_orders o`),
+        stores: await one(sql`
+          select (select count(*) from items i
+                    left join (select m.item_id, sum(m.qty) as qty from stock_movements m join locations l on l.id = m.location_id
+                                where l.type <> 'rejected' group by m.item_id) s on s.item_id = i.id
+                   where i.is_stock_item and i.active and i.reorder_level is not null and coalesce(s.qty, 0) < i.reorder_level)::int as low_stock,
+                 (select count(*) from goods_receipts where status = 'received')::int as waiting_qc,
+                 (select count(*) from purchase_orders where status in ('sent','partly_received'))::int as awaiting_goods`),
+        people: await one(sql`
+          select (select count(*) from employees where status = 'active')::int as on_rolls,
+                 (select count(*) from attendance a where a.date = ${today}::date and a.status in ('present','half_day'))::int as in_today,
+                 (select count(*) from job_openings where status = 'open')::int as open_positions,
+                 (select count(*) from applicants where stage in ('applied','shortlisted','interview','offered'))::int as applicants_in_progress`),
+        operations: await one(sql`
+          select (select count(*) from tasks t where ${LATE})::int as late_tasks,
+                 (select count(*) from tasks t where t.status = 'open' and t.due_date = ${today}::date and not ${LATE})::int as open_today,
+                 (select count(*) from maintenance_schedules where active and next_due_on < ${today}::date)::int as maintenance_overdue,
+                 (select count(*) from projects where status in ('planned','active','on_hold'))::int as projects_running,
+                 (select count(*) from projects where status in ('planned','active','on_hold') and deadline < ${today}::date)::int as projects_overdue`),
       },
     });
   });

@@ -80,7 +80,8 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.9 | E-invoice / e-way bill | ⬜ | V1.3; `irn`, `eway_bill_no` columns exist |
 | 7.10 | Sales, marketing, accounts dashboards (live, date range) | ✅ | Charts with the figures on them and a table behind each ("Show as table"): sales and leads per day, sales by channel, leads by stage and source, top items and dealers, dealer outstanding against credit limit, walk-ins by hour, receivables by age, expenses by category. Click-through to lists is partial |
 | 7.10 | Home screen: the business as a flow | ✅ | Enquiry → lead → quote → delivery → invoice → money in, and purchase order → QC → stock → bill, each step showing how many are waiting and linking to that list. Each role sees only its own steps |
-| 7.10 | Cost per lead (ad spend) | ⬜ | V1.2 |
+| 7.10 | Cost per lead (ad spend) | ✅ | CRM → Ad spend: entries by source and, if wanted, by campaign. The marketing dashboard divides it by the leads of the same days: cost per lead and per conversion, by source and by campaign. A record for marketing only; the payment is still booked under Expenses |
+| 7.10 | Stores dashboard and the owner's one-page summary | ✅ | Stores: stock value by location and kind, running low, orders with suppliers, waiting QC, goods in and out per day, fastest sellers, stock not moving for 90 days. Owner: sales, collections, profit, cash, receivables, payables, stock, GST, and what needs attention across customers, stores, people and operations. Both checked against the books in tests |
 | 7.11 | Export every list/report | 🟡 | CSV everywhere (`?format=csv`). Excel/PDF export not built |
 | 7.11 | Print formats | 🟡 | Tax invoice + credit note (A4, thermal), delivery challan, payment receipt / voucher. Quote, PO and purchase bill print as plain pages |
 | 7.12 | Vyapar migration, dry run, parallel run | ⬜ | Needs sample Vyapar exports |
@@ -212,8 +213,6 @@ Items 6 and 7 below are covered by the approval above.
 Vyapar data and the user list only when deployment is close.** Do not ask for those before then.
 
 Still to build in the app, in rough order:
-2. Stores dashboard and the owner's one-page summary (PRD 7.10, "later").
-3. Ad spend per campaign, giving cost per lead and per conversion.
 4. A credit note's credit set against another invoice.
 5. Portal-format GSTR-1 file; Excel export of lists.
 6. Matching one bank line to several book entries (card-machine payouts).
@@ -268,6 +267,7 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |
 | 2026-10-09 | HR and operations (Sarthak: part of the app before go-live). New roles `hr` and `operations`; migration `0003_hr_and_operations`; modules `hr.ts` and `ops.ts`; 37 new API tests (114 in all, passing in memory and on real PostgreSQL 18; upgrade of an existing database checked). Screens under HR, Operations and "My work"; demo data for both. |
 | 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
+| 2026-10-10 | Stores dashboard and owner's summary (`/api/dashboards/stores`, `/owner`); ad spend with cost per lead (`ad_spends`, migration `0007_ad_spend`, CRM → Ad spend). |
 | 2026-10-10 | Year-end close: `fiscal_closes` table (migration `0006_year_end_close`), `closeYear` / `reopenYear` in `accounting.ts`, Financial years tab, 5 tests. |
 | 2026-10-09 | **CRM lead capture** (Sarthak: a connected CRM like Privyr, which the team uses today; basic structure first). Webhooks for Meta lead ads, Google Ads lead forms, WhatsApp and website forms, all ending in the same `captureLead`; event log with reasons and retry; quick replies with one-tap WhatsApp contact; Lead sources and Quick replies screens; CRM section in the menu. Migration `0005_crm_integrations`, module `crm.ts`, 17 new API tests, README section. Tested with the documented payloads and a live run in the demo; not yet connected to real Meta / Google / WhatsApp accounts. |
 | 2026-10-09 | Founder's requests (via Sarthak): **task deadlines** (every task has a deadline date and an optional time; late is to the minute; routines can carry a finish-by time), **project management** under Operations (projects with an owner, deadline, tasks, progress and a plan against the calendar; the owner can run their own project without operations access), and a **Resource allocation** tab (people and machines committed to projects or other work by period and share of time, week-by-week board, over-allocation refused unless confirmed). Migration `0004_projects_and_allocation`, module `projects.ts`, 11 new API tests. Screens checked on demo data. |

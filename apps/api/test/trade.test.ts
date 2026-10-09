@@ -676,4 +676,47 @@ describe('dashboards', () => {
     expect(acc.body.data.cash_and_bank).toHaveLength(2);
     expect(Number(acc.body.data.gst_this_month.itc.total_tax)).toBe(14700);
   });
+
+  it('the stores dashboard and the owner page agree with the books', async () => {
+    const owner = await w.as('owner');
+    const health = await expectBooksHealthy(w);
+    const stockValue = Number(health.stock_ledger_value);
+
+    const stores = (await (await w.as('stores')).get('/api/dashboards/stores').expect(200)).body.data;
+    const byLocation = stores.value_by_location.reduce((sum: number, l: { value: string }) => sum + Number(l.value), 0);
+    expect(Math.round(byLocation * 100)).toBe(Math.round(stockValue * 100));
+    const byType = stores.value_by_type.reduce((sum: number, t: { value: string }) => sum + Number(t.value), 0);
+    expect(Math.round(byType * 100)).toBe(Math.round(stockValue * 100));
+    expect(stores.movements_by_day).toHaveLength(1);
+    expect(stores.movements_by_day[0].day).toBe(TODAY);
+    // Everything that came in today, less everything that went out, is what is on the shelf.
+    expect(Math.round((Number(stores.movements_by_day[0].value_in) - Number(stores.movements_by_day[0].value_out)) * 100)).toBe(Math.round(stockValue * 100));
+    // Fastest by units sold (the sales dashboard ranks by revenue instead).
+    const sold = stores.fast_movers.map((f: { qty_out: string }) => Number(f.qty_out));
+    expect(sold).toEqual([...sold].sort((a, b) => b - a));
+    expect(stores.fast_movers.map((f: { name: string }) => f.name)).toContain('Cruiser Board');
+    expect(stores.not_moving).toEqual([]); // nothing has been sitting for 90 days
+    expect(stores.awaiting_goods).toEqual([]);
+    expect(stores.adjustments_pending.count).toBe(0);
+
+    const page = (await owner.get('/api/dashboards/owner').expect(200)).body.data;
+    expect(Number(page.sales.month_to_date.value)).toBe(36720 - 4720 + 8376 + 1000 + 1120);
+    expect(Number(page.sales.today.value)).toBe(Number(page.sales.month_to_date.value));
+    expect(Number(page.money.receivables.total)).toBe(400);
+    expect(Number(page.money.payables.total)).toBe(31100);
+    expect(Number(page.money.stock_value)).toBe(stockValue);
+    const pl = (await owner.get(`/api/accounting/reports/profit-and-loss?from=${TODAY.slice(0, 7)}-01&to=${TODAY}`).expect(200)).body;
+    expect(page.money.profit_this_month).toBe(pl.net_profit);
+    const acc = (await owner.get('/api/dashboards/accounts').expect(200)).body.data;
+    const cash = acc.cash_and_bank.reduce((sum: number, a: { balance: string }) => sum + Number(a.balance), 0);
+    expect(Number(page.money.cash_and_bank)).toBe(cash);
+    expect(page.leads.converted).toBe(1);
+    expect(page.operations).toEqual({ late_tasks: 0, open_today: 0, maintenance_overdue: 0, projects_running: 0, projects_overdue: 0 });
+
+    // Each dashboard is for its own people.
+    const sales = await w.as('sales');
+    await sales.get('/api/dashboards/owner').expect(403);
+    await sales.get('/api/dashboards/stores').expect(403);
+    await (await w.as('stores')).get('/api/dashboards/owner').expect(403);
+  });
 });
