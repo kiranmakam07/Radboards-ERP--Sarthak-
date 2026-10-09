@@ -15,7 +15,11 @@ export default function InvoicePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const can = useCan();
-  const { data, loading, error, reload } = useGet<{ data: any }>(`/sales/invoices/${id}`);
+  const { data, loading, error, reload: reloadInvoice } = useGet<{ data: any }>(`/sales/invoices/${id}`);
+  const creditInfo = useGet<{ data: any }>(`/sales/invoices/${id}/credits`);
+  const reload = () => { reloadInvoice(); creditInfo.reload(); };
+  const credits = creditInfo.data?.data;
+  const canApply = can('invoices:adjust') || can('payments:write');
   const [thermal, setThermal] = useState(false);
   const inv = data?.data;
   if (!inv) return <Page title="Invoice"><Loading loading={loading} error={error} /></Page>;
@@ -143,6 +147,42 @@ export default function InvoicePage() {
             <Table rows={inv.credit_notes} rowHref={(r) => `/invoices/${r.id}`} columns={[
               { key: 'invoice_no', title: 'Number' }, { key: 'invoice_date', title: 'Date', render: (r) => date(r.invoice_date) },
               { key: 'reason', title: 'Reason' }, { key: 'grand_total', title: 'Amount', align: 'right', render: (r) => inr(r.grand_total) },
+            ]} />
+          </Card>
+        )}
+        {credits && credits.applied.length > 0 && (
+          <Card title="Credit from other returns, set against this invoice">
+            <Table rows={credits.applied} columns={[
+              { key: 'credit_note_no', title: 'Credit note', render: (r) => <Link href={`/invoices/${r.credit_note_id}`}>{r.credit_note_no}</Link> },
+              { key: 'applied_on', title: 'Date', render: (r) => date(r.applied_on) },
+              { key: 'amount', title: 'Amount', align: 'right', render: (r) => inr(r.amount) },
+              { key: 'actions', title: '', render: (r) => (canApply
+                ? <ActionButton onClick={() => post(`/sales/credit-applications/${r.id}/take-back`)} onDone={reload} confirm="Take this credit back off the invoice?">Take back</ActionButton> : null) },
+            ]} />
+          </Card>
+        )}
+        {credits && credits.available.length > 0 && (
+          <Card title="This customer has credit from a return">
+            <p className="muted small">Goods came back on an invoice that was already paid, so the customer is in credit. It can be set against what is still owed here (₹{inr(credits.outstanding)}).</p>
+            <Table rows={credits.available} columns={[
+              { key: 'credit_note_no', title: 'Credit note', render: (r) => <Link href={`/invoices/${r.credit_note_id}`}>{r.credit_note_no}</Link> },
+              { key: 'against_invoice_no', title: 'Return on' },
+              { key: 'credit_note_date', title: 'Date', render: (r) => date(r.credit_note_date) },
+              { key: 'available', title: 'Unused credit', align: 'right', render: (r) => inr(r.available) },
+              { key: 'actions', title: '', render: (r) => (canApply ? (
+                <ActionButton kind="primary" onClick={() => post(`/sales/invoices/${inv.id}/apply-credit`, { credit_note_id: r.credit_note_id })} onDone={reload}>
+                  Use ₹{inr(Math.min(Number(r.available), Number(credits.outstanding)))} here
+                </ActionButton>
+              ) : null) },
+            ]} />
+          </Card>
+        )}
+        {credits && credits.used_on.length > 0 && (
+          <Card title="Where this credit note's credit was used">
+            <Table rows={credits.used_on} columns={[
+              { key: 'invoice_no', title: 'Invoice', render: (r) => <Link href={`/invoices/${r.invoice_id}`}>{r.invoice_no}</Link> },
+              { key: 'applied_on', title: 'Date', render: (r) => date(r.applied_on) },
+              { key: 'amount', title: 'Amount', align: 'right', render: (r) => inr(r.amount) },
             ]} />
           </Card>
         )}

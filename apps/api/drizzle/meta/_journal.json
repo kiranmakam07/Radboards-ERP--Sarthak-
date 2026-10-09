@@ -57,6 +57,13 @@
       "when": 1791575609181,
       "tag": "0007_ad_spend",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791576019572,
+      "tag": "0008_credit_applications",
+      "breakpoints": true
     }
   ]
 }

@@ -723,6 +723,27 @@ export const journalLines = pgTable('journal_lines', {
 ]);
 
 /**
+ * A credit note's unused credit set against another invoice of the same customer. When goods
+ * are returned on an invoice that was already paid, the credit note leaves the customer in
+ * credit; this is how that credit pays down a later invoice. No journal entry is needed: both
+ * sides are the same customer's balance in Debtors, so it only changes which invoice is open.
+ */
+export const creditApplications = pgTable('credit_applications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  creditNoteId: uuid('credit_note_id').notNull().references(() => invoices.id),
+  invoiceId: uuid('invoice_id').notNull().references(() => invoices.id),
+  amount: money('amount').notNull(),
+  appliedOn: date('applied_on').notNull(),
+  status: postedStatusEnum('status').notNull().default('posted'),
+  ...stamps,
+}, (t) => [
+  index('credit_applications_cn_idx').on(t.creditNoteId),
+  index('credit_applications_invoice_idx').on(t.invoiceId),
+  check('credit_applications_amount_chk', sql`${t.amount} > 0`),
+  check('credit_applications_distinct_chk', sql`${t.creditNoteId} <> ${t.invoiceId}`),
+]);
+
+/**
  * Year-end close: one row per financial year that has been closed. The closing journal entry
  * (ref_type 'year_close') moves that year's income and expenses into Retained Earnings.
  * Reopening a year reverses the entry and removes the row.

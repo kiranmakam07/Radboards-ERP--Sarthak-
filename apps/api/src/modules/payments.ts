@@ -10,6 +10,7 @@ import { rows, type DB } from '../db/client';
 import { invoices, parties, paymentAllocations, payments, purchaseBills } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoneyPos, zText, type Ctx } from '../lib/http';
+import { assertCreditsCovered } from './credits';
 
 export type Payment = typeof payments.$inferSelect;
 export type AllocationInput = { invoiceId?: string | null; purchaseBillId?: string | null; amount: string };
@@ -130,6 +131,10 @@ export async function cancelPayment(ctx: Ctx, id: string, reason: string): Promi
   if (payment!.status === 'cancelled') throw conflict('Payment is already cancelled');
   // Its allocations stop counting the moment the status flips (the outstanding views ignore cancelled payments).
   const [updated] = await tx.update(payments).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(payments.id, id)).returning();
+  // If this receipt is what put the customer in credit on an invoice with a return, that credit must not have been spent.
+  const paidFor = await rows<{ invoice_id: string }>(tx, sql`
+    select distinct invoice_id from payment_allocations where payment_id = ${id} and invoice_id is not null`);
+  await assertCreditsCovered(tx, paidFor.map((r) => r.invoice_id));
   await reverseJournals(ctx, 'payment', id, istDate(), `Cancelled ${payment!.paymentNo}: ${reason}`);
   await audit(ctx, 'payment', id, 'cancel', { status: 'posted' }, { status: 'cancelled', reason });
   return updated!;
