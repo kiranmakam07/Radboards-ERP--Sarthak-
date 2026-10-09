@@ -136,6 +136,11 @@ export async function reverseJournals(
       reversesEntryId: e.id,
       lines: lines.map((l) => ({ account: { id: l.accountId }, partyId: l.partyId, debit: l.credit, credit: l.debit, memo: l.memo ?? undefined })),
     });
+    // A cancelled entry no longer explains the bank statement line it was reconciled with.
+    await tx.execute(sql`
+      update bank_statement_lines
+         set status = 'unmatched', matched_journal_line_id = null, matched_at = null, matched_by = null, updated_at = now()
+       where matched_journal_line_id in (select id from journal_lines where entry_id = ${e.id})`);
   }
   return live.length;
 }

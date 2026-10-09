@@ -20,6 +20,8 @@ export default function AccountsDashboard() {
             <Stat label="Collected" value={`₹${inr(d.invoiced_vs_collected.collected)}`} />
             <Stat label="Receivables" value={`₹${inr(d.receivables.total)}`} hint={<Link href="/accounts/reports">Ageing report</Link>} />
             <Stat label="Payables" value={`₹${inr(d.payables.total)}`} hint={`₹${inr(d.payables.overdue)} overdue · ₹${inr(d.payables.due_this_week)} due this week`} />
+            <Stat label="Bank lines to reconcile" value={d.bank_unreconciled.lines}
+              hint={<Link href="/accounts/bank">₹{inr(d.bank_unreconciled.amount)} unexplained</Link>} />
             <Stat label="GST this month (est.)" value={`₹${inr(d.gst_this_month.net_payable.total)}`}
               hint={`Output ₹${inr(d.gst_this_month.outward.total_tax)} − ITC ₹${inr(d.gst_this_month.itc.total_tax)}`} />
             <Stat label={Number(d.profit_and_loss.net_profit) >= 0 ? 'Net profit' : 'Net loss'} value={`₹${inr(Math.abs(Number(d.profit_and_loss.net_profit)))}`}

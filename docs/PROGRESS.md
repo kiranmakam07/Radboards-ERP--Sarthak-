@@ -14,8 +14,8 @@ the way they were**. Update it with every change (add a line to the change log a
 | Area | State |
 | --- | --- |
 | Backend (API, database, posting engine) | MVP **and** most of V1.1 built and tested |
-| Frontend | Simple working screens for every built flow (36 screens, no charts, plain styling) |
-| Automated tests | 78 passing: 17 shared, 53 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
+| Frontend | Simple working screens for every built flow (39 screens, no charts, plain styling) |
+| Automated tests | 93 passing: 17 shared, 68 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
 | Integrations (Meta, Google, Shopify, GSP) | Not built — data model and idempotency keys are ready |
 | Vyapar migration | Not built — needs sample export files |
 | Deployment / hosting / backups | Packaged for one server (Docker, HTTPS, daily backups) and verified in CI. **Not deployed**: needs a server and a domain |
@@ -61,7 +61,7 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.8 | Expenses with input GST | 🟡 | Bill photo is a link (URL); no file upload yet |
 | 7.8 | Credit notes (stock back in) and debit notes (stock out) | ✅ | |
 | 7.8 | Multiple cash/bank accounts | ✅ | |
-| 7.8 | Bank statement import (CSV) and reconciliation | ⬜ | V1.1 item still open |
+| 7.8 | Bank statement import (CSV) and reconciliation | ✅ | Reads the usual Indian bank CSV layouts, skips rows already imported, matches automatically only when unambiguous, and can book the missing entry (expense, party receipt or payment, other account) from a statement line. One statement line matches one book entry: a single card-machine payout covering several receipts cannot be matched to all of them yet |
 | 7.8 | Immutable issued documents, period lock | ✅ | |
 | 7.8 | Opening balances | 🟡 | By manual journal (parties/accounts) and opening-stock entry. No import tool |
 | 7.8 | Year-end close voucher | ⬜ | Not needed for reports (balance sheet shows profit to date); needed before the first year end |
@@ -76,7 +76,7 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.10 | Sales, marketing, accounts dashboards (live, date range) | ✅ | Numbers and tables, no charts. Click-through to lists is partial |
 | 7.10 | Cost per lead (ad spend) | ⬜ | V1.2 |
 | 7.11 | Export every list/report | 🟡 | CSV everywhere (`?format=csv`). Excel/PDF export not built |
-| 7.11 | Print formats | 🟡 | Tax invoice + credit note (A4, thermal). Quote, PO and purchase bill print as plain pages. Delivery challan and payment receipt layouts not built |
+| 7.11 | Print formats | 🟡 | Tax invoice + credit note (A4, thermal), delivery challan, payment receipt / voucher. Quote, PO and purchase bill print as plain pages |
 | 7.12 | Vyapar migration, dry run, parallel run | ⬜ | Needs sample Vyapar exports |
 | 7.13 | Company profile, users, roles, masters, period lock | ✅ | |
 | 7.13 | Permission matrix | 🟡 | Enforced on every route, but fixed in code (`PERMISSIONS`), not editable on screen |
@@ -194,15 +194,28 @@ Items 6 and 7 below are covered by the approval above.
   printed invoice, pipeline, stock, PO → bill → receipt → QC with reject → supplier return,
   reports, dashboards, setup.
 
-## 6. Next steps (phase 2: go live)
+## 6. Next steps
 
-Waiting on Sarthak / the founder:
-1. **A server and a domain.** Pick the hosting option (cost options owed to the founder), create
-   the account, point a domain at it. Then deployment is the two commands in the README.
-2. **Vyapar exports** (parties with GSTIN and balances, items with HSN and prices, stock per
-   location, unpaid invoices and bills) so the import can be built against the real files.
-3. **Who uses it**: names and roles, plus the real company profile (GSTIN, address, bank
-   details, logo) and how dealer prices and credit terms work.
+**Order of work (Sarthak, 9 Oct 2026): build the app out first; bring in the server, the real
+Vyapar data and the user list only when deployment is close.** Do not ask for those before then.
+
+Still to build in the app, in rough order:
+1. Year-end close.
+2. Stores dashboard and the owner's one-page summary (PRD 7.10, "later").
+3. Ad spend per campaign, giving cost per lead and per conversion.
+4. A credit note's credit set against another invoice.
+5. Portal-format GSTR-1 file; Excel export of lists.
+6. Matching one bank line to several book entries (card-machine payouts).
+7. Later phases as approved: Shopify orders and Meta / Google leads coming in automatically,
+   Amazon and Flipkart, then HR hiring and operations tasks. Open question to Sarthak: are
+   these to be built before the first go-live, or after it as the founder's report says?
+
+For go-live, when it is close (nothing needed before then):
+- A server and a domain. Deployment is then the two commands in the README.
+- Vyapar exports (parties, items, stock, unpaid invoices and bills), for the opening data import.
+- Who uses it (names and roles), the real company profile, dealer prices and credit terms.
+- Then build: the opening-data import with a dry-run report, and the comparison report for the
+  month beside Vyapar.
 
 Hosting cost options (list prices read from the providers' pricing pages on 9 Oct 2026, in
 USD, before taxes and currency conversion):
@@ -215,15 +228,6 @@ USD, before taxes and currency conversion):
 Sources: https://www.digitalocean.com/pricing/droplets , https://www.digitalocean.com/pricing/managed-databases ,
 https://aws.amazon.com/lightsail/pricing/ . Option A is the recommended start: it is the setup
 already tested, and moving the database to a managed service later is a configuration change.
-
-Can be built without waiting:
-4. Import tool for opening data with a dry-run validation report (PRD 7.12).
-5. A comparison report for the month beside Vyapar (sales, tax, stock, balances per day).
-6. Print layouts: delivery challan, payment receipt, quote, PO.
-7. Bank statement import and reconciliation; year-end close; portal-format GSTR-1 file.
-
-Later phases (as approved): Shopify orders and Meta / Google leads coming in automatically,
-Amazon and Flipkart, then HR hiring and operations tasks.
 
 ## 7. Change log
 
@@ -240,3 +244,6 @@ Amazon and Flipkart, then HR hiring and operations tasks.
 | 2026-10-09 | **Founder approved** the report and its five decisions ("Good report. Yes proceed"). Phase 2 (go live) started. |
 | 2026-10-09 | API test suite now also runs on real PostgreSQL. New simultaneous-request tests (8). Fixed: the same enquiry submitted several times at once created several leads. "Today" in overdue and ageing figures is now India time whatever timezone the database server uses. |
 | 2026-10-09 | Deployment packaging: `Dockerfile`, `compose.prod.yml` (PostgreSQL 16, API, web, Caddy HTTPS, daily backups with 30-day retention), `.env.production.example`, README runbook. CI now runs the API tests on PostgreSQL and builds and starts the production stack. |
+| 2026-10-09 | Direction (Sarthak): build the whole app first; server, real data and user lists only when close to deployment. |
+| 2026-10-09 | Printouts: delivery challan and payment receipt / voucher. |
+| 2026-10-09 | Bank reconciliation: statement CSV import (idempotent), automatic and manual matching, booking the missing entry from a statement line, unreconciled figure on the accounts dashboard. Cancelling a reconciled entry puts its statement line back to unmatched. 15 new tests. |

@@ -188,6 +188,10 @@ export function dashboardsRouter(db: DB) {
           select o.bill_id, o.bill_no, o.supplier_invoice_no, p.name as supplier, o.due_date, o.outstanding, (${today}::date - o.due_date) as days_overdue
             from v_bill_outstanding o join parties p on p.id = o.supplier_id
            where o.outstanding > 0 and o.due_date <= ${weekEnd}::date order by o.due_date limit 20`),
+        // Bank statement lines not yet matched to a book entry (PRD 7.10).
+        bank_unreconciled: (await rows(db, sql`
+          select count(*)::int as lines, coalesce(sum(abs(amount)), 0) as amount
+            from bank_statement_lines where status = 'unmatched'`))[0],
         gst_this_month: await gstSummary(db, monthStart, today),
         expenses_by_category: await rows(db, sql`
           select c.name as category, sum(e.amount) as amount, count(*)::int as count

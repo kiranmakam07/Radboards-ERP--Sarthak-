@@ -37,6 +37,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/expenses', label: 'Expenses', perm: 'expenses:read' },
     { href: '/accounts/reports', label: 'Books & reports', perm: 'accounts:read' },
     { href: '/accounts/journal', label: 'Journal', perm: 'accounts:read' },
+    { href: '/accounts/bank', label: 'Bank reconciliation', perm: 'accounts:read' },
     { href: '/gst', label: 'GST', perm: 'gst:read' },
   ] },
   { group: 'Admin', items: [
