@@ -69,16 +69,30 @@ Status: ✅ in RadCore · 🔨 being built now · 🔌 built, waits for an accou
 
 ## HR (reference: Attendo)
 
-| What an app like Attendo offers | RadCore | Note |
+Attendo is Petpooja's attendance and payroll product (it was called Petpooja Payroll; Sarthak
+confirmed the Play Store listing on 12 Oct 2026). Its features below are from Petpooja's own page
+about the rename.
+
+| What Attendo offers | RadCore | Note |
 | --- | --- | --- |
-| **Clock in and out from the phone, with where it was done** | ✅ | On "My work". A clock-in away from the workplace is taken and flagged with the distance |
-| Register by day, monthly summary, export | ✅ | |
-| **Asking for leave and having it approved** | ✅ | Approved leave goes into the register by itself |
+| **Punch from the phone, with where it was done** | ✅ | On "My work". A clock-in away from the workplace is taken and flagged with the distance |
+| Photo with the phone punch | ⏭ | |
+| Fingerprint, card and face devices on the wall | ➖ | Hardware; the phone and the register cover it here |
+| Register by day, monthly summary (muster), export | ✅ | |
+| **Asking for leave and having it approved** | ✅ | One approval, by HR. Approved leave goes into the register by itself |
 | Leave balances | ✅ | |
-| **Late arrivals and hours worked** | ✅ | From a start time and a grace period |
-| Weekly off and holidays | ✅ | Weekly off day set once; holidays still marked in the register |
-| Breaks | ⏭ | |
-| Photo at clock-in | ⏭ | |
-| Wall terminals, business trips | ➖ | |
-| Hiring, interviews, employee records | ✅ | Beyond what an attendance app does |
-| Payroll | ⏭ | Not in the PRD |
+| Late arrivals and hours worked | ✅ | From a start time and a grace period |
+| Shifts: rotating, overnight, 24-hour | ⏭ | One start time for everyone today |
+| Weekly off | ✅ | Set once; needs no marking |
+| Holiday list | ⏭ | A holiday is marked in the register on the day |
+| **Salary worked out from attendance, by month** | ✅ | HR → Payroll. Paid days are days worked, paid leave, weekly offs and holidays |
+| Daily, weekly and hourly pay | ⏭ | Monthly salaries only |
+| **Advances and loans taken back out of salary** | ✅ | A set amount a month, never more than is earned |
+| **PF and ESIC worked out; professional tax and TDS** | ✅ | PF and ESIC by the usual rates, switched on per person; professional tax and TDS as an amount per person |
+| Labour welfare fund | ⏭ | |
+| **Payslips, sent on WhatsApp** | ✅ | A link the person opens; also on their own "My work" |
+| **List for the bank to pay the salaries** | ✅ | Excel |
+| Salary in the books | ✅ | Beyond Attendo: approving a month posts the expense and what is owed; paying it clears the bank |
+| Staff ask for a missed punch to be corrected | ⏭ | HR corrects the register |
+| Sign-in by WhatsApp code; 11 languages | ⏭ | |
+| Hiring, interviews, employee records | ✅ | Beyond what Attendo does |

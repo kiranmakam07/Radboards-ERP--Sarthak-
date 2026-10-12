@@ -24,6 +24,7 @@ import { onlineRouter } from './modules/online-router';
 import { opsRouter } from './modules/ops';
 import { partiesRouter } from './modules/parties';
 import { paymentsRouter } from './modules/payments';
+import { myPayslipRouter, payrollRouter, publicPayslipRouter } from './modules/payroll';
 import { projectsRouter } from './modules/projects';
 import { purchasingRouter } from './modules/purchasing';
 import { salesRouter } from './modules/sales';
@@ -99,6 +100,7 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
     skip: () => config.env === 'test' });
   app.use('/api/public/shares', publicLimiter, publicSharesRouter(db));
   app.use('/api/public/invoices', publicLimiter, publicInvoiceRouter(db));
+  app.use('/api/public/payslips', publicLimiter, publicPayslipRouter(db));
   app.use('/api/public', publicLimiter, publicLeadsRouter(db));
 
   // Lead capture from Meta, Google, WhatsApp and website forms: no login, each request proves itself
@@ -132,6 +134,8 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
   app.use('/api/accounting', accountingRouter(db));
   app.use('/api/bank', bankRouter(db));
   app.use('/api/gst', gstRouter(db));
+  app.use('/api/payroll/my-payslips', myPayslipRouter(db));
+  app.use('/api/payroll', payrollRouter(db));
   app.use('/api/hr', hrSelfRouter(db));
   app.use('/api/hr', hrRouter(db));
   app.use('/api/ops', opsRouter(db));

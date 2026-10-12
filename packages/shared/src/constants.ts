@@ -207,6 +207,9 @@ export const PERMISSIONS = {
   // HR: applicants, interviews, employees, attendance. Salaries live here, so it is not open to everyone.
   'hr:read': ['owner', 'hr', 'admin'],
   'hr:write': ['hr', 'admin'],
+  // Salaries: who may see what people are paid, and who may run the month's salary.
+  'payroll:read': ['owner', 'accounts', 'hr', 'admin'],
+  'payroll:manage': ['accounts', 'hr', 'admin'],
 
   // Operations: everyone can see and finish the tasks given to them; these are for running the whole board.
   'ops:read': ['owner', 'operations', 'admin'],

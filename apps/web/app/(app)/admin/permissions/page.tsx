@@ -9,7 +9,7 @@ const AREAS: Record<string, string> = {
   users: 'Users', settings: 'Setup', masters: 'Master lists', audit: 'Audit trail', items: 'Items', pricelists: 'Price lists', parties: 'Parties',
   leads: 'Leads', crm: 'Lead sources and quick replies', sales: 'Quotes and orders', quickbill: 'Quick bill', invoices: 'Invoices',
   purchasing: 'Purchasing', po: 'Purchase orders', grn: 'Goods receipts and QC', bills: 'Purchase bills', stock: 'Stock', payments: 'Payments',
-  expenses: 'Expenses', accounts: 'Books and reports', gst: 'GST', dashboard: 'Dashboard', hr: 'HR', ops: 'Operations',
+  expenses: 'Expenses', accounts: 'Books and reports', gst: 'GST', dashboard: 'Dashboard', hr: 'HR', payroll: 'Payroll', ops: 'Operations',
 };
 const ACTIONS: Record<string, string> = {
   read: 'see', write: 'add and change', manage: 'manage', approve: 'approve', adjust: 'cancel and credit', create: 'make',

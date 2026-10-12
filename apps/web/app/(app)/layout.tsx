@@ -61,6 +61,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/hr/openings', label: 'Openings', perm: 'hr:read' },
     { href: '/hr/employees', label: 'Employees', perm: 'hr:read' },
     { href: '/hr/attendance', label: 'Attendance', perm: 'hr:read' },
+    { href: '/hr/payroll', label: 'Payroll', perm: 'payroll:read' },
   ] },
   { group: 'Operations', items: [
     { href: '/dashboards/ops', label: 'Operations dashboard', perm: 'ops:read' },

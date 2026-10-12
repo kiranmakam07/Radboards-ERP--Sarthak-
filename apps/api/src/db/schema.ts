@@ -968,6 +968,13 @@ export const employees = pgTable('employees', {
   annualLeaveDays: numeric('annual_leave_days', { precision: 4, scale: 1 }),
   /** Their sign-in, when they have one: this is how tasks reach them. */
   userId: uuid('user_id').unique().references(() => users.id),
+  /** Salary: whether PF and ESIC are deducted for this person, their professional tax and TDS per month, and where the salary is sent. */
+  pfApplicable: boolean('pf_applicable').notNull().default(false),
+  esicApplicable: boolean('esic_applicable').notNull().default(false),
+  ptMonthly: money('pt_monthly').notNull().default('0'),
+  tdsMonthly: money('tds_monthly').notNull().default('0'),
+  bankAccountNo: text('bank_account_no'),
+  bankIfsc: text('bank_ifsc'),
   status: employeeStatusEnum('status').notNull().default('active'),
   leftOn: date('left_on'),
   leftReason: text('left_reason'),
@@ -1088,6 +1095,92 @@ export const paymentReminders = pgTable('payment_reminders', {
   message: text('message').notNull(),
   ...stamps,
 }, (t) => [index('payment_reminders_party_idx').on(t.partyId, t.createdAt)]);
+
+// ----------------------------------------------------------------------------
+// Payroll: the month's salary worked out from the attendance register
+// ----------------------------------------------------------------------------
+export const payrollRunStatusEnum = pgEnum('payroll_run_status', ['draft', 'approved', 'paid']);
+
+/** One month's salary for everyone. Draft: can be recalculated. Approved: in the books. Paid: the money has gone out. */
+export const payrollRuns = pgTable('payroll_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  /** YYYY-MM */
+  month: char('month', { length: 7 }).notNull().unique(),
+  status: payrollRunStatusEnum('status').notNull().default('draft'),
+  /** The date the salary expense is booked on: the last day of the month. */
+  bookedOn: date('booked_on'),
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: ts('approved_at'),
+  paidOn: date('paid_on'),
+  paidFromAccountId: uuid('paid_from_account_id').references(() => accounts.id),
+  paymentReference: text('payment_reference'),
+  ...stamps,
+});
+
+/** One person's salary for one month, with everything it was worked out from kept as it was on the day. */
+export const payslips = pgTable('payslips', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  runId: uuid('run_id').notNull().references(() => payrollRuns.id, { onDelete: 'cascade' }),
+  employeeId: uuid('employee_id').notNull().references(() => employees.id),
+  employeeName: text('employee_name').notNull(),
+  employeeNo: text('employee_no').notNull(),
+  department: text('department').notNull(),
+  designation: text('designation').notNull(),
+  bankAccountNo: text('bank_account_no'),
+  bankIfsc: text('bank_ifsc'),
+  monthlySalary: money('monthly_salary').notNull(),
+  daysInMonth: integer('days_in_month').notNull(),
+  paidDays: numeric('paid_days', { precision: 4, scale: 1 }).notNull(),
+  present: integer('present').notNull().default(0),
+  halfDays: integer('half_days').notNull().default(0),
+  leaveDays: integer('leave_days').notNull().default(0),
+  weeklyOff: integer('weekly_off').notNull().default(0),
+  holidays: integer('holidays').notNull().default(0),
+  absent: integer('absent').notNull().default(0),
+  /** Working days nobody marked in the register: not paid, and shown so they can be completed first. */
+  notMarked: integer('not_marked').notNull().default(0),
+  grossEarned: money('gross_earned').notNull(),
+  basicEarned: money('basic_earned').notNull(),
+  allowanceEarned: money('allowance_earned').notNull(),
+  pfEmployee: money('pf_employee').notNull().default('0'),
+  pfEmployer: money('pf_employer').notNull().default('0'),
+  esicEmployee: money('esic_employee').notNull().default('0'),
+  esicEmployer: money('esic_employer').notNull().default('0'),
+  pt: money('pt').notNull().default('0'),
+  tds: money('tds').notNull().default('0'),
+  advanceRecovery: money('advance_recovery').notNull().default('0'),
+  otherEarning: money('other_earning').notNull().default('0'),
+  otherDeduction: money('other_deduction').notNull().default('0'),
+  netPay: money('net_pay').notNull(),
+  note: text('note'),
+  /** The key of the link the person opens to see this payslip; made the first time it is sent. */
+  token: text('token').unique(),
+  ...stamps,
+}, (t) => [unique('payslips_run_employee_uq').on(t.runId, t.employeeId)]);
+
+/** Money given to someone ahead of their salary, taken back out of later salaries a set amount a month. */
+export const salaryAdvances = pgTable('salary_advances', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  employeeId: uuid('employee_id').notNull().references(() => employees.id),
+  givenOn: date('given_on').notNull(),
+  amount: money('amount').notNull(),
+  monthlyRecovery: money('monthly_recovery').notNull(),
+  paidFromAccountId: uuid('paid_from_account_id').notNull().references(() => accounts.id),
+  note: text('note'),
+  cancelledAt: ts('cancelled_at'),
+  ...stamps,
+}, (t) => [
+  index('salary_advances_employee_idx').on(t.employeeId),
+  check('salary_advances_amount_chk', sql`${t.amount} > 0 and ${t.monthlyRecovery} > 0`),
+]);
+
+export const advanceRecoveries = pgTable('advance_recoveries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  advanceId: uuid('advance_id').notNull().references(() => salaryAdvances.id),
+  payslipId: uuid('payslip_id').notNull().references(() => payslips.id, { onDelete: 'cascade' }),
+  amount: money('amount').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+}, (t) => [index('advance_recoveries_advance_idx').on(t.advanceId)]);
 
 export const leaveRequestStatusEnum = pgEnum('leave_request_status', ['pending', 'approved', 'rejected', 'cancelled']);
 
