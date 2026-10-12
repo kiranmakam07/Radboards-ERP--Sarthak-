@@ -111,6 +111,29 @@ describe('attached files', () => {
     await (await w.as('owner')).get('/api/files/00000000-0000-4000-8000-000000000000').expect(404);
   });
 
+  it('puts pictures on an item, shows the first one in the list, and takes one off again', async () => {
+    const admin = await w.as('admin');
+    const item = (await admin.post('/api/items').send({ sku: 'PIC-1', name: 'Pictured board', item_type: 'finished_good', hsn_sac: '950699', gst_rate: 18 }).expect(201)).body.data;
+    const front = (await send('admin', 'item_image', PNG, 'front.png', 'image/png')).body.data;
+    const side = (await send('admin', 'item_image', PNG, 'side.png', 'image/png')).body.data;
+    expect((await send('sales', 'item_image', PNG)).status).toBe(403); // adding pictures is for whoever keeps the item list
+    const first = (await admin.post(`/api/items/${item.id}/images`).send({ url: front.url, sort: 0 }).expect(201)).body.data;
+    await admin.post(`/api/items/${item.id}/images`).send({ url: side.url, sort: 1 }).expect(201);
+    await admin.post(`/api/items/${item.id}/images`).send({ url: 'javascript:alert(1)' }).expect(400);
+    await admin.post('/api/items/00000000-0000-4000-8000-000000000000/images').send({ url: front.url }).expect(404);
+
+    const sales = await w.as('sales');
+    expect((await sales.get(`/api/items/${item.id}/images`).expect(200)).body.data.map((p: any) => p.url)).toEqual([front.url, side.url]);
+    const listed = (await sales.get('/api/items?q=PIC-1').expect(200)).body.data[0];
+    expect(listed.image_url).toBe(front.url);
+    await sales.get(front.url).expect(200); // anyone signed in can look at an item's picture
+    await sales.delete(`/api/items/${item.id}/images/${first.id}`).expect(403);
+
+    await admin.delete(`/api/items/${item.id}/images/${first.id}`).expect(200);
+    await admin.delete(`/api/items/${item.id}/images/${first.id}`).expect(404);
+    expect((await sales.get('/api/items?q=PIC-1').expect(200)).body.data[0].image_url).toBe(side.url);
+  });
+
   it('can keep files in the database instead, for a host with no disk of its own', async () => {
     const before = fs.readdirSync(dir).length;
     config.fileStore = 'database';

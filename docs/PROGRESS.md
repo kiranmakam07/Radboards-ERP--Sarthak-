@@ -15,7 +15,7 @@ the way they were**. Update it with every change (add a line to the change log a
 | --- | --- |
 | Backend (API, database, posting engine) | MVP **and** most of V1.1 built and tested |
 | Frontend | Simple working screens for every built flow (58 screens, plain styling), with charts on the dashboards, a "what is waiting where" picture on the home screen and progress steps on documents |
-| Automated tests | 215 passing: 23 shared, 184 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
+| Automated tests | 216 passing: 23 shared, 185 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
 | Lead capture (Meta lead ads, Google Ads lead forms, WhatsApp, website) | Receiving side built and tested with the payloads those services send. **Not connected to real accounts yet** (needs the Meta app, the WhatsApp Cloud API number and the Google Ads form, at go-live) |
 | Other integrations (Shopify, Amazon, Flipkart, GSP) | Not built — data model and idempotency keys are ready |
 | Vyapar migration | Not built — needs sample export files |
@@ -55,7 +55,7 @@ Legend: ✅ built and tested · 🟡 partly built · ⬜ not built yet
 | 7.5 | Dealers: price list, credit limit, terms, quote → order → delivery → invoice, outstanding | ✅ | Credit-limit block with override by Accounts/owner |
 | 7.5 | Shopify (orders, SKU map, stock push) | ⬜ | V1.2. `channel_item_map`, `channel_events`, unique `(channel, external_order_id)` exist |
 | 7.5 | Amazon / Flipkart | ⬜ | V1.3 |
-| 7.6 | Item master, locations, append-only stock ledger | ✅ | Item pictures can be stored (file storage exists and the API takes an attached file or a link); there is no picture control on the items screen yet |
+| 7.6 | Item master, locations, append-only stock ledger | ✅ | Pictures are added and removed on the items screen |
 | 7.6 | Transfers, adjustments, physical counts (reason + approval) | ✅ | Admin or owner approves; transfers need a reason but no approval |
 | 7.6 | Valuation | 🟡 | Moving average only. FIFO not built (CA decision pending) |
 | 7.6 | Low-stock view, availability for sales, raw-material stock | ✅ | |
@@ -221,8 +221,7 @@ Still to build in the app, in rough order:
 For go-live, the CRM connections also need (not before then): a Meta developer app with the Page and
 `leads_retrieval`, the WhatsApp Business number moved to the Cloud API, and the webhook set on each
 Google Ads lead form. The steps are in the README under "Connecting lead sources".
-8. HR and operations follow-ups, if wanted: a picture control on the items screen,
-   WhatsApp reminders for tasks and maintenance.
+8. HR and operations follow-ups, if wanted: WhatsApp reminders for tasks and maintenance.
 
 HR and operations were built on 9 Oct 2026 (Sarthak: they are part of the app, not a later phase).
 
@@ -267,6 +266,7 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
 | 2026-10-10 | Smaller gaps: QR code for campaign links; optional person-check on the public enquiry form (`TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET`); leave balances (company figure + per-person figure, pro-rated for joiners, counted from days marked Leave; migration `0010_leave_days`). |
 | 2026-10-10 | Review copy on Vercel (Sarthak: "I have vercel"). The API can now run inside the web app as one deployment: `apps/api/src/serverless.ts` (per-request entry point), `apps/api/src/prepare.ts` (database update and sample data at build time), `apps/web/scripts/embed-api.mjs` + `vercel.json` (Singapore). Attached files can be kept in the database (`file_contents`, migration `0012`, `FILE_STORE=database`), with the size limit shown on the form. Checked on this machine against real PostgreSQL: the Vercel-style build, sign-in, lists, Excel, attachments, the public form and the website hook. The server setup is unchanged. |
+| 2026-10-12 | Item pictures on the items screen: add from the camera or a file, remove, first picture shown as a thumbnail in the list (`GET` / `DELETE /api/items/:id/images`). |
 | 2026-10-12 | Lead score and new-lead notices. Score: 0 to 100 from the stage, the items asked about, calls and messages in the last week, how new the lead is and whether the phone has bought before (rules in one place, `SCORE_JOIN` in `leads.ts`); shown as Hot / Warm / Cold with the number on the list, the board and the lead's page, which lists the points; "Hottest first" sorts the list. Notices: `/api/leads/alerts`, asked every 30 seconds while the app is open, shows a notice for a lead given to you (or any lead, for whoever manages lead sources) and a browser notification once allowed. 5 tests. Notices need the app open in a tab or installed; nothing is sent when it is closed. |
 | 2026-10-12 | Online orders (Sarthak: "continue building the remaining features"). Shopify webhook (`/api/hooks/shopify`, signed with `SHOPIFY_WEBHOOK_SECRET`; new orders and cancellations) and Amazon / Flipkart order-report import, all ending in `takeOrder` (`modules/online.ts`): a confirmed sales order matched by SKU, the customer matched on phone then email (marketplace orders under one party each), place of supply from the shipping state, shipping as a `SHIPPING` service line, never taken in twice. Stuck orders stay on the new Sales → Online orders screen with the reason and a retry. Migration `0013_online_orders`, 14 tests, README section. **Not connected to a real Shopify store, and the Amazon / Flipkart column names have not been checked against a real export.** |
 | 2026-10-12 | Install as an app (Sarthak: an install button like YouTube's). Manifest with 192 and 512 px icons, a service worker that keeps nothing on the device, and an "Install app" button in the menu and on the sign-in page (shown only when the browser offers installation; on an iPhone it explains Share → Add to Home Screen). Checked locally with a simulated install prompt; the real prompt needs Chrome or Edge on the live site. |

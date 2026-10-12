@@ -78,6 +78,7 @@ export function itemsRouter(db: DB) {
     const like = q.q ? `%${q.q}%` : null;
     const data = await rows(db, sql`
       select i.*, c.name as category_name,
+             (select im.url from item_images im where im.item_id = i.id order by im.sort, im.created_at limit 1) as image_url,
              coalesce(s.sellable, 0) as on_hand, coalesce(s.showroom, 0) as showroom_qty,
              coalesce(s.stores, 0) as stores_qty, coalesce(s.rejected, 0) as rejected_qty
         from items i
@@ -160,8 +161,24 @@ export function itemsRouter(db: DB) {
   r.post('/:id/images', requirePerm('items:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const body = z.object({ url: zLink, sort: z.number().int().default(0) }).parse(req.body);
+    const [item] = await db.select({ id: items.id }).from(items).where(eq(items.id, id));
+    must(item, 'Item');
     const [row] = await db.insert(itemImages).values({ itemId: id, url: body.url, sort: body.sort, createdBy: req.user!.id }).returning();
     res.status(201).json({ data: row });
+  });
+
+  r.get('/:id/images', requirePerm('items:read'), async (req, res) => {
+    const id = zId.parse(req.params.id);
+    res.json({ data: await db.select().from(itemImages).where(eq(itemImages.itemId, id)).orderBy(asc(itemImages.sort), asc(itemImages.createdAt)) });
+  });
+
+  /** Take a picture off an item. The file itself is kept: another record may point at it. */
+  r.delete('/:id/images/:imageId', requirePerm('items:write'), async (req, res) => {
+    const id = zId.parse(req.params.id);
+    const imageId = zId.parse(req.params.imageId);
+    const gone = await db.delete(itemImages).where(and(eq(itemImages.id, imageId), eq(itemImages.itemId, id))).returning({ id: itemImages.id });
+    must(gone[0], 'Picture');
+    res.json({ ok: true });
   });
 
   /** Our SKU <-> Shopify/Amazon/Flipkart product ids (PRD 7.5). */
