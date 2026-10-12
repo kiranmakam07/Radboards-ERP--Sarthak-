@@ -65,7 +65,7 @@ export function LineEditor({
   return (
     <div>
       <div className="filters">
-        <select value="" onChange={(e) => add(e.target.value)} style={{ minWidth: 260 }}>
+        <select value="" onChange={(e) => add(e.target.value)} className="grow">
           <option value="">+ Add item…</option>
           {choices.map((i) => (
             <option key={i.id} value={i.id}>
@@ -73,13 +73,13 @@ export function LineEditor({
             </option>
           ))}
         </select>
-        <input placeholder="Scan barcode / type SKU, press Enter" value={code} style={{ width: 260 }}
+        <input placeholder="Scan barcode / type SKU, press Enter" value={code} className="grow"
           onChange={(e) => setCode(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void scan(); } }} />
         {error ? <span className="error small">{error}</span> : null}
       </div>
       {lines.length > 0 && (
-        <div className="table-wrap">
+        <div className="table-wrap stack">
           <table>
             <thead>
               <tr>
@@ -92,12 +92,12 @@ export function LineEditor({
                 const item = byId.get(l.item_id);
                 return (
                   <tr key={l.item_id}>
-                    <td>{item ? `${item.sku} — ${item.name}` : l.item_id}</td>
-                    <td className="right"><input type="number" min="0" step="any" value={l.qty} style={{ width: 80 }} onChange={(e) => update(i, { qty: e.target.value })} /></td>
-                    <td className="right"><input type="number" min="0" step="any" value={l.rate} placeholder={item ? String(Number(item[priceKey])) : ''} style={{ width: 110 }} onChange={(e) => update(i, { rate: e.target.value })} /></td>
-                    {showDiscount && <td className="right"><input type="number" min="0" step="any" value={l.discount} placeholder="0" style={{ width: 90 }} onChange={(e) => update(i, { discount: e.target.value })} /></td>}
-                    <td className="right">{item ? Number(item.gst_rate) : ''}</td>
-                    <td><button type="button" onClick={() => onChange(lines.filter((_, idx) => idx !== i))}>Remove</button></td>
+                    <td data-label="Item">{item ? `${item.sku} — ${item.name}` : l.item_id}</td>
+                    <td className="right" data-label="Qty"><input type="number" inputMode="decimal" min="0" step="any" value={l.qty} style={{ width: 80 }} onChange={(e) => update(i, { qty: e.target.value })} /></td>
+                    <td className="right" data-label="Rate"><input type="number" inputMode="decimal" min="0" step="any" value={l.rate} placeholder={item ? String(Number(item[priceKey])) : ''} style={{ width: 110 }} onChange={(e) => update(i, { rate: e.target.value })} /></td>
+                    {showDiscount && <td className="right" data-label="Discount ₹"><input type="number" inputMode="decimal" min="0" step="any" value={l.discount} placeholder="0" style={{ width: 90 }} onChange={(e) => update(i, { discount: e.target.value })} /></td>}
+                    <td className="right" data-label="GST %">{item ? Number(item.gst_rate) : ''}</td>
+                    <td data-label=""><button type="button" onClick={() => onChange(lines.filter((_, idx) => idx !== i))}>Remove</button></td>
                   </tr>
                 );
               })}

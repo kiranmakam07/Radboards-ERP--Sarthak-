@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { post, useGet } from '@/lib/api';
 import { SessionContext, type Session } from '@/lib/session';
 
@@ -73,6 +73,15 @@ const NAV: { group: string; items: NavItem[] }[] = [
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  // On a phone the menu is a panel that slides in from the side; on a wide screen it is always there.
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => setMenuOpen(false), [pathname]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
   // api() sends the browser to /login on a 401, so a signed-out visitor never sees the shell.
   const { data, error } = useGet<Session>('/auth/me');
   if (error) return <div className="center"><div className="error">{error}</div></div>;
@@ -81,12 +90,21 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   // Highlight the one entry that fits the page best: on /leads/pipeline that is "Pipeline", not "Leads" as well.
   const active = NAV.flatMap((g) => g.items).filter((i) => can(i.perm) && (pathname === i.href || pathname.startsWith(`${i.href}/`)))
     .sort((a, b) => b.href.length - a.href.length)[0]?.href;
+  const here = NAV.flatMap((g) => g.items).find((i) => i.href === active)?.label;
 
   return (
     <SessionContext.Provider value={data}>
-      <div className="shell">
-        <nav className="nav no-print">
+      <div className={menuOpen ? 'shell menu-open' : 'shell'}>
+        <header className="topbar no-print">
+          <button type="button" className="menu-button" aria-expanded={menuOpen} aria-controls="main-menu" onClick={() => setMenuOpen(!menuOpen)}>
+            <span aria-hidden="true">☰</span> Menu
+          </button>
           <Link href="/" className="brand">RadCore</Link>
+          {here ? <span className="here">{here}</span> : null}
+        </header>
+        <button type="button" className="nav-backdrop no-print" aria-label="Close the menu" tabIndex={menuOpen ? 0 : -1} onClick={() => setMenuOpen(false)} />
+        <nav className="nav no-print" id="main-menu">
+          <Link href="/" className="brand" onClick={() => setMenuOpen(false)}>RadCore</Link>
           {NAV.map((g) => {
             const items = g.items.filter((i) => can(i.perm));
             if (items.length === 0) return null;
@@ -94,7 +112,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               <div key={g.group} style={{ display: 'contents' }}>
                 <div className="group">{g.group}</div>
                 {items.map((i) => (
-                  <Link key={i.href} href={i.href} className={i.href === active ? 'active' : undefined}>
+                  <Link key={i.href} href={i.href} className={i.href === active ? 'active' : undefined} onClick={() => setMenuOpen(false)}>
                     {i.label}
                   </Link>
                 ))}
