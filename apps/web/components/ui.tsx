@@ -248,19 +248,20 @@ export function UploadField({ purpose, value, onChange }: { purpose: string; val
 
 /** A button that runs an action, shows the server's error, and can ask for confirmation first. */
 export function ActionButton({
-  children, onClick, confirm, onDone, kind,
+  children, onClick, confirm, onDone, kind, disabled,
 }: {
   children: ReactNode;
   onClick: () => Promise<unknown>;
   confirm?: string;
   onDone?: (result: any) => void;
   kind?: 'primary' | 'danger';
+  disabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
     <span className="action">
-      <button type="button" className={kind} disabled={busy}
+      <button type="button" className={kind} disabled={busy || disabled}
         onClick={async () => {
           if (confirm && !window.confirm(confirm)) return;
           setBusy(true);

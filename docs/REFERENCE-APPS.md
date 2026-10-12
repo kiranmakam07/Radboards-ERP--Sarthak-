@@ -58,12 +58,12 @@ Status: ✅ in RadCore · 🔨 being built now · 🔌 built, waits for an accou
 | Timeline of everything that happened with a lead | ✅ | |
 | Files sent with "they opened it" tracking | ✅ | |
 | Pipeline on the phone | ✅ | |
-| **Follow-up sequences over days and weeks** | 🔨 | A plan of steps; each comes up on its day with the message ready |
-| **Many leads at once** (assign, message one after another) | 🔨 | |
-| **Leads brought in from a spreadsheet** | 🔨 | |
+| **Follow-up sequences over days and weeks** | ✅ | CRM → Follow-up plans. Each step comes up on its day with the message one tap away; a person presses send (nothing goes out by itself until the WhatsApp number is connected) |
+| **Many leads at once** (assign, message one after another) | ✅ | Tick leads on the list: hand them to someone, or message them one tap each |
+| **Leads brought in from a spreadsheet** | ✅ | Leads → Bring in from a spreadsheet (CSV) |
 | Automatic first WhatsApp to a new lead, day or night | 🔌 | Needs the WhatsApp number connected and an approved template |
 | Messages sent from the business number | 🔌 | |
-| Team dashboard: who has how many, who is converting | 🔨 | Per person |
+| Team dashboard: who has how many, who is converting | ✅ | Marketing dashboard → The team, person by person |
 | Lead results sent back to Meta to improve the ads | ⏭ | |
 | WhatsApp campaigns to thousands | ⏭ | Needs approved templates; easy to get a number banned if rushed |
 

@@ -18,6 +18,7 @@ import { hrRouter } from './modules/hr';
 import { hrSelfRouter } from './modules/hr-self';
 import { inventoryRouter } from './modules/inventory';
 import { itemsRouter } from './modules/items';
+import { leadToolsRouter } from './modules/lead-tools';
 import { leadsRouter, publicLeadsRouter } from './modules/leads';
 import { onlineRouter } from './modules/online-router';
 import { opsRouter } from './modules/ops';
@@ -119,6 +120,7 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
   app.use('/api/items', itemsRouter(db));
   app.use('/api/parties', partiesRouter(db));
   app.use('/api/leads', sharesRouter(db));
+  app.use('/api/leads', leadToolsRouter(db));
   app.use('/api/leads', leadsRouter(db));
   app.use('/api/crm', crmRouter(db, crmDeps));
   app.use('/api/sales/online', onlineRouter(db, crmDeps));

@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { LEAD_STAGE_LABELS, LEAD_TRANSITIONS, type LeadStage } from '@radcore/shared';
 import { Steps } from '@/components/charts';
 import { Conversation, QuickReplies, ScoreCard, ShareFiles } from '@/components/crm';
+import { PlanCard } from '@/components/leadtools';
 import { Badge, Card, Form, KV, Loading, Page, Table, dateTime, label } from '@/components/ui';
 import { patch, post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -51,6 +52,8 @@ export default function LeadPage() {
       </Card>
 
       <ScoreCard lead={lead} />
+
+      {lead.stage !== 'converted' && lead.stage !== 'lost' ? <PlanCard leadId={id} plan={lead.plan} phone={lead.phone} canChange={write} onDone={reload} /> : null}
 
       {write && <QuickReplies leadId={id} phone={lead.phone} onDone={reload} />}
 

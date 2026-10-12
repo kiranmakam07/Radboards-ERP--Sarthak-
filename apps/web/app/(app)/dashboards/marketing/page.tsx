@@ -101,6 +101,19 @@ export default function MarketingDashboard() {
               ]} />
             </Card>
           </div>
+          <Card title="The team, person by person">
+            <Table rows={d.team} empty="Nobody has leads in this period." columns={[
+              { key: 'name', title: 'Person' },
+              { key: 'received', title: 'Leads received', align: 'right' },
+              { key: 'contacted', title: 'Contacted', align: 'right' },
+              { key: 'avg_response_min', title: 'Usual time to first contact', align: 'right', render: (r) => (r.avg_response_min === null ? ''
+                : r.avg_response_min < 60 ? `${r.avg_response_min} min` : r.avg_response_min < 1440 ? `${num(Math.round(r.avg_response_min / 6) / 10)} hours` : `${num(Math.round(r.avg_response_min / 144) / 10)} days`) },
+              { key: 'converted', title: 'Converted', align: 'right' },
+              { key: 'open_now', title: 'Open now', align: 'right' },
+              { key: 'overdue', title: 'Follow-ups overdue', align: 'right', render: (r) => (r.overdue ? <span className="error small">{r.overdue}</span> : 0) },
+            ]} />
+            <p className="muted small" style={{ marginBottom: 0 }}>Received, contacted and converted are for the dates chosen above; open and overdue are as of now.</p>
+          </Card>
         </>
       )}
     </Page>

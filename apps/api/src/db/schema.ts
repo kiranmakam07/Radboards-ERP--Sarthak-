@@ -211,6 +211,10 @@ export const leads = pgTable('leads', {
   address: jsonb('address'),
   gstin: text('gstin'),
   notes: text('notes'),
+  /** The follow-up plan this lead is on, which step comes next (0 = the first), and when the plan was started. */
+  planId: uuid('plan_id').references((): AnyPgColumn => followUpPlans.id),
+  planStep: integer('plan_step'),
+  planStartedAt: ts('plan_started_at'),
   ...stamps,
 }, (t) => [
   index('leads_phone_idx').on(t.phone),
@@ -221,6 +225,20 @@ export const leads = pgTable('leads', {
   check('leads_follow_up_chk',
     sql`${t.stage} not in ('contacted','interested','meeting_booked') or ${t.nextFollowUpAt} is not null`),
 ]);
+
+/**
+ * A follow-up plan: steps over days and weeks, each with what to do and, if it is a message, the
+ * quick reply to send. Steps are [{ after_days, what, template_id }], in order of the day.
+ */
+export const followUpPlans = pgTable('follow_up_plans', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  steps: jsonb('steps').notNull(),
+  /** The plan every new lead is put on. At most one. */
+  isDefault: boolean('is_default').notNull().default(false),
+  active: boolean('active').notNull().default(true),
+  ...stamps,
+});
 
 export const leadActivities = pgTable('lead_activities', {
   id: uuid('id').primaryKey().defaultRandom(),

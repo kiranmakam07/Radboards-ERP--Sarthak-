@@ -4,6 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { LEAD_STAGES, LEAD_STAGE_LABELS } from '@radcore/shared';
 import { Score } from '@/components/crm';
+import { BulkLeads, ImportLeads } from '@/components/leadtools';
 import { Badge, CsvLink, Form, Loading, Page, Table, Toggle, dateTime } from '@/components/ui';
 import { post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -24,6 +25,11 @@ function Leads() {
   const path = `/leads${qs(f)}`;
   const { data, loading, error, reload } = useGet<{ data: any[] }>(path);
   const set = (k: string, v: string) => setF({ ...f, [k]: v });
+  // Leads ticked on the list, to hand over or message together.
+  const [picked, setPicked] = useState<string[]>([]);
+  const tick = (leadId: string, on: boolean) => setPicked(on ? [...picked, leadId] : picked.filter((p) => p !== leadId));
+  const shown = data?.data ?? [];
+  const pickedLeads = shown.filter((l) => picked.includes(l.id));
 
   return (
     <Page title="Leads" actions={<CsvLink href={path} />}>
@@ -48,6 +54,11 @@ function Leads() {
             onDone={reload} />
         </Toggle>
       )}
+      {can('crm:manage') && (
+        <Toggle label="+ Bring in from a spreadsheet">
+          <ImportLeads sources={sources.data?.data ?? []} users={users.data?.data ?? []} onDone={reload} />
+        </Toggle>
+      )}
       <div className="filters">
         {VIEWS.map(([v, l]) => <button key={v} type="button" className={f.view === v ? 'primary' : undefined} onClick={() => set('view', v)}>{l}</button>)}
       </div>
@@ -66,8 +77,14 @@ function Leads() {
         <label><input type="checkbox" checked={f.sort === 'score'} onChange={(e) => set('sort', e.target.checked ? 'score' : '')} /> Hottest first</label>
       </div>
       <Loading loading={loading} error={error} />
+      {pickedLeads.length > 0 && can('leads:write') ? (
+        <BulkLeads picked={pickedLeads} users={users.data?.data ?? []} canAssign={can('crm:manage')} onClear={() => setPicked([])} onDone={reload} />
+      ) : null}
       <Table rows={data?.data} rowHref={(r) => `/leads/${r.id}`} columns={[
         { key: 'lead_no', title: 'Lead' },
+        { key: 'pick', title: 'Tick', render: (r) => (
+          <input type="checkbox" checked={picked.includes(r.id)} aria-label={`Tick ${r.name}`} style={{ width: 'auto' }} onChange={(e) => tick(r.id, e.target.checked)} />
+        ) },
         { key: 'name', title: 'Name' },
         { key: 'phone', title: 'Phone' },
         { key: 'stage', title: 'Stage', render: (r) => <><Badge value={r.stage} />{r.lost_reason ? <span className="muted small"> {r.lost_reason}</span> : null}</> },
