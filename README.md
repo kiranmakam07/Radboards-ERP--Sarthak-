@@ -164,6 +164,27 @@ it is connected, and everything that has come in.
 - Anything that could not become a lead (no phone number, a number outside India, Meta refusing
   to hand the lead over) stays on that screen with the reason and a retry button.
 
+## Online orders
+
+An order placed on the Shopify store, Amazon or Flipkart becomes a confirmed sales order (screen
+**Sales → Online orders**), matched to items by SKU, and is then delivered and invoiced like any
+other order. The channel's own order number is kept on it, so nothing is taken in twice.
+
+- **Shopify.** In the Shopify admin: Settings → Notifications → Webhooks → create one for *Order
+  creation* and one for *Order cancellation*, format JSON, address `https://<domain>/api/hooks/shopify`.
+  Copy the signing key shown there into `SHOPIFY_WEBHOOK_SECRET` and restart (on Vercel: add it under
+  Environment Variables and redeploy). The customer is matched on phone, then email, otherwise added.
+  A cancellation cancels the order here unless the goods have already been delivered.
+- **Amazon and Flipkart.** Download the order report from the seller site and choose it on the
+  screen. Their orders sit under one party each ("Amazon marketplace", "Flipkart marketplace"),
+  because the marketplace collects the money and settles with us; the buyer is in the order's notes.
+  The column names were taken from the layouts these reports are known to use and have **not been
+  checked against a real export yet**: if a real file is refused, the message lists the columns it found.
+- Shipping charged to the customer goes on the order as a service item with SKU `SHIPPING`, made the
+  first time it is needed. Prices are taken as including GST.
+- An order with a SKU that no item here has is kept on the screen with the reason. Add the item (or
+  fix the SKU), then press **Try the stuck ones again**.
+
 ## Commands
 
 | Command | What it does |

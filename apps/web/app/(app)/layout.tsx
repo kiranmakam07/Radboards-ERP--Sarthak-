@@ -29,6 +29,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Sales', items: [
     { href: '/dashboards/sales', label: 'Sales dashboard', perm: 'dashboard:sales' },
     { href: '/sales/orders', label: 'Quotes & orders', perm: 'sales:read' },
+    { href: '/sales/online', label: 'Online orders', perm: 'sales:read' },
     { href: '/invoices', label: 'Invoices', perm: 'invoices:read' },
     { href: '/parties', label: 'Parties', perm: 'parties:read' },
   ] },

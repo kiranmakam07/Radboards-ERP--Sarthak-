@@ -55,6 +55,8 @@ export const config = {
   metaVerifyToken: env.META_VERIFY_TOKEN ?? '',
   metaPageAccessToken: env.META_PAGE_ACCESS_TOKEN ?? '',
   metaGraphVersion: env.META_GRAPH_VERSION ?? 'v21.0',
+  /** Shopify signs every webhook with this (Settings > Notifications > Webhooks in the Shopify admin). Blank = not connected. */
+  shopifyWebhookSecret: env.SHOPIFY_WEBHOOK_SECRET ?? '',
   /**
    * "Are you a person?" check on the public enquiry form (Cloudflare Turnstile). Blank = no check,
    * and the form relies on its hidden trap field and rate limit alone.

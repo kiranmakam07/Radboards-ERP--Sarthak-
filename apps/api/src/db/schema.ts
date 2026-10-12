@@ -820,6 +820,8 @@ export const channelEvents = pgTable('channel_events', {
   summary: text('summary'),
   /** The lead this event created or was added to. */
   leadId: uuid('lead_id').references(() => leads.id),
+  /** The sales order this event created or cancelled (orders from Shopify, Amazon and Flipkart). */
+  orderId: uuid('order_id').references(() => salesOrders.id),
   attempts: integer('attempts').notNull().default(0),
   processedAt: ts('processed_at'),
   createdAt: ts('created_at').notNull().defaultNow(),
