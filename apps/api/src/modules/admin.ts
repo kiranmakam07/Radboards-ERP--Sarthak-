@@ -25,6 +25,8 @@ const zPassword = z.string().min(8, 'must be at least 8 characters').max(200);
 const sessionExtras = async (db: DB) => ({
   sample_data: await getSetting(db, 'sample_data'),
   max_upload_mb: Math.floor(config.maxUploadBytes / 1024 / 1024),
+  /** True when messages can be sent to a lead from inside the app (the WhatsApp number is connected). */
+  whatsapp_send: Boolean(config.whatsappPhoneNumberId && config.whatsappAccessToken),
 });
 
 export function authRouter(db: DB) {

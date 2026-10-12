@@ -55,6 +55,14 @@ export const config = {
   metaVerifyToken: env.META_VERIFY_TOKEN ?? '',
   metaPageAccessToken: env.META_PAGE_ACCESS_TOKEN ?? '',
   metaGraphVersion: env.META_GRAPH_VERSION ?? 'v21.0',
+  /**
+   * Sending WhatsApp messages from inside the app (WhatsApp Cloud API). The number id is shown
+   * beside the business number in Meta's WhatsApp > API setup; the token is a permanent system
+   * user token with whatsapp_business_messaging. Both blank = replies go out from the person's
+   * own WhatsApp instead, as before.
+   */
+  whatsappPhoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID ?? '',
+  whatsappAccessToken: env.WHATSAPP_ACCESS_TOKEN ?? '',
   /** Shopify signs every webhook with this (Settings > Notifications > Webhooks in the Shopify admin). Blank = not connected. */
   shopifyWebhookSecret: env.SHOPIFY_WEBHOOK_SECRET ?? '',
   /**

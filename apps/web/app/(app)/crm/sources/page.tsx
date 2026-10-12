@@ -67,7 +67,8 @@ export default function LeadSourcesPage() {
               <p className="small">The first message from a new number starts a lead; later messages go on that lead's timeline. A message that came from a Click-to-WhatsApp ad carries the ad's name.</p>
               <p className="muted small">Callback address (Webhooks → WhatsApp Business Account → <code>messages</code>):</p>
               <Address url={`${origin}/api/hooks/whatsapp`} />
-              <p className="muted small">This needs the business number to be on WhatsApp's Cloud API. Replies are sent from the lead's page: a quick reply opens WhatsApp with the message written.</p>
+              <p><Ready ok={Boolean(d.whatsapp?.send)}>Sending from the app</Ready></p>
+              <p className="muted small">This needs the business number to be on WhatsApp's Cloud API. Until sending is connected (<code>WHATSAPP_PHONE_NUMBER_ID</code> and <code>WHATSAPP_ACCESS_TOKEN</code> on the server), a quick reply on the lead's page opens WhatsApp with the message written.</p>
             </Card>
 
             <Card title="Google Ads lead forms" actions={<Link href="/campaigns">Campaign links</Link>}>

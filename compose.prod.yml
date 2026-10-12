@@ -52,6 +52,9 @@ services:
       META_APP_SECRET: ${META_APP_SECRET:-}
       META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-}
       META_PAGE_ACCESS_TOKEN: ${META_PAGE_ACCESS_TOKEN:-}
+      # Sending WhatsApp messages from inside the app (blank = not connected)
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
 
     volumes:
       - uploads_data:/data/uploads
