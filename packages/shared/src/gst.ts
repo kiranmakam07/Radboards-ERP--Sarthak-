@@ -128,3 +128,29 @@ export function computeTotals(lines: LineTax[], roundToRupee = true): DocTotals 
   const grandTotal = roundToRupee ? raw.toDecimalPlaces(0, Decimal.ROUND_HALF_UP) : raw;
   return { taxableTotal, cgstTotal, sgstTotal, igstTotal, roundOff: grandTotal.minus(raw), grandTotal };
 }
+
+const STATE_SHORT: Record<string, string> = {
+  JK: '01', HP: '02', PB: '03', CH: '04', UK: '05', UT: '05', UA: '05', HR: '06', DL: '07', RJ: '08', UP: '09', BR: '10', SK: '11',
+  AR: '12', NL: '13', MN: '14', MZ: '15', TR: '16', ML: '17', AS: '18', WB: '19', JH: '20', OR: '21', OD: '21', CG: '22', CT: '22',
+  MP: '23', GJ: '24', DN: '26', DD: '26', DH: '26', MH: '27', KA: '29', GA: '30', LD: '31', KL: '32', TN: '33', PY: '34', AN: '35',
+  TS: '36', TG: '36', AP: '37', LA: '38',
+};
+const lettersOnly = (s: string) => s.toLowerCase().replace(/&/g, 'and').replace(/[^a-z]/g, '');
+const STATE_BY_NAME: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(STATE_CODES).map(([code, name]) => [lettersOnly(name), code])),
+  orissa: '21', pondicherry: '34', uttaranchal: '05', newdelhi: '07', nctofdelhi: '07', jammukashmir: '01',
+  andamanandnicobar: '35', dadraandnagarhaveli: '26', damananddiu: '26', chattisgarh: '22',
+};
+
+/**
+ * The GST state code for a state as other systems write it: its name ("Karnataka"), its short
+ * code ("KA", "IN-KA") or the GST code itself ("29"). Null when it is none of these.
+ */
+export function stateCodeFor(raw: string | null | undefined): string | null {
+  const text = (raw ?? '').trim();
+  if (!text) return null;
+  if (/^\d{1,2}$/.test(text)) return STATE_CODES[text.padStart(2, '0')] ? text.padStart(2, '0') : null;
+  const short = text.toUpperCase().replace(/^IN-/, '');
+  if (/^[A-Z]{2}$/.test(short) && STATE_SHORT[short]) return STATE_SHORT[short]!;
+  return STATE_BY_NAME[lettersOnly(text)] ?? null;
+}

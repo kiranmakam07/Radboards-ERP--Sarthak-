@@ -12,6 +12,7 @@ import { adSpends, campaigns, channelEvents, items, leadActivities, leadSources,
 import { AppError, badRequest, conflict, forbidden, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zText, wantsFile, type Ctx } from '../lib/http';
 import { captureLead, moveLead, sourceIdByName } from './leads';
+import { cancelOnlineOrder, fromShopify, isOnlineChannel, takeOrder, type OnlineOrder } from './online';
 
 /**
  * CRM connections: every outside source of enquiries ends in the same place, captureLead, so a
@@ -114,8 +115,13 @@ function whatsappText(m: any): string {
 }
 
 /** Turn one stored event into a lead (or add it to the lead that phone number already has). */
-async function handle(ctx: Ctx, e: Event, fetched: Awaited<ReturnType<typeof fetchMetaLead>> | null): Promise<{ leadId: string; summary: string }> {
+async function handle(ctx: Ctx, e: Event, fetched: Awaited<ReturnType<typeof fetchMetaLead>> | null): Promise<{ leadId?: string | null; orderId?: string | null; summary: string }> {
   const p = e.payload as any;
+  if (isOnlineChannel(e.channel)) {
+    // An order from the online store or a marketplace: it becomes a sales order, not a lead (see online.ts).
+    if (e.eventType === 'cancelled') return cancelOnlineOrder(ctx, e.channel, e.externalId, String(p.name ?? e.externalId));
+    return takeOrder(ctx, e.channel === 'shopify' ? fromShopify(p) : (p as OnlineOrder));
+  }
   if (e.channel === 'google') {
     const incoming = fromGoogleColumns(p.lead?.user_column_data ?? []);
     const [c] = await ctx.tx.select().from(campaigns).where(eq(campaigns.id, p.campaign_id));
@@ -170,7 +176,7 @@ export async function processEvent(db: DB, deps: CrmDeps, id: string): Promise<'
       if (!e || (e.status !== 'received' && e.status !== 'failed')) return 'skipped' as const;
       const result = await handle({ tx, user: null }, e, fetched);
       await tx.update(channelEvents)
-        .set({ status: 'processed', leadId: result.leadId, summary: result.summary, error: null, attempts: e.attempts + 1, processedAt: new Date() })
+        .set({ status: 'processed', leadId: result.leadId ?? null, orderId: result.orderId ?? null, summary: result.summary, error: null, attempts: e.attempts + 1, processedAt: new Date() })
         .where(eq(channelEvents.id, id));
       return 'processed' as const;
     });
@@ -185,9 +191,10 @@ export async function processEvent(db: DB, deps: CrmDeps, id: string): Promise<'
 }
 
 /** Try again everything that has not become a lead yet: after setting a token, say, or fixing a campaign. */
-export async function processPending(db: DB, deps: CrmDeps, limit = 500): Promise<{ processed: number; failed: number }> {
+export async function processPending(db: DB, deps: CrmDeps, limit = 500, channels?: readonly string[]): Promise<{ processed: number; failed: number }> {
   const pending = await db.select({ id: channelEvents.id }).from(channelEvents)
-    .where(inArray(channelEvents.status, ['received', 'failed'])).orderBy(asc(channelEvents.createdAt)).limit(limit);
+    .where(and(inArray(channelEvents.status, ['received', 'failed']), channels ? inArray(channelEvents.channel, [...channels]) : undefined))
+    .orderBy(asc(channelEvents.createdAt)).limit(limit);
   const out = { processed: 0, failed: 0 };
   for (const p of pending) {
     const r = await processEvent(db, deps, p.id);
@@ -198,12 +205,12 @@ export async function processPending(db: DB, deps: CrmDeps, limit = 500): Promis
 }
 
 /** Store an incoming event once. Returns null when this exact event was already stored (the sender repeating itself). */
-async function record(db: DB, v: typeof channelEvents.$inferInsert): Promise<string | null> {
+export async function record(db: DB, v: typeof channelEvents.$inferInsert): Promise<string | null> {
   const [row] = await db.insert(channelEvents).values(v).onConflictDoNothing().returning({ id: channelEvents.id });
   return row?.id ?? null;
 }
 
-const safeEqual = (a: string, b: string) => {
+export const safeEqual = (a: string, b: string) => {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
   return x.length === y.length && crypto.timingSafeEqual(x, y);
@@ -318,6 +325,27 @@ export function hooksRouter(db: DB, deps: CrmDeps = defaultDeps) {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   };
+  /**
+   * Shopify: every new order (and every cancellation) is sent here, signed with the webhook secret.
+   * Subscribe "Order creation" and "Order cancellation" in the Shopify admin; "Order payment" is
+   * accepted too and counts as the same order.
+   */
+  r.post('/shopify', async (req, res) => {
+    if (!config.shopifyWebhookSecret) throw new AppError(503, 'not_configured', 'Shopify is not connected yet');
+    const raw = (req as Request & { rawBody?: Buffer }).rawBody;
+    const sent = String(req.headers['x-shopify-hmac-sha256'] ?? '');
+    const expected = raw ? crypto.createHmac('sha256', config.shopifyWebhookSecret).update(raw).digest('base64') : '';
+    if (!raw || !sent || !safeEqual(sent, expected)) throw forbidden('Signature does not match');
+    const topic = String(req.headers['x-shopify-topic'] ?? '');
+    const eventType = topic === 'orders/cancelled' ? 'cancelled' : ['orders/create', 'orders/paid', 'orders/updated'].includes(topic) ? 'order' : null;
+    const ids: string[] = [];
+    if (eventType && req.body?.id) {
+      const id = await record(db, { channel: 'shopify', eventType, externalId: String(req.body.id), payload: req.body, summary: `Shopify ${String(req.body.name ?? req.body.id)}` });
+      if (id) ids.push(id);
+    }
+    await finish(res, ids, { ok: true });
+  });
+
   r.options('/form/:token', (_req, res) => {
     cors(res);
     res.status(204).end();
@@ -366,10 +394,11 @@ export function crmRouter(db: DB, deps: CrmDeps = defaultDeps) {
              count(*) filter (where status = 'processed')::int as leads,
              count(*) filter (where status = 'failed')::int as failed,
              count(*) filter (where status = 'received')::int as waiting
-        from channel_events where created_at > now() - interval '30 days' group by channel`);
+        from channel_events where created_at > now() - interval '30 days' and channel not in ('shopify', 'amazon', 'flipkart') group by channel`);
     const events = await rows(db, sql`
       select e.id, e.channel, e.event_type, e.status, e.summary, e.error, e.attempts, e.created_at, e.lead_id, l.lead_no
         from channel_events e left join leads l on l.id = e.lead_id
+       where e.channel not in ('shopify', 'amazon', 'flipkart')
        order by (e.status in ('failed','received')) desc, e.created_at desc limit 100`);
     const links = await rows(db, sql`
       select c.id, c.name, c.token, s.name as source_name from campaigns c join lead_sources s on s.id = c.source_id

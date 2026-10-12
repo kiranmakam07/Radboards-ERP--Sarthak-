@@ -6,6 +6,7 @@ import type { Ctx } from '../lib/http';
 import { createAdjustment, decideAdjustment } from '../modules/inventory';
 import { createApplicant, createEmployee, hireApplicant, moveApplicant, saveAttendance, scheduleInterview } from '../modules/hr';
 import { captureLead, sourceIdByName } from '../modules/leads';
+import { fromShopify, takeOrder, type OnlineOrder } from '../modules/online';
 import { createParty } from '../modules/parties';
 import { rows, sql, type DB } from './client';
 import {
@@ -104,6 +105,7 @@ export async function seedDemo(db: DB, password: string = DEMO_PASSWORD): Promis
     ]);
 
     await seedPeopleAndOperations(ctx);
+    await seedOnlineOrders(ctx);
   });
   console.log(`Demo data loaded (${istDate()}). Sign in with phone 9000000006 (admin) and the demo password.`);
 }
@@ -123,6 +125,32 @@ export async function seedReviewCopy(db: DB): Promise<'loaded' | 'already in use
   }
   await seedDemo(db, password);
   return 'loaded';
+}
+
+/** What the Online orders screen looks like once Shopify is connected and a marketplace report has been brought in. */
+async function seedOnlineOrders(ctx: Ctx): Promise<void> {
+  const shopify = (id: number, name: string, sku: string, title: string, price: string, who: [string, string, string], state: string) => ({
+    id, name: `#${name}`, created_at: new Date().toISOString(), currency: 'INR', taxes_included: true, total_price: price, financial_status: 'paid',
+    payment_gateway_names: ['razorpay'], customer: { first_name: who[0], last_name: who[1], phone: who[2] },
+    shipping_address: { name: `${who[0]} ${who[1]}`, phone: who[2], address1: '14 Lake Road', city: state === 'KA' ? 'Bengaluru' : 'Pune', province_code: state, zip: state === 'KA' ? '560001' : '411001' },
+    line_items: [{ sku, title, quantity: 1, price }], shipping_lines: [],
+  });
+  const good = shopify(900001, '1042', 'BRD-LONG', 'Longboard 42"', '9440.00', ['Rhea', 'Menon', '+919820055555'], 'KA');
+  const stuck = shopify(900002, '1043', 'GRIP-TAPE', 'Grip tape', '499.00', ['Kabir', 'Sethi', '+919820066666'], 'MH');
+  const amazon: OnlineOrder = {
+    channel: 'amazon', externalId: '402-7781234-5567890', name: '402-7781234-5567890', orderDate: istDate(), currency: 'INR',
+    customer: { name: 'Tanvi P', phone: null, email: null }, address: { line1: '', line2: '', city: 'Hyderabad', state: 'Telangana', pincode: '500001' },
+    lines: [{ sku: 'HLM-01', title: 'Helmet', qty: '2', unitPrice: '1534.00', discount: '0.00' }], shipping: '0.00', taxInclusive: true, total: null,
+    payment: 'unknown', paymentNote: 'Paid to Amazon, which settles with us', note: null,
+  };
+  const taken = await takeOrder(ctx, fromShopify(good));
+  const fromAmazon = await takeOrder(ctx, amazon);
+  await ctx.tx.insert(channelEvents).values([
+    { channel: 'shopify', eventType: 'order', externalId: String(good.id), payload: good, status: 'processed', orderId: taken.orderId, summary: taken.summary, attempts: 1, processedAt: new Date() },
+    { channel: 'amazon', eventType: 'order', externalId: amazon.externalId, payload: amazon, status: 'processed', orderId: fromAmazon.orderId, summary: fromAmazon.summary, attempts: 1, processedAt: new Date() },
+    { channel: 'shopify', eventType: 'order', externalId: String(stuck.id), payload: stuck, status: 'failed', summary: 'Shopify #1043', attempts: 1,
+      error: 'Shopify #1043: no item here has the SKU GRIP-TAPE (Grip tape). Add the item or correct its SKU, then try again.' },
+  ]);
 }
 
 /** HR and operations sample data: a hiring pipeline at every stage, staff with a week of attendance, routines and machines. */

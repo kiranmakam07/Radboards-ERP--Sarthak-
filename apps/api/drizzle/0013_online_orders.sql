@@ -1,0 +1,2 @@
+ALTER TABLE "channel_events" ADD COLUMN "order_id" uuid;--> statement-breakpoint
+ALTER TABLE "channel_events" ADD CONSTRAINT "channel_events_order_id_sales_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."sales_orders"("id") ON DELETE no action ON UPDATE no action;

@@ -48,6 +48,7 @@ const TONES: Record<string, string> = {
   sent: 'blue', partly_received: 'amber', received: 'amber', inwarded: 'green', closed: 'grey',
   pending: 'amber', approved: 'green', rejected: 'red',
   matched: 'green', unmatched: 'amber', ignored: 'grey', switched_off: 'grey',
+  taken_in: 'green', needs_a_look: 'red', waiting: 'amber',
   applied: 'blue', shortlisted: 'blue', interview: 'amber', offered: 'amber', hired: 'green',
   open: 'blue', on_hold: 'amber', done: 'green', skipped: 'red', scheduled: 'blue', completed: 'green', no_show: 'red',
   pass: 'green', hold: 'amber', fail: 'red', active: 'green', left: 'grey', planned: 'grey',

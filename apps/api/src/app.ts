@@ -17,6 +17,7 @@ import { hrRouter } from './modules/hr';
 import { inventoryRouter } from './modules/inventory';
 import { itemsRouter } from './modules/items';
 import { leadsRouter, publicLeadsRouter } from './modules/leads';
+import { onlineRouter } from './modules/online-router';
 import { opsRouter } from './modules/ops';
 import { partiesRouter } from './modules/parties';
 import { paymentsRouter } from './modules/payments';
@@ -114,6 +115,7 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
   app.use('/api/parties', partiesRouter(db));
   app.use('/api/leads', leadsRouter(db));
   app.use('/api/crm', crmRouter(db, crmDeps));
+  app.use('/api/sales/online', onlineRouter(db, crmDeps));
   app.use('/api/sales', salesRouter(db));
   app.use('/api/payments', paymentsRouter(db));
   app.use('/api/purchasing', purchasingRouter(db));
