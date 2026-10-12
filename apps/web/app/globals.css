@@ -149,6 +149,8 @@ td input, td select { padding: 4px 6px; }
 .doc .head { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 14px; }
 .doc .head > div { flex: 1; }
 .doc table th, .doc table td { white-space: normal; padding: 5px 8px; border: 1px solid #c9ced8; }
+/* The general rule that drops the line under a list's last row must not open the bottom of a printed table. */
+.doc table tbody tr:last-child td { border-bottom: 1px solid #c9ced8; }
 .doc .words { margin-top: 10px; font-style: italic; }
 .doc .sign { margin-top: 44px; text-align: right; }
 .doc.thermal { max-width: 300px; padding: 10px; font-size: 12px; }
