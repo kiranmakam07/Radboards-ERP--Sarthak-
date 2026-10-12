@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { Card, ErrorBox, Notice, dateTime } from '@/components/ui';
+import { ActionButton, Card, ErrorBox, Notice, Table, UploadField, dateTime } from '@/components/ui';
 import { api, post, useGet } from '@/lib/api';
 
 /**
@@ -91,6 +91,7 @@ export function ScoreCard({ lead }: { lead: { score: number | null; score_label:
 }
 
 type NewLead = { id: string; lead_no: string; name: string; source_name: string; source_detail: string | null; mine: boolean };
+type Opened = { id: string; title: string; lead_id: string; name: string; lead_no: string };
 
 /**
  * A notice the moment a lead arrives: asked for every half minute while the app is open. Shown on
@@ -99,6 +100,7 @@ type NewLead = { id: string; lead_no: string; name: string; source_name: string;
  */
 export function LeadAlerts() {
   const [shown, setShown] = useState<NewLead[]>([]);
+  const [opened, setOpened] = useState<Opened[]>([]);
   const [canAsk, setCanAsk] = useState(false);
   const since = useRef<string | null>(null);
 
@@ -107,9 +109,18 @@ export function LeadAlerts() {
     let stopped = false;
     async function look() {
       try {
-        const res = await api<{ data: NewLead[]; now: string }>(`/leads/alerts${since.current ? `?since=${encodeURIComponent(since.current)}` : ''}`);
+        const res = await api<{ data: NewLead[]; opened: Opened[]; now: string }>(`/leads/alerts${since.current ? `?since=${encodeURIComponent(since.current)}` : ''}`);
         if (stopped) return;
         since.current = res.now;
+        if (res.opened.length > 0) {
+          setOpened((old) => [...res.opened.filter((o) => !old.some((x) => x.id === o.id)), ...old].slice(0, 5));
+          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            for (const o of res.opened) {
+              const n = new Notification(`${o.name} opened "${o.title}"`, { body: 'A good moment to call.', tag: o.id, icon: '/icon-192.png' });
+              n.onclick = () => { window.focus(); window.location.href = `/leads/${o.lead_id}`; };
+            }
+          }
+        }
         if (res.data.length === 0) return;
         setShown((old) => [...res.data.filter((l) => !old.some((o) => o.id === l.id)), ...old].slice(0, 5));
         if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
@@ -127,7 +138,7 @@ export function LeadAlerts() {
     return () => { stopped = true; window.clearInterval(timer); };
   }, []);
 
-  if (shown.length === 0) return null;
+  if (shown.length === 0 && opened.length === 0) return null;
   return (
     <div className="alerts no-print" role="status" aria-live="polite">
       {shown.map((l) => (
@@ -140,11 +151,112 @@ export function LeadAlerts() {
           <button type="button" aria-label={`Dismiss the notice about ${l.name}`} onClick={() => setShown((old) => old.filter((o) => o.id !== l.id))}>×</button>
         </div>
       ))}
+      {opened.map((o) => (
+        <div className="alert" key={o.id}>
+          <div>
+            <strong>{o.name} opened “{o.title}”</strong>
+            <div className="small muted">A good moment to call · {o.lead_no}</div>
+          </div>
+          <Link className="button primary" href={`/leads/${o.lead_id}`} onClick={() => setOpened((old) => old.filter((x) => x.id !== o.id))}>Open</Link>
+          <button type="button" aria-label={`Dismiss the notice about ${o.name}`} onClick={() => setOpened((old) => old.filter((x) => x.id !== o.id))}>×</button>
+        </div>
+      ))}
       {canAsk ? (
         <button type="button" className="link small" onClick={() => Notification.requestPermission().then(() => setCanAsk(false))}>
           Also tell me when RadCore is in the background
         </button>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Send a file to the lead (a price list, a brochure) through a link of its own, and see whether
+ * they have opened it. The link goes out by WhatsApp from the person's own phone or computer.
+ */
+export function ShareFiles({ leadId, phone, name, canSend }: { leadId: string; phone: string; name: string; canSend: boolean }) {
+  const { data, reload } = useGet<{ data: any[] }>(`/leads/${leadId}/shares`);
+  const earlier = useGet<{ data: any[] }>(canSend ? '/leads/shared-files' : null);
+  const [title, setTitle] = useState('');
+  const [fileUrl, setFileUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [made, setMade] = useState<{ title: string; url: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const digits = phone.replace(/\D/g, '');
+  const firstName = name.trim().split(/\s+/)[0] ?? name;
+  const link = (token: string) => `${window.location.origin}/s/${token}`;
+  const message = (t: string, url: string) => `Hi ${firstName}, here is ${t}: ${url}`;
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await post(`/leads/${leadId}/shares`, { title, file_url: fileUrl });
+      setMade({ title: res.data.title, url: link(res.data.token) });
+      setCopied(false);
+      setTitle('');
+      setFileUrl('');
+      reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const shares = data?.data ?? [];
+  if (!canSend && shares.length === 0) return null;
+  return (
+    <Card title="Files sent">
+      {canSend && (
+        <>
+          <div className="form" style={{ marginBottom: 10 }}>
+            <label>What it is
+              <input value={title} placeholder="e.g. Price list, October" onChange={(e) => setTitle(e.target.value)} />
+            </label>
+            <label>The file
+              <UploadField purpose="share" value={fileUrl} onChange={setFileUrl} />
+            </label>
+            {(earlier.data?.data ?? []).length > 0 && !fileUrl ? (
+              <label>Or one sent before
+                <select value="" onChange={(e) => {
+                  const f = earlier.data!.data.find((x) => x.file_id === e.target.value);
+                  if (f) { setFileUrl(`/api/files/${f.file_id}`); if (!title) setTitle(f.title); }
+                }}>
+                  <option value="">Choose…</option>
+                  {earlier.data!.data.map((f) => <option key={f.file_id} value={f.file_id}>{f.title}</option>)}
+                </select>
+              </label>
+            ) : null}
+            <div className="form-foot">
+              <button type="button" className="primary" disabled={busy || !title.trim() || !fileUrl} onClick={send}>{busy ? 'Making the link…' : 'Make the link'}</button>
+              <span className="muted small">You will see here when they open it.</span>
+            </div>
+          </div>
+          <ErrorBox error={error} />
+          {made ? (
+            <div className="notice">
+              <strong>{made.title}</strong> is ready to send:{' '}
+              <code style={{ overflowWrap: 'anywhere' }}>{made.url}</code>
+              <div className="actions" style={{ marginTop: 8 }}>
+                <a className="button primary" href={`https://wa.me/${digits}?text=${encodeURIComponent(message(made.title, made.url))}`} target="_blank" rel="noreferrer">Send on WhatsApp</a>
+                <button type="button" onClick={() => navigator.clipboard.writeText(made.url).then(() => setCopied(true))}>{copied ? 'Copied' : 'Copy the link'}</button>
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
+      <Table rows={shares} empty="Nothing has been sent to this lead yet." columns={[
+        { key: 'title', title: 'File', render: (r) => <a href={`/s/${r.token}`} target="_blank" rel="noreferrer">{r.title}</a> },
+        { key: 'created_at', title: 'Sent', render: (r) => <>{dateTime(r.created_at)}{r.sent_by ? <span className="muted small"> · {r.sent_by}</span> : null}</> },
+        { key: 'opened', title: 'Opened', render: (r) => (r.revoked_at ? <span className="badge grey">Link switched off</span>
+          : r.view_count > 0 ? <><span className="badge green">Opened {r.view_count === 1 ? 'once' : `${r.view_count} times`}</span> <span className="muted small">last {dateTime(r.last_viewed_at)}</span></>
+            : <span className="badge amber">Not opened yet</span>) },
+        { key: 'x', title: '', render: (r) => (canSend && !r.revoked_at ? (
+          <ActionButton confirm="Switch this link off? It will stop working for whoever has it." onClick={() => post(`/leads/shares/${r.id}/revoke`)} onDone={reload}>Switch off</ActionButton>
+        ) : null) },
+      ]} />
+    </Card>
   );
 }

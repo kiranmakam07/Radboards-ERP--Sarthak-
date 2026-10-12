@@ -843,7 +843,24 @@ export const files = pgTable('files', {
   size: integer('size').notNull(),
   sha256: text('sha256').notNull(),
   ...stamps,
-}, (t) => [check('files_purpose_chk', sql`${t.purpose} in ('resume', 'bill', 'item_image', 'other')`)]);
+}, (t) => [check('files_purpose_chk', sql`${t.purpose} in ('resume', 'bill', 'item_image', 'share', 'other')`)]);
+
+/**
+ * A file sent to a lead through a link of its own, and whether they have opened it. The token is
+ * the whole of the link's secret: it says nothing about who the lead is.
+ */
+export const leadShares = pgTable('lead_shares', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  leadId: uuid('lead_id').notNull().references(() => leads.id),
+  fileId: uuid('file_id').notNull().references(() => files.id),
+  title: text('title').notNull(),
+  token: text('token').notNull().unique(),
+  viewCount: integer('view_count').notNull().default(0),
+  firstViewedAt: ts('first_viewed_at'),
+  lastViewedAt: ts('last_viewed_at'),
+  revokedAt: ts('revoked_at'),
+  ...stamps,
+}, (t) => [index('lead_shares_lead_idx').on(t.leadId)]);
 
 const bytea = customType<{ data: Buffer; driverData: Uint8Array }>({
   dataType: () => 'bytea',

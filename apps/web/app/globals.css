@@ -34,7 +34,17 @@ h3 { font-size: 14px; margin: 12px 0 6px; }
   height: 100vh; overflow-y: auto;
 }
 .nav .brand { color: #fff; font-weight: 700; font-size: 16px; padding: 4px 16px 12px; }
-.nav .group { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #7f8aa0; padding: 12px 16px 4px; }
+/* Each section of the menu opens and closes; only one is open at a time. */
+.nav .group {
+  display: flex; justify-content: space-between; align-items: center; width: 100%; background: none; border: 0; border-radius: 0;
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #9aa5b8; padding: 10px 16px; cursor: pointer; text-align: left;
+}
+.nav .group:hover { background: #1b2433; color: #fff; }
+.nav .group.current, .nav .section.open > .group { color: #fff; }
+.nav .group .chevron { font-size: 13px; transition: transform .15s ease; }
+.nav .section.open > .group .chevron { transform: rotate(180deg); }
+.nav .section { border-top: 1px solid #1d2636; }
+.nav .section.open { padding-bottom: 6px; }
 .nav a { display: block; color: #cfd6e2; padding: 6px 16px; }
 .nav a:hover { background: #1f2937; text-decoration: none; }
 .nav a.active { background: #26324a; color: #fff; }
@@ -299,7 +309,7 @@ h2.section { margin: 18px 0 8px; color: var(--muted); font-size: 12px; text-tran
     visibility: hidden; overscroll-behavior: contain;
   }
   .menu-open .nav { transform: none; visibility: visible; box-shadow: 0 0 40px rgba(0, 0, 0, .45); }
-  .nav .group { display: block; }
+  .nav .group { display: flex; padding: 14px 18px; font-size: 12px; min-height: 0; }
   .nav .brand { padding: 4px 16px 12px; }
   .nav a { padding: 11px 18px; border-radius: 0; font-size: 15px; }
   .nav .who { border-top: 1px solid #263042; margin: 12px 0 0; padding: 12px 16px; font-size: 13px; }
@@ -414,3 +424,10 @@ h2.section { margin: 18px 0 8px; color: var(--muted); font-size: 12px; text-tran
 .pictures figure { margin: 0; display: grid; gap: 6px; justify-items: center; }
 .pictures img { width: 120px; height: 120px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); background: #fff; display: block; }
 .thumb { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); vertical-align: middle; margin-right: 8px; }
+
+/* ---- a file someone was sent (public page) ---- */
+.shared { max-width: 860px; margin: 0 auto; padding: 18px 14px 40px; }
+.shared header { margin-bottom: 12px; }
+.shared img { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; display: block; }
+.shared iframe { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius: 8px; background: #fff; display: block; }
+.shared .button { margin-top: 12px; padding: 10px 18px; font-size: 16px; }

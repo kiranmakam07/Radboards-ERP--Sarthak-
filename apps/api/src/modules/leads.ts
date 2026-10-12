@@ -365,7 +365,7 @@ export function leadsRouter(db: DB) {
   r.get('/alerts', requirePerm('leads:read'), async (req, res) => {
     const q = z.object({ since: z.string().datetime({ offset: true }).optional() }).parse(req.query);
     const [clock] = await rows<{ now: string }>(db, sql`select now() as now`);
-    if (!q.since) return void res.json({ data: [], now: clock!.now });
+    if (!q.since) return void res.json({ data: [], opened: [], now: clock!.now });
     const everyone = can(req.user!.role, 'crm:manage');
     const data = await rows(db, sql`
       select l.id, l.lead_no, l.name, l.created_at, s.name as source_name, l.source_detail, o.name as owner_name, (l.owner_id = ${req.user!.id}) as mine
@@ -374,7 +374,13 @@ export function leadsRouter(db: DB) {
          and (l.owner_id = ${req.user!.id} or ${everyone})
          and l.created_by is distinct from ${req.user!.id}
        order by l.created_at desc limit 10`);
-    res.json({ data, now: clock!.now });
+    // A file they were sent has just been opened for the first time: the moment to call.
+    const opened = await rows(db, sql`
+      select s.id, s.title, s.first_viewed_at, l.id as lead_id, l.name, l.lead_no
+        from lead_shares s join leads l on l.id = s.lead_id
+       where s.first_viewed_at > ${q.since}::timestamptz and (l.owner_id = ${req.user!.id} or s.created_by = ${req.user!.id})
+       order by s.first_viewed_at desc limit 10`);
+    res.json({ data, opened, now: clock!.now });
   });
 
   r.get('/pipeline', requirePerm('leads:read'), async (req, res) => {
