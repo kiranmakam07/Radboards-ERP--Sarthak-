@@ -14,9 +14,11 @@ if (!isPostgresUrl(url)) {
   console.warn('\nNo database is connected yet (DATABASE_URL is not set), so nothing was prepared.');
   console.warn('Add a Postgres database to the project, then build again.\n');
 } else {
-  // A hosted database that has been idle is asleep and takes a few seconds to wake; the first
-  // connection can fail while it does. Nothing here is harmed by being run again (migrations and
+  // A hosted database that has been idle is asleep and takes a few seconds to wake, and a network
+  // blip can drop a first connection. Nothing here is harmed by being run again (migrations and
   // defaults are applied only where missing), so try a few times before giving up on the build.
+  // (This was added on a wrong guess about two failed Vercel builds; their real cause was GitHub
+  // refusing Vercel's download of the commit. It is kept because it costs nothing.)
   const attempts = 5;
   for (let attempt = 1; ; attempt++) {
     try {
