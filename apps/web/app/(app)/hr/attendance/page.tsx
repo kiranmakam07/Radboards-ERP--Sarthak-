@@ -102,7 +102,7 @@ export default function AttendancePage() {
                 <button type="button" onClick={() => fillBlanks('holiday')}>Holiday</button>
               </div>
             )}
-            <div className="table-wrap">
+            <div className="table-wrap stack">
               <table>
                 <thead><tr><th>Employee</th><th>Department</th><th>Status</th><th>In</th><th>Out</th><th>Note</th></tr></thead>
                 <tbody>
@@ -110,18 +110,18 @@ export default function AttendancePage() {
                     const r = rows[e.employee_id] ?? { status: '', check_in: '', check_out: '', note: '' };
                     return (
                       <tr key={e.employee_id}>
-                        <td><Link href={`/hr/employees/${e.employee_id}`}>{e.name}</Link> <span className="muted small">{e.employee_no}</span></td>
-                        <td>{e.department}</td>
-                        <td>
+                        <td data-label="Employee"><span><Link href={`/hr/employees/${e.employee_id}`}>{e.name}</Link> <span className="muted small">{e.employee_no}</span></span></td>
+                        <td data-label="Department">{e.department}</td>
+                        <td data-label="Status">
                           <select value={r.status} disabled={!write} aria-label={`Status for ${e.name}`}
                             onChange={(ev) => set(e.employee_id, { status: ev.target.value as Row['status'] })}>
                             <option value="">Not marked</option>
                             {ATTENDANCE_STATUSES.map((s) => <option key={s} value={s}>{label(s)}</option>)}
                           </select>
                         </td>
-                        <td><input type="time" value={r.check_in} disabled={!write || !worked(r.status)} aria-label={`In time for ${e.name}`} onChange={(ev) => set(e.employee_id, { check_in: ev.target.value })} /></td>
-                        <td><input type="time" value={r.check_out} disabled={!write || !worked(r.status)} aria-label={`Out time for ${e.name}`} onChange={(ev) => set(e.employee_id, { check_out: ev.target.value })} /></td>
-                        <td><input value={r.note} disabled={!write} aria-label={`Note for ${e.name}`} onChange={(ev) => set(e.employee_id, { note: ev.target.value })} /></td>
+                        <td data-label="In"><input type="time" value={r.check_in} disabled={!write || !worked(r.status)} aria-label={`In time for ${e.name}`} onChange={(ev) => set(e.employee_id, { check_in: ev.target.value })} /></td>
+                        <td data-label="Out"><input type="time" value={r.check_out} disabled={!write || !worked(r.status)} aria-label={`Out time for ${e.name}`} onChange={(ev) => set(e.employee_id, { check_out: ev.target.value })} /></td>
+                        <td data-label="Note"><input value={r.note} disabled={!write} aria-label={`Note for ${e.name}`} onChange={(ev) => set(e.employee_id, { note: ev.target.value })} /></td>
                       </tr>
                     );
                   })}

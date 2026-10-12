@@ -80,7 +80,7 @@ export function Table<T extends Record<string, any>>({
   if (!rows) return null;
   if (rows.length === 0) return <p className="muted">{empty}</p>;
   return (
-    <div className="table-wrap">
+    <div className="table-wrap stack">
       <table>
         <thead>
           <tr>{columns.map((c) => <th key={c.key} className={c.align}>{c.title}</th>)}</tr>
@@ -93,8 +93,9 @@ export function Table<T extends Record<string, any>>({
                 {columns.map((c, ci) => {
                   const content = c.render ? c.render(row) : (row[c.key] as ReactNode);
                   return (
-                    <td key={c.key} className={c.align}>
-                      {href && ci === 0 ? <Link href={href}>{content}</Link> : content}
+                    // On a phone each row is shown as a card, and the column title becomes the label beside the value.
+                    <td key={c.key} className={c.align} data-label={c.title}>
+                      {href && ci === 0 ? <Link href={href} className="row-link">{content}</Link> : content}
                     </td>
                   );
                 })}
