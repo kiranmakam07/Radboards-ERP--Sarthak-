@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@radcore/api": "*",
     "@radcore/shared": "*",
     "next": "^16.0.0",
     "qrcode": "^1.5.4",
