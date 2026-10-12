@@ -408,3 +408,9 @@ h2.section { margin: 18px 0 8px; color: var(--muted); font-size: 12px; text-tran
 .alert > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .alerts .link { background: var(--panel); padding: 4px 8px; border-radius: 6px; }
 @media (max-width: 640px) { .alerts { right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); width: calc(100vw - 20px); } }
+
+/* ---- item pictures ---- */
+.pictures { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 12px; }
+.pictures figure { margin: 0; display: grid; gap: 6px; justify-items: center; }
+.pictures img { width: 120px; height: 120px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); background: #fff; display: block; }
+.thumb { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); vertical-align: middle; margin-right: 8px; }

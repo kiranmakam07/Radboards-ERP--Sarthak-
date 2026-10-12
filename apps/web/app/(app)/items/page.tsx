@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { GST_RATES, ITEM_TYPES, UNITS } from '@radcore/shared';
-import { Badge, CsvLink, Form, Loading, Page, Table, Toggle, inr, label, num, type Field } from '@/components/ui';
-import { patch, post, qs, useGet } from '@/lib/api';
+import { Badge, CsvLink, ErrorBox, Form, Loading, Page, Table, Toggle, UploadField, inr, label, num, type Field } from '@/components/ui';
+import { api, patch, post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
 const fields = (categories: any[]): Field[] => [
@@ -21,6 +21,42 @@ const fields = (categories: any[]): Field[] => [
   { name: 'reorder_level', label: 'Reorder level', type: 'number' },
   { name: 'barcode', label: 'Barcode' },
 ];
+
+/** The item's pictures: add one from the phone's camera or a file, or take one off. The first is the one shown in lists. */
+function Pictures({ itemId, onChange }: { itemId: string; onChange: () => void }) {
+  const { data, reload } = useGet<{ data: any[] }>(`/items/${itemId}/images`);
+  const [error, setError] = useState<string | null>(null);
+  const pictures = data?.data ?? [];
+  const run = async (work: () => Promise<unknown>) => {
+    setError(null);
+    try {
+      await work();
+      reload();
+      onChange();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  return (
+    <div style={{ marginTop: 14 }}>
+      <h3>Pictures</h3>
+      <div className="pictures">
+        {pictures.map((p) => (
+          <figure key={p.id}>
+            <a href={p.url} target="_blank" rel="noreferrer"><img src={p.url} alt="Picture of the item" loading="lazy" /></a>
+            <button type="button" onClick={() => run(() => api(`/items/${itemId}/images/${p.id}`, { method: 'DELETE' }))}>Remove</button>
+          </figure>
+        ))}
+        {pictures.length === 0 ? <p className="muted small">No pictures yet.</p> : null}
+      </div>
+      <label className="small muted" style={{ display: 'grid', gap: 3, maxWidth: 360 }}>
+        Add a picture
+        <UploadField purpose="item_image" value="" onChange={(url) => { if (url) void run(() => post(`/items/${itemId}/images`, { url, sort: pictures.length })); }} />
+      </label>
+      <ErrorBox error={error} />
+    </div>
+  );
+}
 
 export default function ItemsPage() {
   const can = useCan();
@@ -49,6 +85,7 @@ export default function ItemsPage() {
             }}
             onSubmit={(v) => patch(`/items/${editing.id}`, Object.fromEntries(fields([]).map((x) => [x.name, v[x.name]]).concat([['active', v.active]])))}
             onDone={() => { setEditing(null); reload(); }} />
+          <Pictures itemId={editing.id} onChange={reload} />
         </div>
       )}
       <div className="filters">
@@ -63,7 +100,7 @@ export default function ItemsPage() {
       <Loading loading={loading} error={error} />
       <Table rows={data?.data} columns={[
         { key: 'sku', title: 'SKU' },
-        { key: 'name', title: 'Name' },
+        { key: 'name', title: 'Name', render: (r) => <>{r.image_url ? <img className="thumb" src={r.image_url} alt="" loading="lazy" /> : null}{r.name}</> },
         { key: 'item_type', title: 'Type', render: (r) => label(r.item_type) },
         { key: 'hsn_sac', title: 'HSN' },
         { key: 'gst_rate', title: 'GST %', align: 'right', render: (r) => num(r.gst_rate) },
