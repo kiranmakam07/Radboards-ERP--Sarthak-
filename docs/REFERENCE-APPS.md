@@ -30,12 +30,12 @@ Status: ✅ in RadCore · 🔨 being built now · 🔌 built, waits for an accou
 | Discount or extra charge on the whole bill (packing, freight) | ⏭ | Shipping is a line; a bill-level discount is not there |
 | Stock in real time, low-stock list, purchase orders, inward and QC | ✅ | |
 | Who owes what, ageing, payments against bills | ✅ | |
-| **Payment reminders to customers** | 🔨 | One tap from the list of unpaid invoices, message written with the amounts |
-| **Bill sent to the customer on WhatsApp** | 🔨 | A link the customer opens, no sign-in |
+| **Payment reminders to customers** | ✅ | Accounts → To collect: one tap, message written with the amounts and a link to each bill. Sent by hand, not on a timer |
+| **Bill sent to the customer on WhatsApp** | ✅ | A link the customer opens, no sign-in; shows what is still to pay |
 | Party statement | ✅ | Sent on WhatsApp with the reminder |
 | Expenses with GST, bank and cash books, bank reconciliation | ✅ | Reconciliation goes further than Vyapar's |
-| **Cash put in the bank, cash drawn, bank to bank** | 🔨 | Today only as a hand-written journal |
-| **Profit on each bill** | 🔨 | |
+| **Cash put in the bank, cash drawn, bank to bank** | ✅ | Accounts → Cash & bank transfers |
+| **Profit on each bill** | ✅ | Books & reports → Profit by bill |
 | Sales, stock, profit, GST reports; trial balance, P&L, balance sheet | ✅ | |
 | GSTR-1 for the portal | ✅ | |
 | E-invoice and e-way bill | ⏭ | Needs registration with a GST service provider |

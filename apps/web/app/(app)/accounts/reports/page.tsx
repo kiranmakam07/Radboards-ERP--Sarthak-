@@ -2,11 +2,11 @@
 
 import { istDate } from '@radcore/shared';
 import { useState } from 'react';
-import { ActionButton, Badge, Card, CsvLink, Form, Loading, Page, Table, date, inr, label } from '@/components/ui';
+import { ActionButton, Badge, Card, CsvLink, Form, Loading, Page, Table, date, inr, label , num } from '@/components/ui';
 import { post, put, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
-const TABS = ['Trial balance', 'Profit & loss', 'Balance sheet', 'Receivables', 'Payables', 'Ledger / cash & bank book', 'Financial years', 'Health check'] as const;
+const TABS = ['Trial balance', 'Profit & loss', 'Profit by bill', 'Balance sheet', 'Receivables', 'Payables', 'Ledger / cash & bank book', 'Financial years', 'Health check'] as const;
 type Tab = (typeof TABS)[number];
 const today = () => istDate();
 
@@ -22,6 +22,7 @@ export default function ReportsPage() {
   const paths: Record<Tab, string | null> = {
     'Trial balance': `/accounting/reports/trial-balance${qs({ as_of: to })}`,
     'Profit & loss': `/accounting/reports/profit-and-loss${qs({ from, to })}`,
+    'Profit by bill': `/accounting/reports/invoice-profit${qs({ from, to })}`,
     'Balance sheet': `/accounting/reports/balance-sheet${qs({ as_of: to })}`,
     Receivables: '/accounting/reports/receivables-ageing',
     Payables: '/accounting/reports/payables-ageing',
@@ -54,8 +55,8 @@ export default function ReportsPage() {
         {TABS.map((t) => <button key={t} type="button" className={tab === t ? 'primary' : undefined} onClick={() => setTab(t)}>{t}</button>)}
       </div>
       <div className="filters">
-        {(tab === 'Profit & loss' || tab === 'Ledger / cash & bank book') && <label>From <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>}
-        {!['Receivables', 'Payables', 'Health check', 'Financial years'].includes(tab) && <label>{tab === 'Profit & loss' || tab.startsWith('Ledger') ? 'To' : 'As of'} <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>}
+        {(tab === 'Profit & loss' || tab === 'Profit by bill' || tab === 'Ledger / cash & bank book') && <label>From <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>}
+        {!['Receivables', 'Payables', 'Health check', 'Financial years'].includes(tab) && <label>{tab === 'Profit & loss' || tab === 'Profit by bill' || tab.startsWith('Ledger') ? 'To' : 'As of'} <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>}
         {tab === 'Ledger / cash & bank book' && (
           <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
             <option value="">Pick an account…</option>
@@ -81,6 +82,25 @@ export default function ReportsPage() {
           <Card title={`Expenses — ₹${inr(data.total_expense)}`}>{amountList(data.expense)}</Card>
           <Card title="Result"><div className="stat-value">{Number(data.net_profit) >= 0 ? 'Net profit' : 'Net loss'} ₹{inr(Math.abs(Number(data.net_profit)))}</div><p className="muted">{date(data.from)} to {date(data.to)}</p></Card>
         </div>
+      )}
+
+      {tab === 'Profit by bill' && data?.totals && (
+        <>
+          <div className="stats">
+            <div className="stat"><div className="stat-label">Sold, before GST</div><div className="stat-value">₹{inr(data.totals.sale)}</div></div>
+            <div className="stat"><div className="stat-label">What it cost us</div><div className="stat-value">₹{inr(data.totals.cost)}</div></div>
+            <div className="stat"><div className="stat-label">Profit on goods</div><div className="stat-value">₹{inr(data.totals.profit)}</div>
+              <div className="muted small">{date(data.from)} to {date(data.to)} · before expenses</div></div>
+          </div>
+          <Table rows={data.data} empty="No bills in these dates." rowHref={(r) => `/invoices/${r.id}`} columns={[
+            { key: 'invoice_no', title: 'Bill' }, { key: 'invoice_date', title: 'Date', render: (r) => date(r.invoice_date) },
+            { key: 'party_name', title: 'Customer', render: (r) => <>{r.party_name}{r.doc_type === 'credit_note' ? <span className="muted small"> · return</span> : null}</> },
+            { key: 'sale', title: 'Sold for', align: 'right', render: (r) => inr(r.sale) },
+            { key: 'cost', title: 'Cost', align: 'right', render: (r) => inr(r.cost) },
+            { key: 'profit', title: 'Profit', align: 'right', render: (r) => <strong className={Number(r.profit) < 0 ? 'error small' : undefined}>{inr(r.profit)}</strong> },
+            { key: 'margin_pct', title: 'Margin', align: 'right', render: (r) => (r.margin_pct === null ? '' : `${num(r.margin_pct)}%`) },
+          ]} />
+        </>
       )}
 
       {tab === 'Balance sheet' && data?.assets && (

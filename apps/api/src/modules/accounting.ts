@@ -1,4 +1,4 @@
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, eq, inArray, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import { ACCOUNT_TYPES, D, addDays, formatDate, fyOf, fyRange, isValidGstin, istDate, money, normaliseGstin } from '@radcore/shared';
@@ -335,7 +335,7 @@ export function accountingRouter(db: DB) {
       const [entry] = await ctx.tx.select().from(journalEntries).where(eq(journalEntries.id, id));
       must(entry, 'Journal entry');
       // Document entries are reversed by cancelling the document, so the document and books stay in step.
-      if (entry!.refType !== 'manual') throw conflict('This entry belongs to a document. Cancel the document instead.');
+      if (entry!.refType !== 'manual' && entry!.refType !== 'transfer') throw conflict('This entry belongs to a document. Cancel the document instead.');
       if (entry!.reversesEntryId) throw conflict('A reversal entry cannot itself be reversed');
       const [already] = await rows(ctx.tx, sql`select 1 as x from journal_entries where reverses_entry_id = ${id} limit 1`);
       if (already) throw conflict('This entry has already been reversed');
@@ -350,7 +350,68 @@ export function accountingRouter(db: DB) {
     res.json({ ok: true });
   });
 
+  // ---- money moved between our own accounts ---------------------------------
+  /** Cash put in the bank, cash drawn out, or one bank account to another. Undone by reversing the entry. */
+  r.get('/transfers', requirePerm('accounts:read'), async (_req, res) => {
+    res.json({ data: await rows(db, sql`
+      select e.id, e.entry_no, e.entry_date, e.narration,
+             (select a.name from journal_lines l join accounts a on a.id = l.account_id where l.entry_id = e.id and l.credit > 0 limit 1) as from_account,
+             (select a.name from journal_lines l join accounts a on a.id = l.account_id where l.entry_id = e.id and l.debit > 0 limit 1) as to_account,
+             (select sum(l.debit) from journal_lines l where l.entry_id = e.id) as amount,
+             exists (select 1 from journal_entries x where x.reverses_entry_id = e.id) as reversed
+        from journal_entries e where e.ref_type = 'transfer' and e.reverses_entry_id is null
+       order by e.entry_date desc, e.entry_no desc limit 200`) });
+  });
+
+  r.post('/transfers', requirePerm('accounts:write'), async (req, res) => {
+    const b = z.object({
+      from_account_id: zId, to_account_id: zId, amount: zMoneyPos, date: zDate.default(() => istDate()),
+      reference: emptyToNull(z.string().trim().max(100)).optional(), notes: emptyToNull(z.string().trim().max(300)).optional(),
+    }).parse(req.body);
+    if (b.from_account_id === b.to_account_id) throw badRequest('Pick two different accounts');
+    const entryId = await inTx(db, req, async (ctx) => {
+      const pair = await ctx.tx.select().from(accounts).where(inArray(accounts.id, [b.from_account_id, b.to_account_id]));
+      const from = pair.find((a) => a.id === b.from_account_id);
+      const to = pair.find((a) => a.id === b.to_account_id);
+      if (!from || !to || !from.subtype || !to.subtype || !from.active || !to.active) throw badRequest('Money can only be moved between cash and bank accounts');
+      const id = await postJournal(ctx, {
+        date: b.date, refType: 'transfer', refId: null,
+        narration: [`${from.name} to ${to.name}`, b.reference ? `ref ${b.reference}` : null, b.notes].filter(Boolean).join(' · '),
+        lines: [{ account: { id: to.id }, debit: b.amount }, { account: { id: from.id }, credit: b.amount }],
+      });
+      await audit(ctx, 'journal_entry', id!, 'transfer', null, { from: from.name, to: to.name, amount: b.amount, date: b.date });
+      return id;
+    });
+    res.status(201).json({ data: { id: entryId } });
+  });
+
   // ---- reports (all are queries over journal_lines - PRD 8.12) ----
+  /**
+   * Profit on each bill: what the goods on it sold for (before GST) less what they cost us, taken
+   * from the cost recorded when they were delivered. A credit note takes its sale and its cost
+   * back out. Services have no cost, so all of a service line is profit.
+   */
+  r.get('/reports/invoice-profit', requirePerm('accounts:read'), async (req, res) => {
+    const q = z.object({ from: zDate.optional(), to: zDate.optional() }).parse(req.query);
+    const today = istDate();
+    const from = q.from ?? `${today.slice(0, 7)}-01`;
+    const to = q.to ?? today;
+    const data = await rows<{ sale: string; cost: string; profit: string }>(db, sql`
+      select i.id, i.invoice_no, i.doc_type, i.invoice_date, coalesce(i.party_name, 'Cash Sale') as party_name, i.channel,
+             (s.sign * i.taxable_total)::numeric(14,2)::text as sale,
+             (s.sign * coalesce(c.cost, 0))::numeric(14,2)::text as cost,
+             (s.sign * (i.taxable_total - coalesce(c.cost, 0)))::numeric(14,2)::text as profit,
+             case when i.taxable_total > 0 then round(100 * (i.taxable_total - coalesce(c.cost, 0)) / i.taxable_total, 1) end as margin_pct
+        from invoices i
+        cross join lateral (select case when i.doc_type = 'credit_note' then -1 else 1 end as sign) s
+        left join lateral (select sum(l.qty * l.unit_cost) as cost from invoice_lines l where l.invoice_id = i.id) c on true
+       where i.status = 'issued' and i.invoice_date between ${from}::date and ${to}::date
+       order by i.invoice_date desc, i.invoice_no desc limit 5000`);
+    if (wantsFile(req)) return sendList(req, res, data, `profit-by-bill-${from}-to-${to}`);
+    const sum = (k: 'sale' | 'cost' | 'profit') => money(data.reduce((a, r) => a.plus(r[k]), D(0)));
+    res.json({ data, from, to, totals: { sale: sum('sale'), cost: sum('cost'), profit: sum('profit') } });
+  });
+
   /** Ledger of one account with running balance. Cash book / bank book = this for a cash/bank account. */
   r.get('/reports/ledger', requirePerm('accounts:read'), async (req, res) => {
     const q = z.object({ account_id: zId, from: zDate.optional(), to: zDate.optional() }).parse(req.query);

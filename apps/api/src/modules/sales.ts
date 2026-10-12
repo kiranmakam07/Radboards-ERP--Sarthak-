@@ -21,6 +21,7 @@ import {
 } from '../lib/http';
 import { priceFor, priceListFor } from './items';
 import { captureLead, convertLead, sourceIdByName } from './leads';
+import { shareTokenFor } from './collect';
 import { applyCredit, assertCreditsCovered, creditsFor, unapplyAllOn, unapplyCredit } from './credits';
 import { cancelPayment, createPayment } from './payments';
 import { partyBalance, type Party } from './parties';
@@ -919,6 +920,13 @@ export function salesRouter(db: DB) {
 
   r.get('/invoices/:id', requirePerm('invoices:read'), async (req, res) => {
     res.json({ data: await invoiceDocument(db, zId.parse(req.params.id)) });
+  });
+
+  /** The link the customer opens to see this bill. Made once; the same link every time after. */
+  r.post('/invoices/:id/share', requirePerm('invoices:read'), async (req, res) => {
+    const id = zId.parse(req.params.id);
+    const token = await inTx(db, req, (ctx) => shareTokenFor(ctx, id));
+    res.json({ data: { token, path: `/i/${token}` } });
   });
 
   r.post('/invoices/:id/credit-note', requirePerm('invoices:adjust'), async (req, res) => {

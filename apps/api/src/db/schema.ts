@@ -1050,6 +1050,27 @@ export const attendance = pgTable('attendance', {
   index('attendance_date_idx').on(t.date),
 ]);
 
+/**
+ * The link a customer opens to see a bill. Kept beside the invoice, not on it: an issued invoice
+ * is a legal record that the database refuses to change.
+ */
+export const invoiceLinks = pgTable('invoice_links', {
+  invoiceId: uuid('invoice_id').primaryKey().references(() => invoices.id),
+  token: text('token').notNull().unique(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  createdBy: uuid('created_by'),
+});
+
+/** A payment reminder that was sent: to whom, for how much, and what it said. */
+export const paymentReminders = pgTable('payment_reminders', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  partyId: uuid('party_id').notNull().references(() => parties.id),
+  amount: money('amount').notNull(),
+  invoiceIds: uuid('invoice_ids').array().notNull(),
+  message: text('message').notNull(),
+  ...stamps,
+}, (t) => [index('payment_reminders_party_idx').on(t.partyId, t.createdAt)]);
+
 export const leaveRequestStatusEnum = pgEnum('leave_request_status', ['pending', 'approved', 'rejected', 'cancelled']);
 
 /** Leave someone has asked for. Once approved, the days go into the attendance register as Leave. */

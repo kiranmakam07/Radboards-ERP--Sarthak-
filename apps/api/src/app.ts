@@ -9,6 +9,7 @@ import { AppError, errorHandler, forbidden } from './lib/errors';
 import { accountingRouter } from './modules/accounting';
 import { authRouter, mastersRouter, settingsRouter, usersRouter } from './modules/admin';
 import { bankRouter } from './modules/bank';
+import { collectRouter, publicInvoiceRouter } from './modules/collect';
 import { crmRouter, defaultDeps, hooksRouter, type CrmDeps } from './modules/crm';
 import { dashboardsRouter } from './modules/dashboards';
 import { filesRouter } from './modules/files';
@@ -96,6 +97,7 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
   const publicLimiter = rateLimit({ windowMs: 10 * 60_000, limit: 30, standardHeaders: true, legacyHeaders: false,
     skip: () => config.env === 'test' });
   app.use('/api/public/shares', publicLimiter, publicSharesRouter(db));
+  app.use('/api/public/invoices', publicLimiter, publicInvoiceRouter(db));
   app.use('/api/public', publicLimiter, publicLeadsRouter(db));
 
   // Lead capture from Meta, Google, WhatsApp and website forms: no login, each request proves itself
@@ -121,6 +123,7 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
   app.use('/api/crm', crmRouter(db, crmDeps));
   app.use('/api/sales/online', onlineRouter(db, crmDeps));
   app.use('/api/sales', salesRouter(db));
+  app.use('/api/payments', collectRouter(db));
   app.use('/api/payments', paymentsRouter(db));
   app.use('/api/purchasing', purchasingRouter(db));
   app.use('/api/stock', inventoryRouter(db));
