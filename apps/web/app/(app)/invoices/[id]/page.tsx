@@ -4,11 +4,44 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { STATE_CODES } from '@radcore/shared';
+import { InvoiceDocument } from '@/components/invoice';
 import { ActionButton, Badge, Card, ErrorBox, Loading, Page, Table, Toggle, date, inr, num } from '@/components/ui';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
 const addr = (a: any) => (a ? [a.line1, a.line2, a.city, a.state, a.pincode].filter(Boolean).join(', ') : '');
+
+/** Send the bill to the customer: a link that opens it, by WhatsApp to their number when we have one, or copied. */
+function ShareBill({ id, phone, text }: { id: string; phone: string; text: string }) {
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function share(how: 'whatsapp' | 'copy') {
+    // The new tab is opened in the click itself (browsers block one opened later), then pointed at WhatsApp.
+    const tab = how === 'whatsapp' ? window.open('', '_blank') : null;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await post(`/sales/invoices/${id}/share`);
+      const link = `${window.location.origin}${res.data.path}`;
+      if (tab) tab.location.href = `https://wa.me/${phone}?text=${encodeURIComponent(`${text}
+View it here: ${link}`)}`;
+      else { await navigator.clipboard.writeText(link); setCopied(true); }
+    } catch (e) {
+      tab?.close();
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      {phone ? <button type="button" disabled={busy} onClick={() => share('whatsapp')}>Send on WhatsApp</button> : null}
+      <button type="button" disabled={busy} onClick={() => share('copy')}>{copied ? 'Link copied' : 'Copy link to bill'}</button>
+      {error ? <span className="error small">{error}</span> : null}
+    </>
+  );
+}
 
 /** Tax invoice / credit note, laid out for A4 or thermal printing (PRD 7.9, 7.11). */
 export default function InvoicePage() {
@@ -35,7 +68,7 @@ export default function InvoicePage() {
       <>
         <button type="button" onClick={() => setThermal(!thermal)}>{thermal ? 'A4 layout' : 'Thermal layout'}</button>
         <button type="button" className="primary" onClick={() => window.print()}>Print / Save PDF</button>
-        {waPhone && <a className="button" target="_blank" rel="noreferrer" href={`https://wa.me/${waPhone}?text=${encodeURIComponent(waText)}`}>Share on WhatsApp</a>}
+        {inv.status !== 'draft' && <ShareBill id={id} phone={waPhone} text={waText} />}
       </>
     }>
       <div className="no-print" style={{ marginBottom: 12 }}>
@@ -45,92 +78,7 @@ export default function InvoicePage() {
         {inv.against_invoice && <span> · Against <Link href={`/invoices/${inv.against_invoice.id}`}>{inv.against_invoice.invoice_no}</Link></span>}
       </div>
 
-      <div className={thermal ? 'doc thermal' : 'doc'}>
-        <h1>{title}</h1>
-        {inv.status === 'cancelled' && <p style={{ textAlign: 'center' }}><span className="cancelled-stamp">CANCELLED</span></p>}
-        <div className="head">
-          <div>
-            <strong>{c.name}</strong><br />
-            {addr(c.address)}<br />
-            {c.gstin && <>GSTIN: {c.gstin}<br /></>}
-            State: {STATE_CODES[c.state_code]} ({c.state_code})
-            {c.phone && <><br />Phone: {c.phone}</>}
-          </div>
-          <div>
-            <strong>{isCn ? 'Credit note' : 'Invoice'} no:</strong> {inv.invoice_no}<br />
-            <strong>Date:</strong> {date(inv.invoice_date)}<br />
-            {inv.against_invoice && <><strong>Against invoice:</strong> {inv.against_invoice.invoice_no} ({date(inv.against_invoice.invoice_date)})<br /></>}
-            <strong>Place of supply:</strong> {inv.place_of_supply_name} ({inv.place_of_supply})
-            {inv.reason && <><br /><strong>Reason:</strong> {inv.reason}</>}
-          </div>
-        </div>
-        <div className="head">
-          <div>
-            <strong>Bill to</strong><br />
-            {inv.party_name}<br />
-            {addr(inv.billing_address)}{addr(inv.billing_address) && <br />}
-            {inv.party_phone && <>Phone: {inv.party_phone}<br /></>}
-            {inv.party_gstin && <>GSTIN: {inv.party_gstin}</>}
-          </div>
-          {addr(inv.shipping_address) && !thermal && <div><strong>Ship to</strong><br />{addr(inv.shipping_address)}</div>}
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>#</th><th>Item</th><th className="hide-thermal">HSN/SAC</th><th className="right">Qty</th><th className="right">Rate</th>
-              <th className="right hide-thermal">Disc.</th><th className="right hide-thermal">Taxable</th><th className="right hide-thermal">GST %</th>
-              <th className="right">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {inv.lines.map((l: any, i: number) => (
-              <tr key={l.id}>
-                <td>{i + 1}</td><td>{l.description}</td><td className="hide-thermal">{l.hsn_sac}</td>
-                <td className="right">{num(l.qty)} {l.unit}</td><td className="right">{inr(l.rate)}</td>
-                <td className="right hide-thermal">{Number(l.discount) ? inr(l.discount) : ''}</td>
-                <td className="right hide-thermal">{inr(l.taxable_value)}</td><td className="right hide-thermal">{num(l.gst_rate)}</td>
-                <td className="right">{inr(l.line_total)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {inv.tax_inclusive && <p className="small muted">Rates are inclusive of GST.</p>}
-
-        <div className="totals" style={{ marginTop: 10 }}>
-          <div><span>Taxable value</span><span>{inr(inv.taxable_total)}</span></div>
-          {inv.is_inter_state
-            ? <div><span>IGST</span><span>{inr(inv.igst_total)}</span></div>
-            : <><div><span>CGST</span><span>{inr(inv.cgst_total)}</span></div><div><span>SGST</span><span>{inr(inv.sgst_total)}</span></div></>}
-          {Number(inv.round_off) !== 0 && <div><span>Round off</span><span>{inr(inv.round_off)}</span></div>}
-          <div className="grand"><span>Total</span><span>₹{inr(inv.grand_total)}</span></div>
-        </div>
-        <p className="words">{inv.amount_in_words}</p>
-
-        {!thermal && (
-          <>
-            <h3>HSN summary</h3>
-            <table>
-              <thead><tr><th>HSN/SAC</th><th className="right">GST %</th><th className="right">Taxable</th><th className="right">CGST</th><th className="right">SGST</th><th className="right">IGST</th></tr></thead>
-              <tbody>
-                {inv.hsn_summary.map((h: any) => (
-                  <tr key={`${h.hsn_sac}-${h.gst_rate}`}>
-                    <td>{h.hsn_sac}</td><td className="right">{num(h.gst_rate)}</td><td className="right">{inr(h.taxable_value)}</td>
-                    <td className="right">{inr(h.cgst)}</td><td className="right">{inr(h.sgst)}</td><td className="right">{inr(h.igst)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {c.bank?.account_no && (
-              <p className="small" style={{ marginTop: 10 }}>
-                <strong>Bank:</strong> {c.bank.bank_name} · A/c {c.bank.account_no} · IFSC {c.bank.ifsc}{c.bank.upi_id ? ` · UPI ${c.bank.upi_id}` : ''}
-              </p>
-            )}
-            {c.invoice_terms && <p className="small muted">{c.invoice_terms}</p>}
-            <div className="sign">For {c.name}<br /><br /><br />Authorised signatory</div>
-          </>
-        )}
-      </div>
+      <InvoiceDocument inv={inv} thermal={thermal} />
 
       <div className="no-print" style={{ marginTop: 16 }}>
         {inv.payments.length > 0 && (
