@@ -22,6 +22,7 @@ const COA: Coa[] = [
   { code: '1400', name: 'Input CGST', type: 'asset', key: 'input_cgst', parent: '1000' },
   { code: '1410', name: 'Input SGST', type: 'asset', key: 'input_sgst', parent: '1000' },
   { code: '1420', name: 'Input IGST', type: 'asset', key: 'input_igst', parent: '1000' },
+  { code: '1500', name: 'Staff Advances', type: 'asset', key: 'staff_advances', parent: '1000' },
 
   { code: '2000', name: 'Liabilities', type: 'liability', group: true },
   { code: '2100', name: 'Creditors (Accounts Payable)', type: 'liability', key: 'creditors', parent: '2000' },
@@ -29,6 +30,11 @@ const COA: Coa[] = [
   { code: '2210', name: 'Output SGST', type: 'liability', key: 'output_sgst', parent: '2000' },
   { code: '2220', name: 'Output IGST', type: 'liability', key: 'output_igst', parent: '2000' },
   { code: '2300', name: 'Goods Received Not Billed', type: 'liability', key: 'grni', parent: '2000' },
+  { code: '2400', name: 'Salaries Payable', type: 'liability', key: 'salaries_payable', parent: '2000' },
+  { code: '2410', name: 'PF Payable', type: 'liability', key: 'pf_payable', parent: '2000' },
+  { code: '2420', name: 'ESIC Payable', type: 'liability', key: 'esic_payable', parent: '2000' },
+  { code: '2430', name: 'Professional Tax Payable', type: 'liability', key: 'pt_payable', parent: '2000' },
+  { code: '2440', name: 'TDS Payable (Salaries)', type: 'liability', key: 'tds_payable', parent: '2000' },
 
   { code: '3000', name: 'Equity', type: 'equity', group: true },
   { code: '3100', name: "Owner's Capital", type: 'equity', key: 'capital', parent: '3000' },
@@ -44,7 +50,7 @@ const COA: Coa[] = [
   { code: '5110', name: 'Purchases (Non-stock)', type: 'expense', key: 'purchases', parent: '5000' },
   { code: '5120', name: 'Stock Adjustment', type: 'expense', key: 'stock_adjustment', parent: '5000' },
   { code: '5200', name: 'Rent', type: 'expense', parent: '5000' },
-  { code: '5210', name: 'Salaries & Wages', type: 'expense', parent: '5000' },
+  { code: '5210', name: 'Salaries & Wages', type: 'expense', key: 'salaries', parent: '5000' },
   { code: '5220', name: 'Electricity & Utilities', type: 'expense', parent: '5000' },
   { code: '5230', name: 'Freight & Courier', type: 'expense', parent: '5000' },
   { code: '5240', name: 'Marketing & Advertising', type: 'expense', parent: '5000' },
@@ -100,8 +106,10 @@ export async function seedDefaults(db: DB): Promise<void> {
           parentId: a.parent ? (idByCode[a.parent] ?? null) : null,
         })
         .onConflictDoNothing();
-      const [row] = await tx.select({ id: accounts.id }).from(accounts).where(eq(accounts.code, a.code));
+      const [row] = await tx.select({ id: accounts.id, systemKey: accounts.systemKey }).from(accounts).where(eq(accounts.code, a.code));
       if (row) idByCode[a.code] = row.id;
+      // An account that was there before it was given a job by the system (Salaries & Wages, once payroll came) gets its key now.
+      if (row && a.key && !row.systemKey) await tx.update(accounts).set({ systemKey: a.key, isSystem: true }).where(eq(accounts.id, row.id));
     }
 
     for (const [name, code] of EXPENSE_CATEGORIES) {

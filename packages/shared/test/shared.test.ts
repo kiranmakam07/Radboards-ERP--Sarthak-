@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ROLES, addMonths, amountInWords, canMoveApplicant, canMoveLead, computeLine, computeTotals, formatINR, fyOf, fyShort, gstinCheckChar,
+  PAYROLL_RULES_DEFAULT, ROLES, addMonths, amountInWords, canMoveApplicant, canMoveLead, computeLine, computePay, computeTotals, formatINR, fyOf, fyShort, gstinCheckChar,
   isInterState, isTaskDueOn, isValidGstin, leaveEntitlement, money, normalisePhone, peakLoad, stateCodeFromGstin, can, weekStart, weekdayOf,
 } from '../src';
 
@@ -202,5 +202,51 @@ describe('HR and operations', () => {
     expect(leaveEntitlement(15, '2027-01-01', year)).toBe(4); // 3.75, to the nearest half
     expect(leaveEntitlement(18, '2027-01-10', year)).toBe(4.5);
     expect(leaveEntitlement(12, '2027-04-01', year)).toBe(0); // joins after the year ends
+  });
+});
+
+describe('salary for a month', () => {
+  const base = { monthlySalary: 30000, daysInMonth: 30, paidDays: 30, pf: false, esic: false, ptMonthly: 0, tdsMonthly: 0, otherEarning: 0, otherDeduction: 0, advanceDue: 0 };
+
+  it('pays the whole salary for a whole month, and in proportion for part of one', () => {
+    expect(computePay(base)).toMatchObject({ grossEarned: '30000.00', basicEarned: '15000.00', allowanceEarned: '15000.00', netPay: '30000.00' });
+    // 27 paid days out of 31: 30,000 x 27 / 31 = 26,129.03
+    expect(computePay({ ...base, daysInMonth: 31, paidDays: 27 })).toMatchObject({ grossEarned: '26129.03', netPay: '26129.03' });
+    expect(computePay({ ...base, paidDays: 0 })).toMatchObject({ grossEarned: '0.00', netPay: '0.00' });
+    expect(computePay({ ...base, paidDays: 40 }).grossEarned).toBe('30000.00'); // never more than the month
+  });
+
+  it('takes PF on Basic up to the ceiling, the same again from the employer', () => {
+    // Basic 15,000 at 12% = 1,800.
+    expect(computePay({ ...base, pf: true })).toMatchObject({ pfEmployee: '1800.00', pfEmployer: '1800.00', netPay: '28200.00' });
+    // Salary 50,000: Basic 25,000, but PF only on the first 15,000.
+    expect(computePay({ ...base, monthlySalary: 50000, pf: true }).pfEmployee).toBe('1800.00');
+    // Half a month on 20,000: Basic earned 5,000 at 12% = 600.
+    expect(computePay({ ...base, monthlySalary: 20000, paidDays: 15, pf: true })).toMatchObject({ grossEarned: '10000.00', pfEmployee: '600.00', netPay: '9400.00' });
+  });
+
+  it('takes ESIC on what was earned, only for a salary within the limit, rounded up to the rupee', () => {
+    // 18,000 earned: 0.75% = 135, employer 3.25% = 585.
+    expect(computePay({ ...base, monthlySalary: 18000, esic: true })).toMatchObject({ esicEmployee: '135.00', esicEmployer: '585.00', netPay: '17865.00' });
+    // 18,000 x 29 / 31 = 16,838.71: 0.75% = 126.29, so 127.
+    expect(computePay({ ...base, monthlySalary: 18000, daysInMonth: 31, paidDays: 29, esic: true }).esicEmployee).toBe('127.00');
+    // Over 21,000 a month: not covered, even when switched on.
+    expect(computePay({ ...base, monthlySalary: 21001, esic: true }).esicEmployee).toBe('0.00');
+    expect(computePay({ ...base, monthlySalary: 21000, esic: true }).esicEmployee).toBe('158.00'); // 157.50 rounded up
+  });
+
+  it('takes professional tax and TDS as set, adds a bonus, takes off a fine, and recovers an advance from what is left', () => {
+    const pay = computePay({ ...base, pf: true, ptMonthly: 200, tdsMonthly: 500, otherEarning: 1000, otherDeduction: 250, advanceDue: 5000 });
+    // 30,000 + 1,000 - 250 - 1,800 PF - 200 PT - 500 TDS = 28,250; less the 5,000 advance = 23,250.
+    expect(pay).toMatchObject({ pt: '200.00', tds: '500.00', advanceRecovery: '5000.00', netPay: '23250.00' });
+    // The advance never takes more than there is.
+    expect(computePay({ ...base, monthlySalary: 6000, paidDays: 10, advanceDue: 5000 })).toMatchObject({ grossEarned: '2000.00', advanceRecovery: '2000.00', netPay: '0.00' });
+    // Nothing earned, nothing deducted.
+    expect(computePay({ ...base, paidDays: 0, ptMonthly: 200, tdsMonthly: 500, advanceDue: 5000 })).toMatchObject({ pt: '0.00', tds: '0.00', advanceRecovery: '0.00', netPay: '0.00' });
+  });
+
+  it('follows the rules when they are changed', () => {
+    const rules = { ...PAYROLL_RULES_DEFAULT, basic_pct: 40, pf_wage_ceiling: 100000 };
+    expect(computePay({ ...base, pf: true }, rules)).toMatchObject({ basicEarned: '12000.00', allowanceEarned: '18000.00', pfEmployee: '1440.00' });
   });
 });

@@ -49,6 +49,7 @@ function whereAmI(): Promise<{ lat: number; lng: number } | null> {
  */
 export function MyAttendance() {
   const { data, reload } = useGet<{ data: any | null }>('/hr/me');
+  const slips = useGet<{ data: any[] }>('/payroll/me');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -105,6 +106,14 @@ export function MyAttendance() {
           ]}
           onSubmit={(v) => post('/hr/me/leave', v)}
           onDone={() => { setAsking(false); setNotice('Sent to HR. You will see the answer here.'); reload(); }} />
+      ) : null}
+      {(slips.data?.data ?? []).length > 0 ? (
+        <p className="small" style={{ margin: '0 0 8px' }}>
+          My payslips:{' '}
+          {slips.data!.data.slice(0, 6).map((s, i) => (
+            <span key={s.id}>{i ? ' · ' : ''}<a href={`/my-work/payslips/${s.id}`}>{new Date(`${s.month}-01T00:00:00Z`).toLocaleString('en-IN', { month: 'short', year: 'numeric', timeZone: 'UTC' })}</a></span>
+          ))}
+        </p>
       ) : null}
       {d.requests.length > 0 ? (
         <Table rows={d.requests} columns={[

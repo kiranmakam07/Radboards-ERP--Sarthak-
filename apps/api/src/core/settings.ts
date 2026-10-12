@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { PERMISSIONS, ROLES, setPermissionOverrides, type Permission, type PermissionOverrides, type Role } from '@radcore/shared';
+import { PAYROLL_RULES_DEFAULT, PERMISSIONS, ROLES, setPermissionOverrides, type PayrollRules, type Permission, type PermissionOverrides, type Role } from '@radcore/shared';
 import type { DB } from '../db/client';
 import { settings } from '../db/schema';
 import { badRequest } from '../lib/errors';
@@ -43,6 +43,8 @@ export type SettingsMap = {
    * clock-in from somewhere else can be seen.
    */
   attendance_rules: { start: string | null; grace_min: number; weekly_off: number[]; place: { name: string; lat: number; lng: number; radius_m: number } | null };
+  /** The figures salaries are worked out with (see computePay in the shared package). */
+  payroll_rules: PayrollRules;
 };
 
 export const SETTING_DEFAULTS: SettingsMap = {
@@ -62,6 +64,7 @@ export const SETTING_DEFAULTS: SettingsMap = {
   annual_leave_days: 12,
   sample_data: false,
   attendance_rules: { start: null, grace_min: 10, weekly_off: [0], place: null },
+  payroll_rules: PAYROLL_RULES_DEFAULT,
 };
 
 export async function getSetting<K extends keyof SettingsMap>(tx: DB, key: K): Promise<SettingsMap[K]> {

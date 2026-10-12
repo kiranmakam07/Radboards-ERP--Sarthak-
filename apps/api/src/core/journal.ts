@@ -12,7 +12,8 @@ export type SystemAccount =
   | 'cash' | 'bank' | 'debtors' | 'stock' | 'input_cgst' | 'input_sgst' | 'input_igst'
   | 'creditors' | 'output_cgst' | 'output_sgst' | 'output_igst' | 'grni'
   | 'capital' | 'opening_equity' | 'retained_earnings'
-  | 'sales' | 'other_income' | 'cogs' | 'purchases' | 'stock_adjustment' | 'round_off';
+  | 'sales' | 'other_income' | 'cogs' | 'purchases' | 'stock_adjustment' | 'round_off'
+  | 'staff_advances' | 'salaries_payable' | 'pf_payable' | 'esic_payable' | 'pt_payable' | 'tds_payable' | 'salaries';
 
 export type JLine = {
   /** A system key, or an explicit account id (cash/bank accounts, expense accounts, manual journals). */
