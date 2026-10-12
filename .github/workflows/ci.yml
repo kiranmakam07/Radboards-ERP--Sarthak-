@@ -62,14 +62,25 @@ jobs:
       SEED_ADMIN_PASSWORD: ci-only-admin-password
     steps:
       - uses: actions/checkout@v4
-      # Docker Hub limits anonymous downloads from shared build machines. Take the same official
-      # images from a mirror and give them the names the compose file and the Dockerfile ask for.
+      # Image registries limit anonymous downloads from shared build machines, each at its own
+      # moments. Take the same official images from whichever of three answers, trying again
+      # after a pause, and give them the names the compose file and the Dockerfile ask for.
       - name: Fetch base images
         run: |
-          for image in postgres:16 node:22-bookworm-slim; do
-            docker pull -q "public.ecr.aws/docker/library/$image"
-            docker tag "public.ecr.aws/docker/library/$image" "$image"
-          done
+          fetch() {
+            for attempt in 1 2 3 4; do
+              for source in public.ecr.aws/docker/library mirror.gcr.io/library docker.io/library; do
+                if docker pull -q "$source/$1"; then
+                  docker tag "$source/$1" "$1"
+                  return 0
+                fi
+              done
+              sleep $((attempt * 15))
+            done
+            return 1
+          }
+          fetch postgres:16
+          fetch node:22-bookworm-slim
       - name: Build images and start database, API and web
         run: docker compose -f compose.prod.yml up -d --build --wait db api web
       - name: Sign in through the API and read a report
