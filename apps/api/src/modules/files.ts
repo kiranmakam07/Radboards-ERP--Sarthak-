@@ -20,15 +20,15 @@ import { zId } from '../lib/http';
  */
 export const MAX_BYTES = config.maxUploadBytes;
 
-const PURPOSES = ['resume', 'bill', 'item_image', 'other'] as const;
+const PURPOSES = ['resume', 'bill', 'item_image', 'share', 'other'] as const;
 type Purpose = (typeof PURPOSES)[number];
 
 /** Who may attach, and who may open, each kind of file. */
 const UPLOAD: Record<Purpose, Permission[] | null> = {
-  resume: ['hr:write'], bill: ['expenses:write', 'bills:write'], item_image: ['items:write'], other: null,
+  resume: ['hr:write'], bill: ['expenses:write', 'bills:write'], item_image: ['items:write'], share: ['leads:write'], other: null,
 };
 const OPEN: Record<Purpose, Permission[] | null> = {
-  resume: ['hr:read'], bill: ['expenses:read', 'purchasing:read', 'accounts:read'], item_image: null, other: null,
+  resume: ['hr:read'], bill: ['expenses:read', 'purchasing:read', 'accounts:read'], item_image: null, share: ['leads:read'], other: null,
 };
 
 /** What the bytes really are, from their signature. Null when it is not a kind we keep. */
@@ -42,7 +42,16 @@ export function sniff(buf: Buffer): 'application/pdf' | 'image/jpeg' | 'image/pn
 
 const diskPath = (id: string) => path.join(config.uploadDir, id);
 /** A name safe to put in a header and on someone's disk: no paths, no control characters. */
-const safeName = (name: string) => name.replace(/[/\\]/g, '_').replace(/[^\w .()\-]+/g, '_').slice(0, 120) || 'file';
+export const safeName = (name: string) => name.replace(/[/\\]/g, '_').replace(/[^\w .()\-]+/g, '_').slice(0, 120) || 'file';
+
+/** A stored file and its bytes, from wherever they are kept. Null when there is no such file. */
+export async function readFileBytes(db: DB, id: string): Promise<{ file: typeof files.$inferSelect; bytes: Buffer } | null> {
+  const [file] = await db.select().from(files).where(eq(files.id, id));
+  if (!file) return null;
+  if (fs.existsSync(diskPath(id))) return { file, bytes: fs.readFileSync(diskPath(id)) };
+  const [kept] = await db.select({ bytes: fileContents.bytes }).from(fileContents).where(eq(fileContents.fileId, id));
+  return kept ? { file, bytes: kept.bytes } : null;
+}
 
 export function filesRouter(db: DB) {
   const r = Router();

@@ -24,6 +24,7 @@ import { paymentsRouter } from './modules/payments';
 import { projectsRouter } from './modules/projects';
 import { purchasingRouter } from './modules/purchasing';
 import { salesRouter } from './modules/sales';
+import { publicSharesRouter, sharesRouter } from './modules/shares';
 
 /**
  * CSRF defence in depth on top of the SameSite=Lax session cookie: a browser always sends
@@ -93,6 +94,7 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
   // Public enquiry forms: no login, so rate-limited per IP (PRD section 9).
   const publicLimiter = rateLimit({ windowMs: 10 * 60_000, limit: 30, standardHeaders: true, legacyHeaders: false,
     skip: () => config.env === 'test' });
+  app.use('/api/public/shares', publicLimiter, publicSharesRouter(db));
   app.use('/api/public', publicLimiter, publicLeadsRouter(db));
 
   // Lead capture from Meta, Google, WhatsApp and website forms: no login, each request proves itself
@@ -113,6 +115,7 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
   app.use('/api/masters', mastersRouter(db));
   app.use('/api/items', itemsRouter(db));
   app.use('/api/parties', partiesRouter(db));
+  app.use('/api/leads', sharesRouter(db));
   app.use('/api/leads', leadsRouter(db));
   app.use('/api/crm', crmRouter(db, crmDeps));
   app.use('/api/sales/online', onlineRouter(db, crmDeps));

@@ -94,6 +94,20 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const active = NAV.flatMap((g) => g.items).filter((i) => can(i.perm) && (pathname === i.href || pathname.startsWith(`${i.href}/`)))
     .sort((a, b) => b.href.length - a.href.length)[0]?.href;
   const here = NAV.flatMap((g) => g.items).find((i) => i.href === active)?.label;
+  const activeGroup = NAV.find((g) => g.items.some((i) => i.href === active))?.group ?? null;
+  return <Shell data={data} can={can} active={active} here={here} activeGroup={activeGroup} menuOpen={menuOpen} setMenuOpen={setMenuOpen}>{children}</Shell>;
+}
+
+/**
+ * The frame around every screen. The menu is a list of sections that open one at a time:
+ * opening one closes the one that was open, and the section of the current screen opens by itself.
+ */
+function Shell({ data, can, active, here, activeGroup, menuOpen, setMenuOpen, children }: {
+  data: Session; can: (p?: string) => boolean; active: string | undefined; here: string | undefined; activeGroup: string | null;
+  menuOpen: boolean; setMenuOpen: (open: boolean) => void; children: ReactNode;
+}) {
+  const [openGroup, setOpenGroup] = useState<string | null>(activeGroup);
+  useEffect(() => { if (activeGroup) setOpenGroup(activeGroup); }, [activeGroup]);
 
   return (
     <SessionContext.Provider value={data}>
@@ -111,14 +125,21 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           {NAV.map((g) => {
             const items = g.items.filter((i) => can(i.perm));
             if (items.length === 0) return null;
+            const open = openGroup === g.group;
+            const panel = `menu-${g.group.toLowerCase()}`;
             return (
-              <div key={g.group} style={{ display: 'contents' }}>
-                <div className="group">{g.group}</div>
-                {items.map((i) => (
-                  <Link key={i.href} href={i.href} className={i.href === active ? 'active' : undefined} onClick={() => setMenuOpen(false)}>
-                    {i.label}
-                  </Link>
-                ))}
+              <div key={g.group} className={open ? 'section open' : 'section'}>
+                <button type="button" className={g.group === activeGroup ? 'group current' : 'group'} aria-expanded={open} aria-controls={panel}
+                  onClick={() => setOpenGroup(open ? null : g.group)}>
+                  <span>{g.group}</span><span className="chevron" aria-hidden="true">▾</span>
+                </button>
+                <div id={panel} hidden={!open}>
+                  {items.map((i) => (
+                    <Link key={i.href} href={i.href} className={i.href === active ? 'active' : undefined} onClick={() => setMenuOpen(false)}>
+                      {i.label}
+                    </Link>
+                  ))}
+                </div>
               </div>
             );
           })}
