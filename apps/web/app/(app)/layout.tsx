@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
+import { InstallButton } from '@/components/install';
 import { post, useGet } from '@/lib/api';
 import { SessionContext, type Session } from '@/lib/session';
 
@@ -120,6 +121,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             );
           })}
           <div className="who">
+            <InstallButton className="install" />
             <div>{data.user.name}</div>
             <div className="muted">{data.user.role}</div>
             <Link href="/account" style={{ padding: '4px 0' }}>My password</Link>

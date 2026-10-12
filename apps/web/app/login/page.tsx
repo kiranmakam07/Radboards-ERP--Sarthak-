@@ -1,5 +1,6 @@
 'use client';
 
+import { InstallButton } from '@/components/install';
 import { Form } from '@/components/ui';
 import { post } from '@/lib/api';
 
@@ -22,6 +23,7 @@ export default function LoginPage() {
             window.location.href = next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
           }}
         />
+        <InstallButton className="install" />
       </div>
     </div>
   );
