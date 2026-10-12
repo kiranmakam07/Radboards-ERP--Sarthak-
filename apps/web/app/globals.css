@@ -391,3 +391,10 @@ h2.section { margin: 18px 0 8px; color: var(--muted); font-size: 12px; text-tran
   .doc { padding: 14px; overflow-x: auto; }
   .doc .head { flex-direction: column; gap: 10px; }
 }
+
+/* ---- install as an app ---- */
+.nav .who .install { display: block; width: 100%; margin: 0 0 12px; background: #26324a; border-color: #34425e; color: #fff; }
+.nav .who .install:hover { background: #2d3b57; }
+.install-help { margin: -4px 0 12px; color: #aeb8c9; }
+.center .install { width: 100%; margin-top: 10px; }
+.center .install-help { color: var(--muted); margin: 8px 0 0; font-size: 13px; }
