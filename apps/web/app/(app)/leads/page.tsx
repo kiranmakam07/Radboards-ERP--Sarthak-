@@ -3,6 +3,7 @@
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { LEAD_STAGES, LEAD_STAGE_LABELS } from '@radcore/shared';
+import { Score } from '@/components/crm';
 import { Badge, CsvLink, Form, Loading, Page, Table, Toggle, dateTime } from '@/components/ui';
 import { post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -16,7 +17,7 @@ const VIEWS: [string, string][] = [
 function Leads() {
   const params = useSearchParams();
   const can = useCan();
-  const [f, setF] = useState({ view: params.get('view') ?? '', q: '', stage: params.get('stage') ?? '', source_id: '', owner_id: '', mine: params.get('mine') ?? '' });
+  const [f, setF] = useState({ view: params.get('view') ?? '', q: '', stage: params.get('stage') ?? '', source_id: '', owner_id: '', mine: params.get('mine') ?? '', sort: '' });
   const sources = useGet<{ data: any[] }>('/masters/lead-sources');
   const users = useGet<{ data: any[] }>('/masters/users-lite');
   const items = useGet<{ data: any[] }>('/items?limit=1000');
@@ -62,6 +63,7 @@ function Leads() {
           <option value="">Any owner</option>{(users.data?.data ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
         <label><input type="checkbox" checked={f.mine === 'true'} onChange={(e) => set('mine', e.target.checked ? 'true' : '')} /> Mine only</label>
+        <label><input type="checkbox" checked={f.sort === 'score'} onChange={(e) => set('sort', e.target.checked ? 'score' : '')} /> Hottest first</label>
       </div>
       <Loading loading={loading} error={error} />
       <Table rows={data?.data} rowHref={(r) => `/leads/${r.id}`} columns={[
@@ -69,6 +71,7 @@ function Leads() {
         { key: 'name', title: 'Name' },
         { key: 'phone', title: 'Phone' },
         { key: 'stage', title: 'Stage', render: (r) => <><Badge value={r.stage} />{r.lost_reason ? <span className="muted small"> {r.lost_reason}</span> : null}</> },
+        { key: 'score', title: 'Chance', render: (r) => <Score score={r.score} label={r.score_label} /> },
         { key: 'source_name', title: 'Source', render: (r) => <>{r.source_name}{r.source_detail ? <span className="muted small"> · {r.source_detail}</span> : null}</> },
         { key: 'interested_items', title: 'Interested in', render: (r) => (r.interested_items ?? []).join(', ') },
         { key: 'owner_name', title: 'Owner' },

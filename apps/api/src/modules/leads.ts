@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  FOLLOW_UP_REQUIRED_STAGES, LEAD_STAGES, LEAD_STAGE_LABELS, canMoveLead, istDate, type LeadStage,
+  FOLLOW_UP_REQUIRED_STAGES, LEAD_STAGES, LEAD_STAGE_LABELS, can, canMoveLead, istDate, type LeadStage,
 } from '@radcore/shared';
 import { config } from '../config';
 import { audit } from '../core/audit';
@@ -253,6 +253,41 @@ const VIEWS: Record<string, ReturnType<typeof sql>> = {
   lost: sql`l.stage = 'lost'`,
 };
 
+/**
+ * How likely a lead is to buy, as a number from 0 to 100, from what is already on record. The
+ * rules are deliberately few and visible (the lead's page lists the points behind its score):
+ *   - how far it has come: new 10, contacted 20, interested 40, meeting booked 55
+ *   - what it wants: 5 for naming an item, 15 if one of them sells for 5,000 or more
+ *   - is it talking to us: 5 for each call, message, meeting or repeat enquiry in the last week
+ *     (up to 15), and 10 more if they wrote to us in the last three days
+ *   - is it fresh: 10 in its first two days; minus 15 once nothing has happened for two weeks
+ *   - have they bought before: 10 if this phone number already has an invoice
+ * 60 and over is "hot", 35 to 59 "warm", the rest "cold". Leads that are won or lost have no score.
+ * Joined with the lead as `l`; gives the columns of `sc`.
+ */
+const SCORE_JOIN = sql`
+  left join lateral (
+    select
+      case l.stage when 'new' then 10 when 'contacted' then 20 when 'interested' then 40 when 'meeting_booked' then 55 end as stage_pts,
+      (select case when count(*) = 0 then 0 when max(i.retail_price) >= 5000 then 15 else 5 end
+         from items i where i.id = any(l.interested_item_ids)) as interest_pts,
+      (select least(15, 5 * count(*))::int from lead_activities a
+        where a.lead_id = l.id and a.at > now() - interval '7 days'
+          -- the enquiry that created the lead is not a conversation; one that comes later is
+          and (a.type in ('call', 'whatsapp', 'meeting') or (a.type = 'enquiry' and a.at > l.created_at + interval '1 minute')))
+        + (case when exists (select 1 from lead_activities a
+                              where a.lead_id = l.id and a.type = 'whatsapp' and a.user_id is null and a.at > now() - interval '3 days') then 10 else 0 end) as contact_pts,
+      case when l.created_at > now() - interval '2 days' then 10
+           when greatest(l.created_at, coalesce((select max(a.at) from lead_activities a where a.lead_id = l.id), l.created_at)) < now() - interval '14 days' then -15
+           else 0 end as fresh_pts,
+      case when exists (select 1 from parties bp join invoices inv on inv.party_id = bp.id
+                         where bp.phone = l.phone and inv.status <> 'cancelled') then 10 else 0 end as repeat_pts
+  ) pts on l.stage in ('new', 'contacted', 'interested', 'meeting_booked')
+  left join lateral (
+    select greatest(0, least(100, pts.stage_pts + pts.interest_pts + pts.contact_pts + pts.fresh_pts + pts.repeat_pts))::int as score
+  ) sc on pts.stage_pts is not null`;
+const SCORE_COLS = sql`sc.score, case when sc.score is null then null when sc.score >= 60 then 'hot' when sc.score >= 35 then 'warm' else 'cold' end as score_label`;
+
 export function leadsRouter(db: DB) {
   const r = Router();
 
@@ -265,19 +300,21 @@ export function leadsRouter(db: DB) {
       from: zDate.optional(),
       to: zDate.optional(),
       mine: z.enum(['true', 'false']).optional(),
+      sort: z.enum(['newest', 'score']).optional(),
     }).parse(req.query);
     const like = q.q ? `%${q.q}%` : null;
     const digits = q.q ? q.q.replace(/\D/g, '') : '';
     const phoneLike = digits.length >= 4 ? `%${digits}%` : null;
     const owner = q.mine === 'true' ? req.user!.id : (q.owner_id ?? null);
     const data = await rows(db, sql`
-      select l.*, s.name as source_name, o.name as owner_name, lr.name as lost_reason,
+      select l.*, s.name as source_name, o.name as owner_name, lr.name as lost_reason, ${SCORE_COLS},
              (l.stage in ('new','contacted','interested','meeting_booked') and l.next_follow_up_at < now()) as overdue,
              (select coalesce(array_agg(i.name order by i.name), '{}') from items i where i.id = any(l.interested_item_ids)) as interested_items
         from leads l
         join lead_sources s on s.id = l.source_id
         left join users o on o.id = l.owner_id
         left join lost_reasons lr on lr.id = l.lost_reason_id
+        ${SCORE_JOIN}
        where (${q.stage ?? null}::text is null or l.stage::text = ${q.stage ?? null})
          and (${owner}::uuid is null or l.owner_id = ${owner}::uuid)
          and (${q.source_id ?? null}::uuid is null or l.source_id = ${q.source_id ?? null}::uuid)
@@ -286,7 +323,8 @@ export function leadsRouter(db: DB) {
          and (${like}::text is null or l.name ilike ${like} or l.lead_no ilike ${like}
               or (${phoneLike}::text is not null and l.phone like ${phoneLike}))
          and (${q.view ? VIEWS[q.view]! : sql`true`})
-       order by ${q.view === 'followups_due' || q.view === 'overdue' ? sql`l.next_follow_up_at asc` : sql`l.created_at desc`}
+       order by ${q.sort === 'score' ? sql`sc.score desc nulls last, l.created_at desc`
+         : q.view === 'followups_due' || q.view === 'overdue' ? sql`l.next_follow_up_at asc` : sql`l.created_at desc`}
        limit ${q.limit} offset ${q.offset}`);
     sendList(req, res, data, 'leads');
   });
@@ -319,15 +357,36 @@ export function leadsRouter(db: DB) {
   });
 
   /** Kanban board: open stages, newest follow-up first. */
+  /**
+   * Leads that have arrived since the given moment and that this person should hear about: the ones
+   * given to them, or every one for whoever looks after the lead sources. Not the ones they typed in
+   * themselves. The screens ask every half minute and show a notice for each.
+   */
+  r.get('/alerts', requirePerm('leads:read'), async (req, res) => {
+    const q = z.object({ since: z.string().datetime({ offset: true }).optional() }).parse(req.query);
+    const [clock] = await rows<{ now: string }>(db, sql`select now() as now`);
+    if (!q.since) return void res.json({ data: [], now: clock!.now });
+    const everyone = can(req.user!.role, 'crm:manage');
+    const data = await rows(db, sql`
+      select l.id, l.lead_no, l.name, l.created_at, s.name as source_name, l.source_detail, o.name as owner_name, (l.owner_id = ${req.user!.id}) as mine
+        from leads l join lead_sources s on s.id = l.source_id left join users o on o.id = l.owner_id
+       where l.created_at > ${q.since}::timestamptz
+         and (l.owner_id = ${req.user!.id} or ${everyone})
+         and l.created_by is distinct from ${req.user!.id}
+       order by l.created_at desc limit 10`);
+    res.json({ data, now: clock!.now });
+  });
+
   r.get('/pipeline', requirePerm('leads:read'), async (req, res) => {
     const q = z.object({ owner_id: zId.optional(), mine: z.enum(['true', 'false']).optional() }).parse(req.query);
     const owner = q.mine === 'true' ? req.user!.id : (q.owner_id ?? null);
     const data = await rows(db, sql`
       select l.id, l.lead_no, l.name, l.phone, l.stage, l.next_follow_up_at, l.owner_id, o.name as owner_name,
-             s.name as source_name,
+             s.name as source_name, ${SCORE_COLS},
              (l.next_follow_up_at < now()) as overdue,
              (select coalesce(sum(i.retail_price), 0) from items i where i.id = any(l.interested_item_ids)) as value
         from leads l join lead_sources s on s.id = l.source_id left join users o on o.id = l.owner_id
+        ${SCORE_JOIN}
        where l.stage in ('new','contacted','interested','meeting_booked')
          and (${owner}::uuid is null or l.owner_id = ${owner}::uuid)
        order by l.next_follow_up_at asc nulls last`);
@@ -338,7 +397,9 @@ export function leadsRouter(db: DB) {
     const id = zId.parse(req.params.id);
     const [lead] = await rows(db, sql`
       select l.*, s.name as source_name, o.name as owner_name, lr.name as lost_reason, a.name as attended_by_name,
-             p.name as party_name,
+             p.name as party_name, ${SCORE_COLS},
+             case when sc.score is null then null else json_build_object('stage', pts.stage_pts, 'interest', pts.interest_pts,
+               'contact', pts.contact_pts, 'fresh', pts.fresh_pts, 'repeat', pts.repeat_pts) end as score_points,
              (select coalesce(json_agg(json_build_object('id', i.id, 'name', i.name, 'sku', i.sku, 'retail_price', i.retail_price)), '[]'::json)
                 from items i where i.id = any(l.interested_item_ids)) as interested_items
         from leads l
@@ -347,6 +408,7 @@ export function leadsRouter(db: DB) {
         left join users a on a.id = l.attended_by
         left join lost_reasons lr on lr.id = l.lost_reason_id
         left join parties p on p.id = l.party_id
+        ${SCORE_JOIN}
        where l.id = ${id}`);
     must(lead, 'Lead');
     const activities = await rows(db, sql`

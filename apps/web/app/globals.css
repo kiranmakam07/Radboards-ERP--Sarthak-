@@ -398,3 +398,13 @@ h2.section { margin: 18px 0 8px; color: var(--muted); font-size: 12px; text-tran
 .install-help { margin: -4px 0 12px; color: #aeb8c9; }
 .center .install { width: 100%; margin-top: 10px; }
 .center .install-help { color: var(--muted); margin: 8px 0 0; font-size: 13px; }
+
+/* ---- a lead has just arrived ---- */
+.alerts { position: fixed; right: 14px; bottom: 14px; z-index: 60; display: grid; gap: 8px; width: min(380px, calc(100vw - 28px)); justify-items: end; }
+.alert {
+  display: flex; align-items: center; gap: 10px; width: 100%; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+  border-radius: 8px; padding: 10px 12px; box-shadow: 0 6px 24px rgba(20, 27, 38, .18);
+}
+.alert > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.alerts .link { background: var(--panel); padding: 4px 8px; border-radius: 6px; }
+@media (max-width: 640px) { .alerts { right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); width: calc(100vw - 20px); } }
