@@ -279,6 +279,21 @@ export function dashboardsRouter(db: DB) {
     const totalSpend = bySource.reduce((sum, x) => sum.plus(x.spend), D(0));
     const paidLeads = data.by_source.filter((s: { spend: string }) => D(s.spend).gt(0)).reduce((n: number, s: { leads: number }) => n + s.leads, 0);
     data.spend = { total: money(totalSpend), leads_from_paid_sources: paidLeads, cost_per_lead: totalSpend.gt(0) ? each(money(totalSpend), paidLeads) : null };
+    // The team, person by person: what came to them in the period, how fast they answered, what they closed, and what is waiting now.
+    data.team = await rows(db, sql`
+      select u.id, u.name,
+             count(l.id) filter (where (l.created_at at time zone ${IST})::date between ${from}::date and ${to}::date)::int as received,
+             count(l.id) filter (where (l.created_at at time zone ${IST})::date between ${from}::date and ${to}::date and l.first_contacted_at is not null)::int as contacted,
+             round(avg(extract(epoch from (l.first_contacted_at - l.created_at)) / 60)
+               filter (where (l.created_at at time zone ${IST})::date between ${from}::date and ${to}::date and l.first_contacted_at is not null))::int as avg_response_min,
+             count(l.id) filter (where (l.converted_at at time zone ${IST})::date between ${from}::date and ${to}::date)::int as converted,
+             count(l.id) filter (where l.stage in ('new', 'contacted', 'interested', 'meeting_booked'))::int as open_now,
+             count(l.id) filter (where l.stage in ('new', 'contacted', 'interested', 'meeting_booked') and l.next_follow_up_at < now())::int as overdue
+        from users u join leads l on l.owner_id = u.id
+       group by u.id, u.name
+      having count(l.id) filter (where (l.created_at at time zone ${IST})::date between ${from}::date and ${to}::date) > 0
+          or count(l.id) filter (where l.stage in ('new', 'contacted', 'interested', 'meeting_booked')) > 0
+       order by 3 desc, u.name`);
     res.json({ data });
   });
 

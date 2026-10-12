@@ -5,6 +5,7 @@ import {
   FOLLOW_UP_REQUIRED_STAGES, LEAD_STAGES, LEAD_STAGE_LABELS, can, canMoveLead, istDate, type LeadStage,
 } from '@radcore/shared';
 import { config } from '../config';
+import { advancePlan, planView, startDefaultPlan } from './plans';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { nextNumber } from '../core/numbering';
@@ -141,6 +142,7 @@ export async function captureLead(ctx: Ctx, input: CaptureInput): Promise<{ lead
     leadId: lead!.id, type: 'enquiry', note: `Captured via ${detail}`, userId: ctx.user?.id ?? null,
   });
   await audit(ctx, 'lead', lead!.id, 'create', null, lead);
+  await startDefaultPlan(ctx, lead!.id);
   return { lead: lead!, duplicate: false };
 }
 
@@ -165,6 +167,8 @@ export async function moveLead(
     if (!reason || !reason.active) throw badRequest('Unknown lost reason');
     patch.lostReasonId = reason.id;
     patch.nextFollowUpAt = null;
+    // A lost lead is on no plan.
+    Object.assign(patch, { planId: null, planStep: null, planStartedAt: null });
   } else {
     patch.lostReasonId = null;
     const followUp = input.nextFollowUpAt ?? lead!.nextFollowUpAt;
@@ -225,6 +229,7 @@ export async function convertLead(
     .update(leads)
     .set({
       stage: 'converted', partyId: party.id, convertedAt: new Date(), nextFollowUpAt: null, lostReasonId: null,
+      planId: null, planStep: null, planStartedAt: null,
       firstContactedAt: lead!.firstContactedAt ?? new Date(), updatedAt: new Date(),
     })
     .where(eq(leads.id, id))
@@ -421,7 +426,7 @@ export function leadsRouter(db: DB) {
       select a.id, a.type, a.note, a.at, u.name as user_name
         from lead_activities a left join users u on u.id = a.user_id
        where a.lead_id = ${id} order by a.at desc, a.id`);
-    res.json({ data: { ...lead, activities } });
+    res.json({ data: { ...lead, activities, plan: await planView(db, { planId: (lead as any).plan_id, planStep: (lead as any).plan_step, planStartedAt: (lead as any).plan_started_at }) } });
   });
 
   const zCapture = z.object({
@@ -543,6 +548,8 @@ export function leadsRouter(db: DB) {
       if (!lead!.firstContactedAt && b.type !== 'note') patch.firstContactedAt = new Date();
       if (b.next_follow_up_at) patch.nextFollowUpAt = b.next_follow_up_at;
       await ctx.tx.update(leads).set(patch).where(eq(leads.id, id));
+      // Speaking to the lead does the step of its follow-up plan that was due.
+      if (b.type !== 'note') await advancePlan(ctx, id, { keepFollowUp: Boolean(b.next_follow_up_at) });
       return row;
     });
     res.status(201).json({ data: activity });

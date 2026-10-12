@@ -446,3 +446,15 @@ h2.section { margin: 18px 0 8px; color: var(--muted); font-size: 12px; text-tran
 .clock-times { display: flex; gap: 18px; font-size: 15px; margin-bottom: 4px; }
 .clock-times strong { font-size: 20px; font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .clock .big { width: 100%; padding: 16px; font-size: 18px; } }
+
+/* ---- follow-up plan on a lead ---- */
+.plan { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 8px; }
+.plan li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.plan li > span:nth-child(2) { flex: 1; min-width: 180px; }
+.plan .dot {
+  width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--viz-axis); display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; background: #fff; flex: none;
+}
+.plan .done { color: var(--muted); }
+.plan .done .dot { background: var(--accent); border-color: var(--accent); color: #fff; }
+.plan .now .dot { border-color: var(--accent); color: var(--accent); border-width: 2px; }

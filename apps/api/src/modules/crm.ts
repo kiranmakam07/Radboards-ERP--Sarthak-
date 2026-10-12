@@ -12,6 +12,7 @@ import { adSpends, campaigns, channelEvents, items, leadActivities, leadSources,
 import { AppError, badRequest, conflict, forbidden, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zText, wantsFile, type Ctx } from '../lib/http';
 import { captureLead, moveLead, sourceIdByName } from './leads';
+import { advancePlan, stopPlan } from './plans';
 import { cancelOnlineOrder, fromShopify, isOnlineChannel, takeOrder, type OnlineOrder } from './online';
 
 /**
@@ -156,7 +157,10 @@ async function handle(ctx: Ctx, e: Event, fetched: Awaited<ReturnType<typeof fet
     if (open) {
       // Already being followed up: the message goes on that lead's timeline, where its owner sees it.
       await ctx.tx.insert(leadActivities).values({ leadId: open.id, type: 'whatsapp', note: `They wrote: ${text}`.slice(0, 2000), userId: null });
-      await ctx.tx.update(leads).set({ updatedAt: new Date() }).where(eq(leads.id, open.id));
+      // They have answered: the plan of messages stops, and the lead is due now for a person to reply.
+      const onPlan = Boolean(open.planId);
+      await stopPlan(ctx, open.id, 'they replied on WhatsApp');
+      await ctx.tx.update(leads).set({ updatedAt: new Date(), ...(onPlan ? { nextFollowUpAt: new Date() } : {}) }).where(eq(leads.id, open.id));
       return { leadId: open.id, summary: `${open.name}, ${phone} · message on ${open.leadNo}` };
     }
     // From a Click-to-WhatsApp ad the first message says which ad it was.
@@ -394,11 +398,16 @@ export function renderTemplate(body: string, v: { name: string; myName: string; 
 async function markContacted(ctx: Ctx, lead: typeof leads.$inferSelect): Promise<typeof leads.$inferSelect> {
   const days = await getSetting(ctx.tx, 'default_follow_up_days');
   const next = lead.nextFollowUpAt && lead.nextFollowUpAt > new Date() ? lead.nextFollowUpAt : new Date(Date.now() + days * 86400_000);
-  if (lead.stage === 'new') return moveLead(ctx, lead.id, { stage: 'contacted', nextFollowUpAt: next });
-  const patch: Partial<typeof leads.$inferInsert> = { updatedAt: new Date() };
-  if (!lead.firstContactedAt) patch.firstContactedAt = new Date();
-  if (OPEN_LEAD_STAGES.includes(lead.stage)) patch.nextFollowUpAt = next;
-  const [row] = await ctx.tx.update(leads).set(patch).where(eq(leads.id, lead.id)).returning();
+  if (lead.stage === 'new') await moveLead(ctx, lead.id, { stage: 'contacted', nextFollowUpAt: next });
+  else {
+    const patch: Partial<typeof leads.$inferInsert> = { updatedAt: new Date() };
+    if (!lead.firstContactedAt) patch.firstContactedAt = new Date();
+    if (OPEN_LEAD_STAGES.includes(lead.stage)) patch.nextFollowUpAt = next;
+    await ctx.tx.update(leads).set(patch).where(eq(leads.id, lead.id));
+  }
+  // On a follow-up plan, this contact does the step that was due and the next step sets the date.
+  await advancePlan(ctx, lead.id);
+  const [row] = await ctx.tx.select().from(leads).where(eq(leads.id, lead.id));
   return row!;
 }
 

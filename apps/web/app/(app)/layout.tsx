@@ -24,6 +24,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/crm/sources', label: 'Lead sources', perm: 'crm:manage' },
     { href: '/campaigns', label: 'Campaign links', perm: 'leads:write' },
     { href: '/crm/replies', label: 'Quick replies', perm: 'leads:read' },
+    { href: '/crm/plans', label: 'Follow-up plans', perm: 'leads:read' },
     { href: '/crm/spend', label: 'Ad spend', perm: 'crm:manage' },
     { href: '/dashboards/marketing', label: 'Marketing dashboard', perm: 'dashboard:marketing' },
   ] },
