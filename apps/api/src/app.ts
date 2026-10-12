@@ -14,6 +14,7 @@ import { dashboardsRouter } from './modules/dashboards';
 import { filesRouter } from './modules/files';
 import { gstRouter } from './modules/gst';
 import { hrRouter } from './modules/hr';
+import { hrSelfRouter } from './modules/hr-self';
 import { inventoryRouter } from './modules/inventory';
 import { itemsRouter } from './modules/items';
 import { leadsRouter, publicLeadsRouter } from './modules/leads';
@@ -126,6 +127,7 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
   app.use('/api/accounting', accountingRouter(db));
   app.use('/api/bank', bankRouter(db));
   app.use('/api/gst', gstRouter(db));
+  app.use('/api/hr', hrSelfRouter(db));
   app.use('/api/hr', hrRouter(db));
   app.use('/api/ops', opsRouter(db));
   app.use('/api/ops', projectsRouter(db));

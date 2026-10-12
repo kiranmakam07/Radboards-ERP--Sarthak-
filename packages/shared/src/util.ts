@@ -124,3 +124,24 @@ export function leaveEntitlement(daysPerYear: number, joinDate: string, year: { 
   const months = (Number(year.to.slice(0, 4)) * 12 + Number(year.to.slice(5, 7))) - (Number(joinDate.slice(0, 4)) * 12 + Number(joinDate.slice(5, 7))) + 1;
   return Math.round((daysPerYear * months) / 12 * 2) / 2;
 }
+
+/** Time of day (HH:MM:SS) in IST for a given instant. */
+export function istClock(at: Date = new Date()): string {
+  return new Date(at.getTime() + IST_OFFSET_MS).toISOString().slice(11, 19);
+}
+
+/** Distance in metres between two points on the ground (haversine; good to a few metres at city scale). */
+export function distanceMetres(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6_371_000 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** The dates from one day to another, both included, leaving out the given weekdays (0 = Sunday). */
+export function workingDates(from: string, to: string, weeklyOff: readonly number[] = []): string[] {
+  const out: string[] = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) if (!weeklyOff.includes(weekdayOf(d))) out.push(d);
+  return out;
+}

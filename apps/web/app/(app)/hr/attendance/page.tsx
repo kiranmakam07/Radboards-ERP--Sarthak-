@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ATTENDANCE_STATUSES, istDate, type AttendanceStatus } from '@radcore/shared';
+import { AttendanceRules, LeaveRequests, PlaceNote } from '@/components/hr';
 import { Card, ErrorBox, Form, Loading, Notice, Page, Table, label, num } from '@/components/ui';
 import { ApiError, api, post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -16,7 +17,7 @@ export default function AttendancePage() {
   const today = istDate();
   const [day, setDay] = useState(today);
   const [month, setMonth] = useState(today.slice(0, 7));
-  const register = useGet<{ data: any[] }>(`/hr/attendance?date=${day}`);
+  const register = useGet<{ data: any[]; rules?: any }>(`/hr/attendance?date=${day}`);
   const summary = useGet<{ data: any[] }>(`/hr/attendance/summary?month=${month}`);
   const leave = useGet<{ data: any[]; fy: string; annual_leave_days: number }>('/hr/leave-balances');
   const [rows, setRows] = useState<Record<string, Row>>({});
@@ -110,7 +111,9 @@ export default function AttendancePage() {
                     const r = rows[e.employee_id] ?? { status: '', check_in: '', check_out: '', note: '' };
                     return (
                       <tr key={e.employee_id}>
-                        <td data-label="Employee"><span><Link href={`/hr/employees/${e.employee_id}`}>{e.name}</Link> <span className="muted small">{e.employee_no}</span></span></td>
+                        <td data-label="Employee"><span><Link href={`/hr/employees/${e.employee_id}`}>{e.name}</Link> <span className="muted small">{e.employee_no}</span>
+                          {e.self_marked ? <> <PlaceNote distance={e.in_distance_m} radius={register.data?.rules?.place?.radius_m ?? null} noLocation={e.no_location} /></> : null}
+                          {e.late ? <> <span className="badge amber">Late</span></> : null}</span></td>
                         <td data-label="Department">{e.department}</td>
                         <td data-label="Status">
                           <select value={r.status} disabled={!write} aria-label={`Status for ${e.name}`}
@@ -149,6 +152,8 @@ export default function AttendancePage() {
         </Card>
       )}
 
+      <LeaveRequests canDecide={write} onChange={() => { register.reload(); summary.reload(); leave.reload(); }} />
+
       <Card title="The month, by employee" actions={
         <>
           <label>Month <input type="month" value={month} max={today.slice(0, 7)} onChange={(e) => e.target.value && setMonth(e.target.value)} style={{ width: 'auto' }} /></label>
@@ -160,6 +165,8 @@ export default function AttendancePage() {
         <Table rows={summary.data?.data} empty="Nobody on the rolls in this month." rowHref={(r) => `/hr/employees/${r.employee_id}`} columns={[
           { key: 'name', title: 'Employee' }, { key: 'department', title: 'Department' },
           { key: 'days_worked', title: 'Days worked', align: 'right', render: (r) => num(r.days_worked) },
+          { key: 'hours_worked', title: 'Hours', align: 'right', render: (r) => (Number(r.hours_worked) ? num(r.hours_worked) : '') },
+          { key: 'late_days', title: 'Late', align: 'right', render: (r) => (r.late_days ? <span className="error small">{r.late_days}</span> : 0) },
           { key: 'present', title: 'Present', align: 'right' }, { key: 'half_day', title: 'Half days', align: 'right' },
           { key: 'absent', title: 'Absent', align: 'right', render: (r) => (r.absent ? <span className="error small">{r.absent}</span> : 0) },
           { key: 'leave', title: 'Leave', align: 'right' }, { key: 'weekly_off', title: 'Weekly off', align: 'right' },
@@ -186,6 +193,7 @@ export default function AttendancePage() {
           { key: 'balance', title: 'Left', align: 'right', render: (r) => (r.balance < 0 ? <span className="error small">{num(-r.balance)} over</span> : num(r.balance)) },
         ]} />
       </Card>
+      <AttendanceRules canChange={write} onChange={() => { register.reload(); summary.reload(); }} />
     </Page>
   );
 }

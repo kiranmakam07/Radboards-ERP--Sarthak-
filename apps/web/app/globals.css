@@ -440,3 +440,9 @@ h2.section { margin: 18px 0 8px; color: var(--muted); font-size: 12px; text-tran
 .bubble .when { font-size: 11px; color: var(--muted); margin-top: 2px; white-space: normal; }
 .chat-send { display: flex; gap: 8px; align-items: flex-end; margin-top: 6px; }
 .chat-send textarea { flex: 1; resize: vertical; }
+
+/* ---- my attendance ---- */
+.clock { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.clock-times { display: flex; gap: 18px; font-size: 15px; margin-bottom: 4px; }
+.clock-times strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .clock .big { width: 100%; padding: 16px; font-size: 18px; } }
