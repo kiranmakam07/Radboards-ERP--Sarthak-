@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { LEAD_STAGE_LABELS, type LeadStage } from '@radcore/shared';
+import { Score } from '@/components/crm';
 import { Loading, Page, dateTime, inr } from '@/components/ui';
 import { useGet } from '@/lib/api';
 
@@ -27,7 +28,7 @@ export default function PipelinePage() {
                 <h2><span>{LEAD_STAGE_LABELS[stage]} ({leads.length})</span><span className="muted small">₹{inr(value)}</span></h2>
                 {leads.map((l) => (
                   <Link key={l.id} href={`/leads/${l.id}`} className={l.overdue ? 'lead overdue' : 'lead'}>
-                    <strong>{l.name}</strong> <span className="muted small">{l.lead_no}</span><br />
+                    <strong>{l.name}</strong> <span className="muted small">{l.lead_no}</span> <Score score={l.score} label={l.score_label} /><br />
                     <span className="small">{l.phone} · {l.source_name}</span><br />
                     <span className={l.overdue ? 'small error' : 'small muted'}>{l.next_follow_up_at ? `Follow up ${dateTime(l.next_follow_up_at)}` : 'No follow-up set'}</span>
                     {l.owner_name && <span className="small muted"> · {l.owner_name}</span>}

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { LEAD_STAGE_LABELS, LEAD_TRANSITIONS, type LeadStage } from '@radcore/shared';
 import { Steps } from '@/components/charts';
-import { QuickReplies } from '@/components/crm';
+import { QuickReplies, ScoreCard } from '@/components/crm';
 import { Badge, Card, Form, KV, Loading, Page, Table, dateTime, label } from '@/components/ui';
 import { patch, post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -49,6 +49,8 @@ export default function LeadPage() {
           ['Notes', lead.notes],
         ]} />
       </Card>
+
+      <ScoreCard lead={lead} />
 
       {write && <QuickReplies leadId={id} phone={lead.phone} onDone={reload} />}
 

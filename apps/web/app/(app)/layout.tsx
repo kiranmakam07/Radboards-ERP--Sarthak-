@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
+import { LeadAlerts } from '@/components/crm';
 import { InstallButton } from '@/components/install';
 import { post, useGet } from '@/lib/api';
 import { SessionContext, type Session } from '@/lib/session';
@@ -132,6 +133,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <main className="main">
           {data.sample_data ? <div className="sample-banner no-print">Review copy with sample data. Nothing here is real, and it will be cleared before the system goes live.</div> : null}
           {children}
+          {can('leads:read') ? <LeadAlerts /> : null}
         </main>
       </div>
     </SessionContext.Provider>
