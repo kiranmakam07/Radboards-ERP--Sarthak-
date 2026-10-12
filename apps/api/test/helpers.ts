@@ -54,7 +54,10 @@ async function freshDatabase(): Promise<{ url: string; drop: () => Promise<void>
  * Tests never reach the internet: `getJson` stands in for Meta's Graph API, and webhooks answer
  * only after the lead has been created so a test can check for it straight away.
  */
-export async function setup(getJson: CrmDeps['getJson'] = async () => { throw new Error('no network in tests'); }) {
+export async function setup(
+  getJson: CrmDeps['getJson'] = async () => { throw new Error('no network in tests'); },
+  postJson: NonNullable<CrmDeps['postJson']> = async () => { throw new Error('no network in tests'); },
+) {
   const database = await freshDatabase();
   const handle = await createDb(database.url, config.migrationsFolder);
   const db = handle.db;
@@ -66,7 +69,7 @@ export async function setup(getJson: CrmDeps['getJson'] = async () => { throw ne
     address: { line1: '1 Test Road', city: 'Pune', state: 'Maharashtra', pincode: '411001' },
   }, null);
 
-  const app = createApp(db, { getJson, awaitProcessing: true });
+  const app = createApp(db, { getJson, postJson, awaitProcessing: true });
   const agents = new Map<Role, Agent>();
   const as = async (role: Role): Promise<Agent> => {
     const cached = agents.get(role);

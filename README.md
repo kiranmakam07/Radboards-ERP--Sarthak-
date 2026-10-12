@@ -164,6 +164,15 @@ it is connected, and everything that has come in.
 - Anything that could not become a lead (no phone number, a number outside India, Meta refusing
   to hand the lead over) stays on that screen with the reason and a retry button.
 
+### Sending WhatsApp messages from the app
+
+With `WHATSAPP_PHONE_NUMBER_ID` (shown beside the business number in Meta's WhatsApp → API setup) and
+`WHATSAPP_ACCESS_TOKEN` (a permanent system-user token with `whatsapp_business_messaging`) set, the
+lead's page gets a box to write and send from the business number, and the messages both ways are
+shown as a chat. WhatsApp allows a free reply only within 24 hours of the customer's last message;
+after that it refuses and the screen says so. Without the two settings nothing changes: a quick
+reply opens WhatsApp on the person's own phone with the message written.
+
 ## Online orders
 
 An order placed on the Shopify store, Amazon or Flipkart becomes a confirmed sales order (screen

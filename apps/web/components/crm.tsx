@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { ActionButton, Card, ErrorBox, Notice, Table, UploadField, dateTime } from '@/components/ui';
 import { api, post, useGet } from '@/lib/api';
+import { useSession } from '@/lib/session';
 
 /**
  * Contact a lead in one tap. Picking a quick reply opens WhatsApp with the message already
@@ -257,6 +258,71 @@ export function ShareFiles({ leadId, phone, name, canSend }: { leadId: string; p
           <ActionButton confirm="Switch this link off? It will stop working for whoever has it." onClick={() => post(`/leads/shares/${r.id}/revoke`)} onDone={reload}>Switch off</ActionButton>
         ) : null) },
       ]} />
+    </Card>
+  );
+}
+
+/**
+ * The WhatsApp messages to and from this lead, oldest first, like a chat. Once the business number
+ * is connected, a reply can be typed and sent from here; until then replies go out from the
+ * person's own WhatsApp with the buttons above.
+ */
+export function Conversation({ leadId, activities, canSend, onDone }: { leadId: string; activities: any[]; canSend: boolean; onDone: () => void }) {
+  const { whatsapp_send: connected } = useSession();
+  const templates = useGet<{ data: any[] }>(connected && canSend ? '/crm/templates' : null);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const messages = activities.filter((a) => a.type === 'whatsapp').slice().sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  if (messages.length === 0 && !(connected && canSend)) return null;
+
+  async function send(body: Record<string, string>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await post(`/crm/leads/${leadId}/whatsapp`, body);
+      setText('');
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="WhatsApp">
+      <div className="chat" role="log" aria-label="WhatsApp messages with this lead">
+        {messages.length === 0 ? <p className="muted small">No messages yet.</p> : null}
+        {messages.map((a) => {
+          const theirs = String(a.note ?? '').startsWith('They wrote: ');
+          return (
+            <div key={a.id} className={theirs ? 'bubble theirs' : 'bubble ours'}>
+              <div>{String(a.note ?? '').replace(/^(They wrote|We wrote): /, '')}</div>
+              <div className="when">{theirs ? 'They wrote' : a.user_name ?? 'We wrote'} · {dateTime(a.at)}</div>
+            </div>
+          );
+        })}
+      </div>
+      {connected && canSend ? (
+        <>
+          <div className="chat-send">
+            <textarea rows={2} value={text} placeholder="Write a message" aria-label="Message to send on WhatsApp" onChange={(e) => setText(e.target.value)} />
+            <button type="button" className="primary" disabled={busy || !text.trim()} onClick={() => send({ text })}>{busy ? 'Sending…' : 'Send'}</button>
+          </div>
+          {(templates.data?.data ?? []).some((t) => t.active) ? (
+            <div className="filters" style={{ marginTop: 8, marginBottom: 0 }}>
+              {templates.data!.data.filter((t) => t.active).map((t) => (
+                <button key={t.id} type="button" disabled={busy} title={t.body} onClick={() => send({ template_id: t.id })}>Send “{t.name}”</button>
+              ))}
+            </div>
+          ) : null}
+          <ErrorBox error={error} />
+          <p className="muted small" style={{ marginBottom: 0 }}>Sent from the business number. WhatsApp allows a free reply for 24 hours after the customer last wrote.</p>
+        </>
+      ) : canSend ? (
+        <p className="muted small" style={{ marginBottom: 0 }}>Replies go out from your own WhatsApp with the buttons above. Sending from here switches on once the business number is connected.</p>
+      ) : null}
     </Card>
   );
 }

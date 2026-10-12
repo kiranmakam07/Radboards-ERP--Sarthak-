@@ -9,6 +9,8 @@ export type Session = {
   sample_data?: boolean;
   /** The largest file that can be attached here, in MB. */
   max_upload_mb?: number;
+  /** True when WhatsApp messages can be sent to a lead from inside the app. */
+  whatsapp_send?: boolean;
 };
 
 export const SessionContext = createContext<Session | null>(null);

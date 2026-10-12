@@ -15,7 +15,7 @@ the way they were**. Update it with every change (add a line to the change log a
 | --- | --- |
 | Backend (API, database, posting engine) | MVP **and** most of V1.1 built and tested |
 | Frontend | Simple working screens for every built flow (58 screens, plain styling), with charts on the dashboards, a "what is waiting where" picture on the home screen and progress steps on documents |
-| Automated tests | 221 passing: 23 shared, 190 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
+| Automated tests | 226 passing: 23 shared, 195 API integration (hand-checked figures), 8 simultaneous-request tests. The API tests pass on both the in-memory database and real PostgreSQL |
 | Lead capture (Meta lead ads, Google Ads lead forms, WhatsApp, website) | Receiving side built and tested with the payloads those services send. **Not connected to real accounts yet** (needs the Meta app, the WhatsApp Cloud API number and the Google Ads form, at go-live) |
 | Other integrations (Shopify, Amazon, Flipkart, GSP) | Not built — data model and idempotency keys are ready |
 | Vyapar migration | Not built — needs sample export files |
@@ -214,8 +214,8 @@ Vyapar data and the user list only when deployment is close.** Do not ask for th
 
 Still to build in the app, in rough order:
 7. Online orders, next steps: connect the real Shopify store, check a real Amazon and a real Flipkart order report against the import, marketplace settlements (matching payouts and fees to the orders), stock levels pushed back to the channels.
-8. CRM, once real leads flow (Sarthak: basic structure first, optimise later): sending WhatsApp replies from
-   inside the app, alerts that arrive when the app is closed (needs WhatsApp or
+8. CRM, once real leads flow (Sarthak: basic structure first, optimise later): approved WhatsApp templates for
+   writing after the 24-hour window, delivered / read ticks, alerts that arrive when the app is closed (needs WhatsApp or
    push messages), tuning the lead score against real conversions.
 
 For go-live, the CRM connections also need (not before then): a Meta developer app with the Page and
@@ -266,6 +266,7 @@ already tested, and moving the database to a managed service later is a configur
 | 2026-10-09 | HR and operations screens checked end to end on demo data (every form's values against the API, plus real clicks for ticking a checklist, finishing a task, saving attendance and logging maintenance). Small fixes from that pass: whole-number chart scales for counts, singular wording, clearer maintenance due text. CI green. |
 | 2026-10-10 | Smaller gaps: QR code for campaign links; optional person-check on the public enquiry form (`TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET`); leave balances (company figure + per-person figure, pro-rated for joiners, counted from days marked Leave; migration `0010_leave_days`). |
 | 2026-10-10 | Review copy on Vercel (Sarthak: "I have vercel"). The API can now run inside the web app as one deployment: `apps/api/src/serverless.ts` (per-request entry point), `apps/api/src/prepare.ts` (database update and sample data at build time), `apps/web/scripts/embed-api.mjs` + `vercel.json` (Singapore). Attached files can be kept in the database (`file_contents`, migration `0012`, `FILE_STORE=database`), with the size limit shown on the form. Checked on this machine against real PostgreSQL: the Vercel-style build, sign-in, lists, Excel, attachments, the public form and the website hook. The server setup is unchanged. |
+| 2026-10-12 | WhatsApp messages sent from inside the app, ready to connect: `POST /api/crm/leads/:id/whatsapp` sends free text or a quick reply through the WhatsApp Cloud API (`WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`), logs it only once WhatsApp accepts it, and explains the 24-hour rule in plain words when WhatsApp refuses. The lead's page shows the messages both ways as a chat. 5 tests against the documented request and error replies. **Not connected: the send box has only been exercised through the API tests, never against WhatsApp itself.** |
 | 2026-10-12 | Menu sections are dropdowns (Sarthak): one open at a time, opening another closes the current one, and the section of the screen you are on opens by itself. |
 | 2026-10-12 | Files sent to a lead, with tracking (Sarthak: connections are hooked up later, during testing; keep building). A file gets a link of its own per lead (`lead_shares`, migration `0014`, `modules/shares.ts`, public page `/s/<token>`); it counts as opened when that page is on a screen, not when a chat app fetches a preview; the first opening goes on the lead's timeline and raises a notice for the owner and the sender. Links can be switched off; a file sent before can be reused. 5 tests. |
 | 2026-10-12 | Item pictures on the items screen: add from the camera or a file, remove, first picture shown as a thumbnail in the list (`GET` / `DELETE /api/items/:id/images`). |

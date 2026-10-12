@@ -27,6 +27,8 @@ import { cancelOnlineOrder, fromShopify, isOnlineChannel, takeOrder, type Online
 export type CrmDeps = {
   /** GET a JSON document from the web (Meta's Graph API). Replaced by a stub in tests. */
   getJson: (url: string) => Promise<{ status: number; body: any }>;
+  /** POST a JSON document to the web (sending a WhatsApp message). Replaced by a stub in tests. */
+  postJson?: (url: string, body: unknown, headers: Record<string, string>) => Promise<{ status: number; body: any }>;
   /** When true the webhook answers only after the lead is created. Tests use this; live traffic is answered first. */
   awaitProcessing?: boolean;
 };
@@ -34,6 +36,10 @@ export type CrmDeps = {
 export const defaultDeps: CrmDeps = {
   getJson: async (url) => {
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  },
+  postJson: async (url, body, headers) => {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
     return { status: res.status, body: await res.json().catch(() => null) };
   },
 };
@@ -384,8 +390,75 @@ export function renderTemplate(body: string, v: { name: string; myName: string; 
   return body.replace(/\{(\w+)\}/g, (whole, key: string) => values[key] ?? whole);
 }
 
+/** Contacting a lead always leaves it with a next follow-up, so it cannot be forgotten afterwards; a New lead becomes Contacted. */
+async function markContacted(ctx: Ctx, lead: typeof leads.$inferSelect): Promise<typeof leads.$inferSelect> {
+  const days = await getSetting(ctx.tx, 'default_follow_up_days');
+  const next = lead.nextFollowUpAt && lead.nextFollowUpAt > new Date() ? lead.nextFollowUpAt : new Date(Date.now() + days * 86400_000);
+  if (lead.stage === 'new') return moveLead(ctx, lead.id, { stage: 'contacted', nextFollowUpAt: next });
+  const patch: Partial<typeof leads.$inferInsert> = { updatedAt: new Date() };
+  if (!lead.firstContactedAt) patch.firstContactedAt = new Date();
+  if (OPEN_LEAD_STAGES.includes(lead.stage)) patch.nextFollowUpAt = next;
+  const [row] = await ctx.tx.update(leads).set(patch).where(eq(leads.id, lead.id)).returning();
+  return row!;
+}
+
+/** The quick reply written out for this lead by this person. */
+async function quickReplyText(ctx: Ctx, lead: typeof leads.$inferSelect, templateId: string): Promise<{ name: string; text: string }> {
+  const [t] = await ctx.tx.select().from(messageTemplates).where(eq(messageTemplates.id, templateId));
+  if (!t || !t.active) throw badRequest('That quick reply is not available');
+  const wanted = lead.interestedItemIds.length ? await ctx.tx.select({ name: items.name }).from(items).where(inArray(items.id, lead.interestedItemIds)) : [];
+  const company = await getSetting(ctx.tx, 'company');
+  return { name: t.name, text: renderTemplate(t.body, { name: lead.name, myName: ctx.user!.name, company: company.name, products: wanted.map((i) => i.name).sort() }) };
+}
+
 export function crmRouter(db: DB, deps: CrmDeps = defaultDeps) {
   const r = Router();
+
+  /**
+   * Send a WhatsApp message to the lead from the business number, without leaving the app.
+   * WhatsApp allows free text only within 24 hours of the customer's last message; outside that
+   * window it refuses, and the answer says so in plain words. The message goes on the lead's
+   * timeline only once WhatsApp has accepted it.
+   */
+  r.post('/leads/:id/whatsapp', requirePerm('leads:write'), async (req, res) => {
+    const id = zId.parse(req.params.id);
+    const b = z.object({ text: emptyToNull(z.string().trim().max(4000)).optional(), template_id: emptyToNull(zId).optional() }).parse(req.body);
+    if (!config.whatsappPhoneNumberId || !config.whatsappAccessToken) {
+      throw new AppError(503, 'not_configured', 'Sending from here is not connected yet. Use a button that opens WhatsApp on your own phone or computer.');
+    }
+    const [lead] = await db.select().from(leads).where(eq(leads.id, id));
+    must(lead, 'Lead');
+    const text = b.text ?? (b.template_id ? (await quickReplyText({ tx: db, user: req.user! }, lead!, b.template_id)).text : null);
+    if (!text) throw badRequest('Write a message first');
+
+    let sent;
+    try {
+      // The call to WhatsApp happens outside any transaction, so nothing is locked while waiting on the network.
+      sent = await (deps.postJson ?? defaultDeps.postJson!)(
+        `https://graph.facebook.com/${config.metaGraphVersion}/${encodeURIComponent(config.whatsappPhoneNumberId)}/messages`,
+        { messaging_product: 'whatsapp', recipient_type: 'individual', to: lead!.phone.replace(/\D/g, ''), type: 'text', text: { preview_url: true, body: text } },
+        { Authorization: `Bearer ${config.whatsappAccessToken}` },
+      );
+    } catch {
+      throw new AppError(502, 'whatsapp_unreachable', 'WhatsApp could not be reached. Nothing was sent; try again in a moment.');
+    }
+    const messageId = sent.body?.messages?.[0]?.id;
+    if (sent.status !== 200 || !messageId) {
+      const err = sent.body?.error ?? {};
+      // 131047: more than 24 hours since the customer last wrote. 131026: the number is not on WhatsApp.
+      if (err.code === 131047 || /24 hours|re-?engage/i.test(String(err.message ?? ''))) {
+        throw conflict('WhatsApp did not send it: this person last wrote to us more than 24 hours ago, and after that a business may only send an approved template. Send it from your own WhatsApp instead.');
+      }
+      if (err.code === 131026) throw conflict('WhatsApp did not send it: this number does not seem to be on WhatsApp.');
+      throw new AppError(502, 'whatsapp_refused', `WhatsApp did not send it (${String(err.message ?? `HTTP ${sent.status}`).slice(0, 200)}).`);
+    }
+    const updated = await inTx(db, req, async (ctx) => {
+      const [locked] = await ctx.tx.select().from(leads).where(eq(leads.id, id)).for('update');
+      await ctx.tx.insert(leadActivities).values({ leadId: id, type: 'whatsapp', userId: ctx.user!.id, note: `We wrote: ${text}`.slice(0, 2000) });
+      return markContacted(ctx, locked!);
+    });
+    res.status(201).json({ data: { message_id: messageId, text, stage: updated.stage, stage_label: LEAD_STAGE_LABELS[updated.stage], next_follow_up_at: updated.nextFollowUpAt } });
+  });
 
   /** The Lead sources screen: what is connected, what has come in, and what could not be turned into a lead. */
   r.get('/integrations', requirePerm('crm:manage'), async (_req, res) => {
@@ -406,6 +479,7 @@ export function crmRouter(db: DB, deps: CrmDeps = defaultDeps) {
     res.json({
       data: {
         meta: { app_secret: Boolean(config.metaAppSecret), verify_token: Boolean(config.metaVerifyToken), page_access_token: Boolean(config.metaPageAccessToken) },
+        whatsapp: { send: Boolean(config.whatsappPhoneNumberId && config.whatsappAccessToken) },
         campaign_links: links,
         by_channel: byChannel,
         events,
@@ -517,33 +591,15 @@ export function crmRouter(db: DB, deps: CrmDeps = defaultDeps) {
       let text = '';
       let sent: string | null = null;
       if (b.template_id) {
-        const [t] = await ctx.tx.select().from(messageTemplates).where(eq(messageTemplates.id, b.template_id));
-        if (!t || !t.active) throw badRequest('That quick reply is not available');
-        const wanted = lead!.interestedItemIds.length
-          ? await ctx.tx.select({ name: items.name }).from(items).where(inArray(items.id, lead!.interestedItemIds))
-          : [];
-        const company = await getSetting(ctx.tx, 'company');
-        text = renderTemplate(t.body, { name: lead!.name, myName: ctx.user!.name, company: company.name, products: wanted.map((i) => i.name).sort() });
-        sent = t.name;
+        const reply = await quickReplyText(ctx, lead!, b.template_id);
+        text = reply.text;
+        sent = reply.name;
       }
       await ctx.tx.insert(leadActivities).values({
         leadId: id, type: b.channel, userId: ctx.user!.id,
         note: b.channel === 'call' ? 'Called' : sent ? `Sent "${sent}": ${text}`.slice(0, 2000) : 'Opened the WhatsApp chat',
       });
-      // Contacting a lead always leaves it with a next follow-up, so it cannot be forgotten afterwards.
-      const days = await getSetting(ctx.tx, 'default_follow_up_days');
-      const next = lead!.nextFollowUpAt && lead!.nextFollowUpAt > new Date() ? lead!.nextFollowUpAt : new Date(Date.now() + days * 86400_000);
-      let updated = lead!;
-      if (lead!.stage === 'new') {
-        updated = await moveLead(ctx, id, { stage: 'contacted', nextFollowUpAt: next });
-      } else {
-        const patch: Partial<typeof leads.$inferInsert> = { updatedAt: new Date() };
-        if (!lead!.firstContactedAt) patch.firstContactedAt = new Date();
-        if (OPEN_LEAD_STAGES.includes(lead!.stage)) patch.nextFollowUpAt = next;
-        const [row] = await ctx.tx.update(leads).set(patch).where(eq(leads.id, id)).returning();
-        updated = row!;
-      }
-      return { lead: updated, text };
+      return { lead: await markContacted(ctx, lead!), text };
     });
     const digits = result.lead.phone.replace(/\D/g, '');
     res.json({
