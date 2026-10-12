@@ -854,15 +854,19 @@ export function hrRouter(db: DB) {
   r.get('/attendance', requirePerm('hr:read'), async (req, res) => {
     const q = z.object({ date: zDate.optional() }).parse(req.query);
     const day = q.date ?? istDate();
+    const rules = await getSetting(db, 'attendance_rules');
     const data = await rows(db, sql`
       select e.id as employee_id, e.employee_no, e.name, e.department, e.designation,
-             a.status, to_char(a.check_in, 'HH24:MI') as check_in, to_char(a.check_out, 'HH24:MI') as check_out, a.note
+             a.status, to_char(a.check_in, 'HH24:MI') as check_in, to_char(a.check_out, 'HH24:MI') as check_out, a.note,
+             coalesce(a.self_marked, false) as self_marked, a.in_distance_m, a.out_distance_m,
+             (a.self_marked and a.in_lat is null) as no_location,
+             coalesce(a.status in ('present', 'half_day') and a.check_in > (${rules.start}::time + make_interval(mins => ${rules.grace_min})), false) as late
         from employees e
         left join attendance a on a.employee_id = e.id and a.date = ${day}::date
        where e.join_date <= ${day}::date and (e.left_on is null or e.left_on >= ${day}::date)
        order by e.department, e.name`);
     if (wantsFile(req)) return sendList(req, res, data, `attendance-${day}`);
-    res.json({ data, date: day });
+    res.json({ data, date: day, rules });
   });
 
   r.put('/attendance', requirePerm('hr:write'), async (req, res) => {
@@ -890,6 +894,7 @@ export function hrRouter(db: DB) {
     const month = q.month ?? today.slice(0, 7);
     const from = `${month}-01`;
     const to = `${month}-${String(lastDayOfMonth(from)).padStart(2, '0')}`;
+    const rules = await getSetting(db, 'attendance_rules');
     const data = await rows(db, sql`
       with span as (select ${from}::date as d1, least(${to}::date, ${today}::date) as d2)
       select e.id as employee_id, e.employee_no, e.name, e.department,
@@ -900,6 +905,9 @@ export function hrRouter(db: DB) {
              count(a.id) filter (where a.status = 'weekly_off')::int as weekly_off,
              count(a.id) filter (where a.status = 'holiday')::int as holiday,
              (count(a.id) filter (where a.status = 'present') + 0.5 * count(a.id) filter (where a.status = 'half_day'))::numeric(6,1) as days_worked,
+             count(a.id) filter (where a.status in ('present', 'half_day')
+               and a.check_in > (${rules.start}::time + make_interval(mins => ${rules.grace_min})))::int as late_days,
+             coalesce(round((sum(extract(epoch from (a.check_out - a.check_in))) filter (where a.check_in is not null and a.check_out is not null) / 3600)::numeric, 1), 0) as hours_worked,
              greatest(0, (least(span.d2, coalesce(e.left_on, span.d2)) - greatest(span.d1, e.join_date) + 1) - count(a.id))::int as not_marked
         from employees e
         cross join span

@@ -37,6 +37,12 @@ export type SettingsMap = {
   annual_leave_days: number;
   /** True when this database was filled with sample data (the demo, or a review copy). Shown as a banner. */
   sample_data: boolean;
+  /**
+   * How attendance is judged: when the day starts and how many minutes of grace before someone is
+   * late, which weekdays are the weekly off (0 = Sunday), and where the workplace is, so that a
+   * clock-in from somewhere else can be seen.
+   */
+  attendance_rules: { start: string | null; grace_min: number; weekly_off: number[]; place: { name: string; lat: number; lng: number; radius_m: number } | null };
 };
 
 export const SETTING_DEFAULTS: SettingsMap = {
@@ -55,6 +61,7 @@ export const SETTING_DEFAULTS: SettingsMap = {
   permission_overrides: {},
   annual_leave_days: 12,
   sample_data: false,
+  attendance_rules: { start: null, grace_min: 10, weekly_off: [0], place: null },
 };
 
 export async function getSetting<K extends keyof SettingsMap>(tx: DB, key: K): Promise<SettingsMap[K]> {

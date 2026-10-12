@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { addDays } from '@radcore/shared';
 import { plural } from '@/components/charts';
-import { InterviewResult } from '@/components/hr';
+import { InterviewResult, MyAttendance } from '@/components/hr';
 import { MaintenanceDone, TaskCard, Due, everyText } from '@/components/ops';
 import { Card, Loading, Page, Stat, Table, dateTime, label, num } from '@/components/ui';
 import { useGet } from '@/lib/api';
@@ -36,6 +36,7 @@ export default function MyWorkPage() {
 
   return (
     <Page title="My work">
+      <MyAttendance />
       <Loading loading={work.loading && !d} error={work.error} />
       {d && (
         <>

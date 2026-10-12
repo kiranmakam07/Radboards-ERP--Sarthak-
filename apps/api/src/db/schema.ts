@@ -1035,10 +1035,41 @@ export const attendance = pgTable('attendance', {
   checkIn: time('check_in'),
   checkOut: time('check_out'),
   note: text('note'),
+  /** True when the person clocked in themselves from their phone, rather than HR marking the register. */
+  selfMarked: boolean('self_marked').notNull().default(false),
+  /** Where they were when they clocked in and out, and how far that was from the workplace (metres). Null = no location given. */
+  inLat: numeric('in_lat', { precision: 9, scale: 6 }),
+  inLng: numeric('in_lng', { precision: 9, scale: 6 }),
+  inDistanceM: integer('in_distance_m'),
+  outLat: numeric('out_lat', { precision: 9, scale: 6 }),
+  outLng: numeric('out_lng', { precision: 9, scale: 6 }),
+  outDistanceM: integer('out_distance_m'),
   ...stamps,
 }, (t) => [
   unique('attendance_employee_day_uq').on(t.employeeId, t.date),
   index('attendance_date_idx').on(t.date),
+]);
+
+export const leaveRequestStatusEnum = pgEnum('leave_request_status', ['pending', 'approved', 'rejected', 'cancelled']);
+
+/** Leave someone has asked for. Once approved, the days go into the attendance register as Leave. */
+export const leaveRequests = pgTable('leave_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  employeeId: uuid('employee_id').notNull().references(() => employees.id),
+  fromDate: date('from_date').notNull(),
+  toDate: date('to_date').notNull(),
+  /** Working days in the span when it was asked for (weekly offs left out). */
+  days: integer('days').notNull(),
+  reason: text('reason').notNull(),
+  status: leaveRequestStatusEnum('status').notNull().default('pending'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  decisionNote: text('decision_note'),
+  ...stamps,
+}, (t) => [
+  index('leave_requests_employee_idx').on(t.employeeId),
+  index('leave_requests_status_idx').on(t.status),
+  check('leave_requests_span_chk', sql`${t.toDate} >= ${t.fromDate}`),
 ]);
 
 // ----------------------------------------------------------------------------
