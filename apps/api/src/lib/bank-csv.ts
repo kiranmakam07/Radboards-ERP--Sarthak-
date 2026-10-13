@@ -4,6 +4,9 @@ import { D, isIsoDate, money } from '@radcore/shared';
  * Reads a bank statement exported as CSV. Indian banks all lay these out differently, so
  * nothing about the layout is assumed: the header row is found by looking for a date column
  * and an amount column, and each column is recognised by its name.
+ *
+ * A statement that arrives as a PDF is first turned into the same rows and columns
+ * (see bank-pdf.ts) and then read by the same code, so both kinds are understood alike.
  */
 
 export type StatementRow = {
@@ -127,7 +130,7 @@ const FIELDS: Record<string, RegExp[]> = {
   balance: [/balance/],
 };
 
-function detectColumns(header: string[]): Record<string, number> {
+export function detectColumns(header: string[]): Record<string, number> {
   const cols: Record<string, number> = {};
   const names = header.map(norm);
   for (const [field, patterns] of Object.entries(FIELDS)) {
@@ -142,7 +145,7 @@ function detectColumns(header: string[]): Record<string, number> {
   return cols;
 }
 
-const usable = (c: Record<string, number>) =>
+export const usable = (c: Record<string, number>) =>
   c.date !== undefined && ((c.debit !== undefined && c.credit !== undefined) || c.amount !== undefined);
 
 export class StatementFormatError extends Error {}
@@ -168,7 +171,12 @@ function isNewestFirst(rows: StatementRow[]): boolean {
 }
 
 export function parseStatement(text: string): ParsedStatement {
-  const table = parseCsv(text).map((r) => r.map((c) => c.trim()));
+  return parseStatementTable(parseCsv(text));
+}
+
+/** The same reading, for rows and columns that are already apart (a CSV once split, or a table lifted out of a PDF). */
+export function parseStatementTable(cells: string[][]): ParsedStatement {
+  const table = cells.map((r) => r.map((c) => c.trim()));
   // Banks put account details above the table: the header is the first row that names a date and an amount.
   let headerAt = -1;
   let cols: Record<string, number> = {};

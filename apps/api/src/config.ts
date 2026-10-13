@@ -63,6 +63,23 @@ export const config = {
    */
   whatsappPhoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID ?? '',
   whatsappAccessToken: env.WHATSAPP_ACCESS_TOKEN ?? '',
+  /**
+   * A long random text (24 characters or more) that locks the secrets kept in the database, such
+   * as a bank statement's password. Blank = such secrets cannot be saved, only typed each time.
+   * Changing it later makes the saved ones unreadable; they are then entered again.
+   */
+  appSecret: env.APP_SECRET ?? '',
+  /**
+   * The mailbox bank statements are forwarded to, read over IMAP. Give it a mailbox of its own
+   * and an app password, not a person's mailbox. All blank = statements are uploaded by hand.
+   * - cron secret: lets a scheduler ask for the mailbox to be checked (see the README)
+   */
+  bankMailHost: env.BANK_MAIL_HOST ?? '',
+  bankMailPort: Number(env.BANK_MAIL_PORT ?? 993),
+  bankMailUser: env.BANK_MAIL_USER ?? '',
+  bankMailPassword: env.BANK_MAIL_PASSWORD ?? '',
+  bankMailFolder: env.BANK_MAIL_FOLDER ?? 'INBOX',
+  bankMailCronSecret: env.BANK_MAIL_CRON_SECRET ?? env.CRON_SECRET ?? '',
   /** Shopify signs every webhook with this (Settings > Notifications > Webhooks in the Shopify admin). Blank = not connected. */
   shopifyWebhookSecret: env.SHOPIFY_WEBHOOK_SECRET ?? '',
   /**

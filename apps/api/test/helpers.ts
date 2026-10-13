@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import request from 'supertest';
 import { ROLES, gstinCheckChar, type Role } from '@radcore/shared';
-import { createApp } from '../src/app';
+import { createApp, type AppDeps } from '../src/app';
 import type { CrmDeps } from '../src/modules/crm';
 import { config } from '../src/config';
 import { hashPassword } from '../src/core/auth';
@@ -57,6 +57,8 @@ async function freshDatabase(): Promise<{ url: string; drop: () => Promise<void>
 export async function setup(
   getJson: CrmDeps['getJson'] = async () => { throw new Error('no network in tests'); },
   postJson: NonNullable<CrmDeps['postJson']> = async () => { throw new Error('no network in tests'); },
+  /** Stands in for the statements mailbox; with none given, no mailbox is connected. */
+  readMailbox?: AppDeps['readMailbox'],
 ) {
   const database = await freshDatabase();
   const handle = await createDb(database.url, config.migrationsFolder);
@@ -69,7 +71,7 @@ export async function setup(
     address: { line1: '1 Test Road', city: 'Pune', state: 'Maharashtra', pincode: '411001' },
   }, null);
 
-  const app = createApp(db, { getJson, postJson, awaitProcessing: true });
+  const app = createApp(db, { getJson, postJson, awaitProcessing: true, readMailbox });
   const agents = new Map<Role, Agent>();
   const as = async (role: Role): Promise<Agent> => {
     const cached = agents.get(role);

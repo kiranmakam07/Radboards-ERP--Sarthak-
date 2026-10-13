@@ -1,20 +1,43 @@
 import crypto from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { z } from 'zod';
 import { D, money } from '@radcore/shared';
+import { config } from '../config';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { postJournal } from '../core/journal';
 import { rows, type DB } from '../db/client';
-import { accounts, bankLineMatches, bankStatementLines } from '../db/schema';
-import { parseStatement, StatementFormatError } from '../lib/bank-csv';
-import { badRequest, conflict, must } from '../lib/errors';
+import { accounts, bankFeeds, bankLineMatches, bankStatementLines } from '../db/schema';
+import { parseStatement, StatementFormatError, type ParsedStatement } from '../lib/bank-csv';
+import { StatementPasswordError, isPdf, parsePdfStatement } from '../lib/bank-pdf';
+import { AppError, badRequest, conflict, must } from '../lib/errors';
+import { seal, unseal } from '../lib/secret-box';
 import { emptyToNull, inTx, sendList, zDate, zId, zText, wantsFile, type Ctx } from '../lib/http';
 import { createExpense } from './accounting';
 import { createPayment } from './payments';
 
 type Line = typeof bankStatementLines.$inferSelect;
+
+/** A header's value as typed: sent URL-encoded so that any character survives the journey. */
+const decodeHeader = (value: string | undefined): string | null => {
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+/** Keep the password that opens an account's statements, locked. The account gets a feed row if it has none. */
+export async function savePassword(ctx: Ctx, accountId: string, password: string): Promise<void> {
+  const sealed = seal(password);
+  const [feed] = await ctx.tx.select().from(bankFeeds).where(eq(bankFeeds.accountId, accountId));
+  if (feed) await ctx.tx.update(bankFeeds).set({ passwordSealed: sealed, updatedAt: new Date() }).where(eq(bankFeeds.id, feed.id));
+  // A feed needs a rule to recognise mails by; until one is set this cannot match any mail.
+  else await ctx.tx.insert(bankFeeds).values({ accountId, matchSubject: 'statement', passwordSealed: sealed, active: false, createdBy: ctx.user?.id ?? null });
+  await audit(ctx, 'bank_feed', accountId, 'password_saved', null, { saved: true });
+}
 
 /** How far apart the bank's date and our entry's date may be for an automatic match. */
 const MATCH_WINDOW_DAYS = 5;
@@ -92,8 +115,6 @@ export async function autoMatch(ctx: Ctx, accountId: string): Promise<number> {
  * nothing is saved. Rows already imported before (same or overlapping file) are skipped.
  */
 export async function importStatement(ctx: Ctx, accountId: string, csv: string) {
-  const { tx } = ctx;
-  await bankAccount(tx, accountId);
   let parsed;
   try {
     parsed = parseStatement(csv);
@@ -101,6 +122,32 @@ export async function importStatement(ctx: Ctx, accountId: string, csv: string) 
     if (e instanceof StatementFormatError) throw badRequest(e.message);
     throw e;
   }
+  return importParsed(ctx, accountId, parsed);
+}
+
+/**
+ * Import a statement that came as a PDF, as banks email them. `password` opens a locked one.
+ * The reading is checked against the statement's own balances before anything is kept.
+ */
+export async function importPdfStatement(ctx: Ctx, accountId: string, pdf: Uint8Array, password?: string | null) {
+  let parsed;
+  try {
+    parsed = await parsePdfStatement(pdf, password);
+  } catch (e) {
+    if (e instanceof StatementPasswordError) {
+      throw new AppError(422, e.reason === 'needed' ? 'statement_password_needed' : 'statement_password_wrong',
+        e.reason === 'needed' ? 'This statement is locked with a password. Enter the password the bank set for it.' : 'That password did not open the statement. Check it and try again.');
+    }
+    if (e instanceof StatementFormatError) throw badRequest(e.message);
+    throw e;
+  }
+  return importParsed(ctx, accountId, parsed);
+}
+
+/** Keep the rows of a statement that has been read, whichever kind of file it came from. */
+export async function importParsed(ctx: Ctx, accountId: string, parsed: ParsedStatement) {
+  const { tx } = ctx;
+  await bankAccount(tx, accountId);
   if (parsed.errors.length > 0) {
     throw badRequest(`${parsed.errors.length} row(s) in the file could not be read. Nothing was imported.`, { errors: parsed.errors.slice(0, 50) });
   }
@@ -108,7 +155,15 @@ export async function importStatement(ctx: Ctx, accountId: string, csv: string) 
 
   const importId = crypto.randomUUID();
   const seen = new Map<string, number>();
-  const values = parsed.rows.map((r, i) => {
+  // The same transaction can arrive twice worded differently: once in a CSV and once in the emailed PDF, or in a weekly
+  // statement and again in the monthly one. Its date, amount and the balance after it are the same every time.
+  const first = parsed.rows[0]!.txnDate;
+  const last = parsed.rows.at(-1)!.txnDate;
+  const here = new Set((await rows<{ k: string }>(tx, sql`
+    select txn_date::text || '|' || amount::text || '|' || balance::numeric(14,2)::text as k from bank_statement_lines
+     where account_id = ${accountId} and balance is not null and txn_date between ${first < last ? first : last}::date and ${first < last ? last : first}::date`)).map((r) => r.k));
+  const fresh = parsed.rows.filter((r) => r.balance === null || !here.has(`${r.txnDate}|${r.amount}|${r.balance}`));
+  const values = fresh.map((r, i) => {
     const key = `${r.txnDate}|${r.amount}|${r.description}|${r.reference ?? ''}`;
     // Two genuinely identical rows on one day (two equal UPI receipts) stay distinct by their order.
     const nth = (seen.get(key) ?? 0) + 1;
@@ -258,6 +313,27 @@ export function bankRouter(db: DB) {
   r.post('/statements/import', requirePerm('accounts:write'), async (req, res) => {
     const b = z.object({ account_id: zId, csv: z.string().min(1, 'the file is empty') }).parse(req.body);
     res.status(201).json({ data: await inTx(db, req, (ctx) => importStatement(ctx, b.account_id, b.csv)) });
+  });
+
+  /**
+   * A statement as the bank emails it: a PDF, sent here as the file itself with the account in the address.
+   * The password travels in a header so it is never part of an address that might be logged; with none
+   * given, the one saved for the account is tried. `X-Remember-Password: yes` saves the one that worked.
+   */
+  r.post('/statements/import-pdf', requirePerm('accounts:write'), express.raw({ type: () => true, limit: config.maxUploadBytes }), async (req, res) => {
+    const q = z.object({ account_id: zId }).parse(req.query);
+    const body = req.body as Buffer;
+    if (!Buffer.isBuffer(body) || body.length === 0) throw badRequest('The file is empty');
+    if (!isPdf(body)) throw badRequest('This is not a PDF. A statement downloaded as CSV is imported with the other button.');
+    const typed = decodeHeader(req.get('x-statement-password'));
+    const remember = req.get('x-remember-password') === 'yes';
+    const data = await inTx(db, req, async (ctx) => {
+      const [feed] = await ctx.tx.select().from(bankFeeds).where(eq(bankFeeds.accountId, q.account_id));
+      const result = await importPdfStatement(ctx, q.account_id, body, typed ?? unseal(feed?.passwordSealed));
+      if (typed && remember) await savePassword(ctx, q.account_id, typed);
+      return result;
+    });
+    res.status(201).json({ data });
   });
 
   /** The reconciliation screen: statement lines, the book entries still unmatched, and the totals. */

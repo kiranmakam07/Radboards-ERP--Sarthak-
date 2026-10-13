@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ActionButton, Badge, Card, CsvLink, ErrorBox, Loading, Notice, Page, Stat, Table, date, inr, label } from '@/components/ui';
+import { ImportStatement, StatementsByEmail } from '@/components/bank-mail';
+import { ActionButton, Badge, Card, CsvLink, ErrorBox, Loading, Page, Stat, Table, date, inr, label } from '@/components/ui';
 import { post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
 /**
  * Bank reconciliation (PRD 7.8): import the bank's statement, see which lines the books
  * already explain, and deal with the rest - match by hand, or book the missing entry.
+ * The statement comes in as a file chosen here, or by itself from the statements mailbox.
  */
 export default function BankPage() {
   const can = useCan();
@@ -15,10 +17,8 @@ export default function BankPage() {
   const accounts = useGet<{ data: any[] }>('/bank/accounts');
   const [accountId, setAccountId] = useState('');
   const [status, setStatus] = useState('unmatched');
-  const [imported, setImported] = useState<any | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [booking, setBooking] = useState<string | null>(null);
+  const [mailTick, setMailTick] = useState(0);
   const [combining, setCombining] = useState<string | null>(null);
 
   useEffect(() => {
@@ -30,26 +30,11 @@ export default function BankPage() {
   const r = data?.data;
   const refresh = () => { reload(); accounts.reload(); setBooking(null); setCombining(null); };
 
-  async function importFile(file: File | undefined) {
-    if (!file) return;
-    setBusy(true); setImportError(null); setImported(null);
-    try {
-      const res = await post('/bank/statements/import', { account_id: accountId, csv: await file.text() });
-      setImported(res.data);
-      refresh();
-    } catch (e) {
-      const details = (e as any).details?.errors as { row: number; message: string }[] | undefined;
-      setImportError(`${(e as Error).message}${details ? ` ${details.slice(0, 5).map((d) => `Row ${d.row}: ${d.message}.`).join(' ')}` : ''}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <Page title="Bank reconciliation" actions={path ? <CsvLink href={`/bank/reconciliation${qs({ account_id: accountId })}`} /> : null}>
       <Loading loading={accounts.loading} error={accounts.error} />
       <div className="filters">
-        <select value={accountId} onChange={(e) => { setAccountId(e.target.value); setImported(null); }}>
+        <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
           {(accounts.data?.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}{a.unmatched_lines ? ` (${a.unmatched_lines} to reconcile)` : ''}</option>)}
         </select>
         {['unmatched', 'matched', 'ignored', ''].map((s) => (
@@ -57,20 +42,9 @@ export default function BankPage() {
         ))}
       </div>
 
-      {write && accountId && (
-        <Card title="Import a bank statement">
-          <p className="muted small">Download the statement from the bank as CSV and choose the file. Importing the same period twice is safe: lines already here are skipped.</p>
-          <input type="file" accept=".csv,text/csv,text/plain" disabled={busy} onChange={(e) => { void importFile(e.target.files?.[0]); e.target.value = ''; }} />
-          {busy && <span className="muted"> Importing…</span>}
-          <ErrorBox error={importError} />
-          {imported && (
-            <Notice>
-              {imported.imported} line(s) imported for {date(imported.from)} to {date(imported.to)}; {imported.already_present} were already here;{' '}
-              {imported.auto_matched} matched automatically.
-            </Notice>
-          )}
-        </Card>
-      )}
+      {write && accountId && <ImportStatement key={accountId} accountId={accountId} onDone={() => { refresh(); setMailTick((t) => t + 1); }} />}
+      {/* Remounted after an import here, so a password just remembered shows as saved. */}
+      {accountId && <StatementsByEmail key={mailTick} accountId={accountId} onImported={refresh} />}
 
       <Loading loading={loading} error={error} />
       {r && (

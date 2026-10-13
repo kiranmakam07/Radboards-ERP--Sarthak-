@@ -34,6 +34,7 @@ Status: ✅ in RadCore · 🔨 being built now · 🔌 built, waits for an accou
 | **Bill sent to the customer on WhatsApp** | ✅ | A link the customer opens, no sign-in; shows what is still to pay |
 | Party statement | ✅ | Sent on WhatsApp with the reminder |
 | Expenses with GST, bank and cash books, bank reconciliation | ✅ | Reconciliation goes further than Vyapar's |
+| **Bank transactions without typing them in** | 🔌 | The bank's emailed statement (locked PDF) is read and matched to the books. By hand today; by itself once the statements mailbox exists |
 | **Cash put in the bank, cash drawn, bank to bank** | ✅ | Accounts → Cash & bank transfers |
 | **Profit on each bill** | ✅ | Books & reports → Profit by bill |
 | Sales, stock, profit, GST reports; trial balance, P&L, balance sheet | ✅ | |
