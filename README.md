@@ -194,6 +194,49 @@ other order. The channel's own order number is kept on it, so nothing is taken i
 - An order with a SKU that no item here has is kept on the screen with the reason. Add the item (or
   fix the SKU), then press **Try the stuck ones again**.
 
+## Bank statements by email
+
+The bank emails the statement as a PDF, usually locked with a password. RadCore reads that PDF, so
+nobody types the statement in: the lines land on **Accounts → Bank reconciliation**, the ones the
+books already have (a receipt entered when the money came) are matched by themselves, and the rest
+wait there for someone to say what each was. Lines already imported are never added twice, even
+when a weekly statement and the monthly one cover the same days.
+
+It works in two ways, and the first needs nothing set up:
+
+1. **By hand.** On the Bank reconciliation screen choose the PDF from the bank's mail (or a CSV
+   downloaded from the bank). A locked PDF asks for its password, which can be remembered for
+   that account.
+2. **By itself.** Give RadCore a mailbox of its own and have the statement mails forwarded to it:
+   - Create a mailbox used for nothing else (say `statements@your-domain`). Switch IMAP on for it
+     and make an **app password**. Set `BANK_MAIL_HOST`, `BANK_MAIL_USER` and `BANK_MAIL_PASSWORD`
+     on the server (on Vercel: Environment Variables, then redeploy), together with `APP_SECRET`.
+   - In the mailbox where the bank's mail arrives, add a forwarding rule that sends mail from the
+     bank's statement address to that mailbox. An automatic forward keeps the bank as the sender.
+     The bank's own e-statement setting decides how often it comes (monthly, weekly or daily).
+   - On the Bank reconciliation screen, under **Statements by email**, say for each bank account
+     how its mails are recognised (words in the sender's address and in the subject) and enter the
+     statement's password.
+   - The mailbox is read when someone opens that screen (at most every half hour), when **Check
+     the mailbox now** is pressed, and whenever a scheduler calls
+     `GET https://<domain>/api/hooks/bank-mail/check` with the header
+     `Authorization: Bearer <BANK_MAIL_CRON_SECRET>` (a cron job on the server, or the host's own
+     scheduler).
+
+What keeps this safe: the app can read that one mailbox and nothing else, and only reads (it never
+deletes, moves or sends). A mail is touched only if it fits an account's rule; everything else is
+listed as left alone. Only attachments are used, each checked by its content. A statement is kept
+only if its figures add up (every printed balance must follow from the one before), so a misread
+layout imports nothing rather than something wrong. The statement's password is stored locked
+with `APP_SECRET` and is never shown again. Every mail is listed with what became of it, and one
+that could not be imported can be tried again after the password or the rule is put right.
+
+The PDF reader works the table out from where the text sits on the page, so it does not depend on
+one bank's layout. It has been tested on statements made up in several layouts; it has **not been
+tried on a real statement from the bank yet**, and the mailbox connection has not been tried
+against a real mail service. If a real statement is refused, the message says what was read, and
+the bank's CSV download still works.
+
 ## Commands
 
 | Command | What it does |

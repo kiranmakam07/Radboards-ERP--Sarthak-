@@ -8,7 +8,9 @@ import type { DB } from './db/client';
 import { AppError, errorHandler, forbidden } from './lib/errors';
 import { accountingRouter } from './modules/accounting';
 import { authRouter, mastersRouter, settingsRouter, usersRouter } from './modules/admin';
+import { readMailbox } from './lib/mailbox';
 import { bankRouter } from './modules/bank';
+import { bankMailHookRouter, bankMailRouter, type MailDeps } from './modules/bank-mail';
 import { collectRouter, publicInvoiceRouter } from './modules/collect';
 import { crmRouter, defaultDeps, hooksRouter, type CrmDeps } from './modules/crm';
 import { dashboardsRouter } from './modules/dashboards';
@@ -71,7 +73,18 @@ function snakeKeys(value: unknown): unknown {
   return value;
 }
 
-export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
+/** Everything the app reaches outside itself for, so that tests can stand in for the outside world. */
+export type AppDeps = CrmDeps & MailDeps;
+
+/** The statements mailbox, when one is set on the server. */
+const mailboxReader: MailDeps['readMailbox'] = config.bankMailHost && config.bankMailUser && config.bankMailPassword
+  ? (opts) => readMailbox({
+      host: config.bankMailHost, port: config.bankMailPort, user: config.bankMailUser, password: config.bankMailPassword, folder: config.bankMailFolder,
+    }, opts)
+  : undefined;
+export const defaultAppDeps: AppDeps = { ...defaultDeps, readMailbox: mailboxReader };
+
+export function createApp(db: DB, crmDeps: AppDeps = defaultAppDeps) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
@@ -108,6 +121,7 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
   // with a signature or a key. Their servers send in bursts, so the limit is far looser than for people.
   const hookLimiter = rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: true, legacyHeaders: false,
     skip: () => config.env === 'test' });
+  app.use('/api/hooks/bank-mail', hookLimiter, bankMailHookRouter(db, crmDeps));
   app.use('/api/hooks/form', express.urlencoded({ extended: false, limit: '100kb' }));
   app.use('/api/hooks', hookLimiter, hooksRouter(db, crmDeps));
 
@@ -133,6 +147,7 @@ export function createApp(db: DB, crmDeps: CrmDeps = defaultDeps) {
   app.use('/api/purchasing', purchasingRouter(db));
   app.use('/api/stock', inventoryRouter(db));
   app.use('/api/accounting', accountingRouter(db));
+  app.use('/api/bank', bankMailRouter(db, crmDeps));
   app.use('/api/bank', bankRouter(db));
   app.use('/api/gst', gstRouter(db));
   app.use('/api/tds', tdsRouter(db));

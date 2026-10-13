@@ -5,6 +5,9 @@ if (process.env.NODE_ENV === 'production') {
   process.exit(1);
 }
 process.env.DATABASE_URL = 'memory://';
+// So the demo can show a statement password being saved. Nothing here outlives the process, and a
+// real server is given its own long random APP_SECRET.
+process.env.APP_SECRET ??= 'demo-only-not-a-secret-0123456789';
 
 // Imported after the environment is set, because config reads it at import time.
 const { createApp } = await import('./app');

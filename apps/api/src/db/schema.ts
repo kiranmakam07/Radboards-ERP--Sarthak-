@@ -948,6 +948,47 @@ export const fileContents = pgTable('file_contents', {
 });
 
 /**
+ * Statements by email: for one bank account, how its statement mails are recognised (words in the
+ * sender's address and in the subject) and the password that opens the attached PDF. The
+ * password is kept locked (lib/secret-box.ts) and is never sent to a screen.
+ */
+export const bankFeeds = pgTable('bank_feeds', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  accountId: uuid('account_id').notNull().unique().references(() => accounts.id),
+  matchFrom: text('match_from'),
+  matchSubject: text('match_subject'),
+  passwordSealed: text('password_sealed'),
+  active: boolean('active').notNull().default(true),
+  ...stamps,
+}, (t) => [check('bank_feeds_rule_chk', sql`${t.matchFrom} is not null or ${t.matchSubject} is not null`)]);
+
+/**
+ * Every mail the statements mailbox received, one row per attachment, and what became of it.
+ * The mail's own id makes sure a mail is dealt with once however often the mailbox is read. The
+ * attachment is kept while it has not been imported, so it can be tried again after the
+ * password or the rule is put right.
+ */
+export const bankMails = pgTable('bank_mails', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  messageId: text('message_id').notNull(),
+  part: integer('part').notNull().default(0),
+  fromAddress: text('from_address'),
+  subject: text('subject'),
+  receivedAt: ts('received_at'),
+  accountId: uuid('account_id').references(() => accounts.id),
+  attachmentName: text('attachment_name'),
+  attachment: bytea('attachment'),
+  status: text('status').notNull(),
+  detail: text('detail'),
+  importId: uuid('import_id'),
+  result: jsonb('result'),
+  ...stamps,
+}, (t) => [
+  unique('bank_mails_message_uq').on(t.messageId, t.part),
+  check('bank_mails_status_chk', sql`${t.status} in ('imported', 'failed', 'ignored')`),
+]);
+
+/**
  * What was spent on advertising, so the marketing dashboard can show cost per lead. An entry is
  * for a lead source, and optionally for one campaign within it (`detail` is the campaign name as
  * it appears on the leads). This is a marketing record: the payment itself is booked under Expenses.

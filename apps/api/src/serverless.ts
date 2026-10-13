@@ -1,10 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import express, { type Express } from 'express';
-import { createApp } from './app';
+import { createApp, defaultAppDeps } from './app';
 import { config } from './config';
 import { loadPermissionOverrides } from './core/settings';
 import { createDb, isPostgresUrl, type DB } from './db/client';
-import { defaultDeps } from './modules/crm';
 
 /**
  * The API as one request handler, for a host that runs it per request instead of as a server
@@ -72,7 +71,7 @@ async function start() {
   // Few connections per running copy: the host starts more copies under load, and a hosted database caps the total.
   const { db } = await createDb(config.databaseUrl, config.migrationsFolder, { migrate: false, poolSize: 5 });
   // Leads are created before the webhook is answered: nothing is guaranteed to keep running afterwards.
-  return { app: createApp(db, { ...defaultDeps, awaitProcessing: true }), db };
+  return { app: createApp(db, { ...defaultAppDeps, awaitProcessing: true }), db };
 }
 
 export const handle = makeHandler(start);
