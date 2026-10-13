@@ -40,6 +40,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/purchasing/orders', label: 'Purchase orders', perm: 'purchasing:read' },
     { href: '/purchasing/receipts', label: 'Inward & QC', perm: 'purchasing:read' },
     { href: '/stock', label: 'Stock', perm: 'stock:read' },
+    { href: '/jobwork', label: 'Job work', perm: 'jobwork:read' },
     { href: '/items', label: 'Items', perm: 'items:read' },
   ] },
   { group: 'Accounts', items: [

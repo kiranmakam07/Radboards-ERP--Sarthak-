@@ -34,7 +34,7 @@ export async function valuation(tx: DB, itemId: string): Promise<{ qty: Decimal;
   return { qty: D(r?.qty ?? 0), value: D(r?.value ?? 0) };
 }
 
-export async function locationByType(tx: DB, type: 'stores' | 'showroom' | 'rejected'): Promise<string> {
+export async function locationByType(tx: DB, type: 'stores' | 'showroom' | 'rejected' | 'job_work'): Promise<string> {
   const [loc] = await tx
     .select({ id: locations.id })
     .from(locations)
@@ -43,6 +43,16 @@ export async function locationByType(tx: DB, type: 'stores' | 'showroom' | 'reje
     .limit(1);
   if (!loc) throw badRequest(`No active "${type}" location is set up`);
   return loc.id;
+}
+
+/**
+ * Stock lying with job workers is moved only by a job work challan and what is recorded against it,
+ * so the challans and the stock can never disagree. A sale, a transfer or a count cannot touch it.
+ */
+export async function assertNotWithJobWorkers(tx: DB, locationId: string, refType: string): Promise<void> {
+  if (refType.startsWith('job_work')) return;
+  const [loc] = await tx.select({ type: locations.type }).from(locations).where(eq(locations.id, locationId));
+  if (loc?.type === 'job_work') throw badRequest('Stock that is with job workers moves only on a job work challan');
 }
 
 type MoveBase = {
@@ -59,6 +69,7 @@ type MoveBase = {
 export async function stockIn(ctx: Ctx, m: MoveBase & { unitCost: Num }): Promise<Decimal> {
   const q = D(m.qty);
   if (q.lte(0)) throw badRequest('Stock-in quantity must be more than 0');
+  await assertNotWithJobWorkers(ctx.tx, m.locationId, m.refType);
   const value = round2(q.times(D(m.unitCost)));
   await ctx.tx.insert(stockMovements).values({
     itemId: m.itemId,
@@ -88,6 +99,7 @@ export async function stockOut(
   const { tx } = ctx;
   const q = D(m.qty);
   if (q.lte(0)) throw badRequest('Stock-out quantity must be more than 0');
+  await assertNotWithJobWorkers(tx, m.locationId, m.refType);
 
   const available = await onHand(tx, m.itemId, m.locationId);
   if (available.lt(q)) {

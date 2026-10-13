@@ -49,6 +49,7 @@ export default function StockPage() {
             { key: 'stores_qty', title: 'Stores', align: 'right', render: (r) => num(r.stores_qty) },
             { key: 'showroom_qty', title: 'Showroom', align: 'right', render: (r) => num(r.showroom_qty) },
             { key: 'available_qty', title: 'Available', align: 'right', render: (r) => <strong>{num(r.available_qty)}</strong> },
+            { key: 'job_work_qty', title: 'With job workers', align: 'right', render: (r) => (Number(r.job_work_qty) ? num(r.job_work_qty) : '') },
             { key: 'rejected_qty', title: 'Rejected', align: 'right', render: (r) => (Number(r.rejected_qty) ? <span className="error small">{num(r.rejected_qty)}</span> : '') },
             { key: 'reorder_level', title: 'Reorder at', align: 'right', render: (r) => num(r.reorder_level) },
             { key: 'avg_cost', title: 'Avg cost', align: 'right', render: (r) => inr(r.avg_cost) },

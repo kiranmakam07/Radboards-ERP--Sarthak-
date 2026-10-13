@@ -10,7 +10,9 @@ export type PartyType = (typeof PARTY_TYPES)[number];
 export const ITEM_TYPES = ['raw_material', 'finished_good', 'spare_part', 'service'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
-export const LOCATION_TYPES = ['stores', 'showroom', 'rejected'] as const;
+// 'job_work' is where our material lies while an outside worker has it: still ours, not on our shelves.
+// New kinds are added at the end: the database enum only ever grows.
+export const LOCATION_TYPES = ['stores', 'showroom', 'rejected', 'job_work'] as const;
 export type LocationType = (typeof LOCATION_TYPES)[number];
 
 export const LEAD_STAGES = ['new', 'contacted', 'interested', 'meeting_booked', 'converted', 'lost'] as const;
@@ -67,7 +69,7 @@ export const BILL_DOC_TYPES = ['bill', 'debit_note'] as const;
 export const BILL_STATUSES = ['posted', 'cancelled'] as const;
 
 export const MOVEMENT_TYPES = [
-  'opening', 'purchase_in', 'sale_out', 'sales_return_in', 'purchase_return_out', 'transfer', 'adjustment',
+  'opening', 'purchase_in', 'sale_out', 'sales_return_in', 'purchase_return_out', 'transfer', 'adjustment', 'job_work',
 ] as const;
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
 
@@ -195,6 +197,9 @@ export const PERMISSIONS = {
   'stock:read': ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin'],
   'stock:write': ['stores', 'admin'],
   'stock:approve': ['owner', 'admin'],
+  // Job work: material sent to an outside worker on a challan, and what comes back.
+  'jobwork:read': ['owner', 'stores', 'accounts', 'operations', 'admin'],
+  'jobwork:write': ['stores', 'operations', 'admin'],
 
   'payments:read': ['owner', 'accounts', 'admin'],
   'payments:write': ['accounts', 'admin'],

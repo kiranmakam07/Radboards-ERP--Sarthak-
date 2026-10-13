@@ -20,6 +20,7 @@ import { tdsRouter } from './modules/tds';
 import { hrRouter } from './modules/hr';
 import { hrSelfRouter } from './modules/hr-self';
 import { inventoryRouter } from './modules/inventory';
+import { jobWorkRouter } from './modules/jobwork';
 import { itemsRouter } from './modules/items';
 import { leadToolsRouter } from './modules/lead-tools';
 import { leadsRouter, publicLeadsRouter } from './modules/leads';
@@ -146,6 +147,7 @@ export function createApp(db: DB, crmDeps: AppDeps = defaultAppDeps) {
   app.use('/api/payments', paymentsRouter(db));
   app.use('/api/purchasing', purchasingRouter(db));
   app.use('/api/stock', inventoryRouter(db));
+  app.use('/api/jobwork', jobWorkRouter(db));
   app.use('/api/accounting', accountingRouter(db));
   app.use('/api/bank', bankMailRouter(db, crmDeps));
   app.use('/api/bank', bankRouter(db));

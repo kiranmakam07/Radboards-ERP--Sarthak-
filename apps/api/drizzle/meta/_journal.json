@@ -148,6 +148,13 @@
       "when": 1791885789834,
       "tag": "0020_bank_mail",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791889100034,
+      "tag": "0021_job_work",
+      "breakpoints": true
     }
   ]
 }

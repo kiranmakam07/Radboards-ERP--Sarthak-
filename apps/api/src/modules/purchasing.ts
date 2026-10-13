@@ -13,13 +13,15 @@ import { getCompany } from '../core/settings';
 import { locationByType, lockItems, stockIn, stockOut } from '../core/stock';
 import { rows, type DB } from '../db/client';
 import {
-  goodsReceiptLines, goodsReceipts, items, parties, purchaseBillLines, purchaseBills, purchaseOrderLines, purchaseOrders,
+  goodsReceiptLines, goodsReceipts, items, jobWorks, parties, purchaseBillLines, purchaseBills, purchaseOrderLines, purchaseOrders,
   purchaseReturnLines, purchaseReturns,
 } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
 import {
   emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSignedMoney, zText, type Ctx,
 } from '../lib/http';
+
+import { chargeState } from './jobwork';
 
 type PO = typeof purchaseOrders.$inferSelect;
 type Bill = typeof purchaseBills.$inferSelect;
@@ -198,6 +200,8 @@ export async function createPurchaseBill(
   input: {
     supplierId: string; purchaseOrderId?: string | null; supplierInvoiceNo: string; billDate: string; dueDate?: string | null;
     roundOff?: string | null; notes?: string | null; lines: BillLineInput[];
+    /** The job work challan this bill is the job worker's charge for. */
+    jobWorkId?: string | null;
   },
 ): Promise<Bill> {
   const { tx } = ctx;
@@ -265,6 +269,19 @@ export async function createPurchaseBill(
   if (roundOff.abs().gt(10)) throw badRequest('Round-off on a supplier bill cannot be more than 10 rupees');
   const grand = totals.grandTotal.plus(roundOff);
 
+  // A job worker's bill first settles the charges that were added to the cost of the goods when they came
+  // back (they are already in stock, so they must not be expensed again); anything beyond that is an expense.
+  let jobWorkCleared = D(0);
+  if (input.jobWorkId) {
+    const [job] = await tx.select().from(jobWorks).where(eq(jobWorks.id, input.jobWorkId)).for('update');
+    must(job, 'Job work challan');
+    if (job!.jobWorkerId !== supplier.id) throw badRequest(`Challan ${job!.challanNo} was sent to a different job worker`);
+    if (job!.status === 'cancelled') throw conflict(`Challan ${job!.challanNo} is cancelled`);
+    const c = await chargeState(tx, job!.id);
+    const open = c.added.minus(c.billed);
+    jobWorkCleared = open.lte(0) ? D(0) : serviceTaxable.lt(open) ? serviceTaxable : open;
+  }
+
   const { number, fy } = await nextNumber(tx, 'purchase_bill', input.billDate);
   const [bill] = await tx
     .insert(purchaseBills)
@@ -275,6 +292,7 @@ export async function createPurchaseBill(
       taxableTotal: money(totals.taxableTotal), cgstTotal: money(totals.cgstTotal), sgstTotal: money(totals.sgstTotal),
       igstTotal: money(totals.igstTotal), roundOff: money(roundOff), grandTotal: money(grand),
       mismatches: mismatches.length ? mismatches : null, notes: input.notes ?? null, createdBy: ctx.user?.id ?? null,
+      jobWorkId: input.jobWorkId ?? null, jobWorkCleared: money(jobWorkCleared),
     })
     .returning();
   await tx.insert(purchaseBillLines).values(lineRows.map((l) => ({ ...l, billId: bill!.id })));
@@ -286,7 +304,8 @@ export async function createPurchaseBill(
     narration: `Purchase bill ${input.supplierInvoiceNo} from ${supplier.name} (${number})`,
     lines: [
       { account: 'grni', debit: stockTaxable },
-      { account: 'purchases', debit: serviceTaxable },
+      { account: 'job_work_accrued', partyId: supplier.id, debit: jobWorkCleared },
+      { account: 'purchases', debit: serviceTaxable.minus(jobWorkCleared) },
       { account: 'input_cgst', debit: totals.cgstTotal },
       { account: 'input_sgst', debit: totals.sgstTotal },
       { account: 'input_igst', debit: totals.igstTotal },
@@ -636,10 +655,11 @@ export function purchasingRouter(db: DB) {
   r.get('/bills/:id', requirePerm('purchasing:read'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const [bill] = await rows(db, sql`
-      select b.*, s.name as supplier_name, s.gstin as supplier_gstin, s.billing_address as supplier_address, po.po_no,
+      select b.*, s.name as supplier_name, s.gstin as supplier_gstin, s.billing_address as supplier_address, po.po_no, jw.challan_no as job_work_challan_no,
              o.allocated, o.debited, o.outstanding, o.payment_status
         from purchase_bills b join parties s on s.id = b.supplier_id
         left join purchase_orders po on po.id = b.purchase_order_id
+        left join job_works jw on jw.id = b.job_work_id
         left join v_bill_outstanding o on o.bill_id = b.id where b.id = ${id}`);
     must(bill, 'Purchase bill');
     const lines = await rows(db, sql`
@@ -663,6 +683,7 @@ export function purchasingRouter(db: DB) {
       due_date: emptyToNull(zDate).optional(),
       round_off: emptyToNull(zSignedMoney).optional(),
       notes: emptyToNull(z.string().trim().max(2000)).optional(),
+      job_work_id: emptyToNull(zId).optional(),
       lines: z.array(z.object({
         po_line_id: emptyToNull(zId).optional(), item_id: emptyToNull(zId).optional(), qty: zQty, rate: zMoney,
         description: emptyToNull(z.string().trim().max(300)).optional(),
@@ -671,7 +692,7 @@ export function purchasingRouter(db: DB) {
     const bill = await inTx(db, req, (ctx) =>
       createPurchaseBill(ctx, {
         supplierId: b.supplier_id, purchaseOrderId: b.purchase_order_id, supplierInvoiceNo: b.supplier_invoice_no, billDate: b.bill_date,
-        dueDate: b.due_date, roundOff: b.round_off, notes: b.notes,
+        dueDate: b.due_date, roundOff: b.round_off, notes: b.notes, jobWorkId: b.job_work_id,
         lines: b.lines.map((l) => ({ poLineId: l.po_line_id, itemId: l.item_id, qty: l.qty, rate: l.rate, description: l.description })),
       }));
     res.status(201).json({ data: bill });

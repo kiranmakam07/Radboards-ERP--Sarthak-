@@ -85,7 +85,7 @@ export function itemsRouter(db: DB) {
         left join item_categories c on c.id = i.category_id
         left join (
           select m.item_id,
-                 sum(m.qty) filter (where l.type <> 'rejected') as sellable,
+                 sum(m.qty) filter (where l.type in ('stores', 'showroom')) as sellable,
                  sum(m.qty) filter (where l.type = 'showroom') as showroom,
                  sum(m.qty) filter (where l.type = 'stores') as stores,
                  sum(m.qty) filter (where l.type = 'rejected') as rejected

@@ -31,6 +31,7 @@ const COA: Coa[] = [
   { code: '2210', name: 'Output SGST', type: 'liability', key: 'output_sgst', parent: '2000' },
   { code: '2220', name: 'Output IGST', type: 'liability', key: 'output_igst', parent: '2000' },
   { code: '2300', name: 'Goods Received Not Billed', type: 'liability', key: 'grni', parent: '2000' },
+  { code: '2310', name: 'Job Work Charges to be Billed', type: 'liability', key: 'job_work_accrued', parent: '2000' },
   { code: '2400', name: 'Salaries Payable', type: 'liability', key: 'salaries_payable', parent: '2000' },
   { code: '2410', name: 'PF Payable', type: 'liability', key: 'pf_payable', parent: '2000' },
   { code: '2420', name: 'ESIC Payable', type: 'liability', key: 'esic_payable', parent: '2000' },
@@ -141,6 +142,7 @@ export async function seedDefaults(db: DB): Promise<void> {
         { name: 'Stores', type: 'stores' },
         { name: 'Showroom', type: 'showroom' },
         { name: 'Rejected', type: 'rejected' },
+        { name: 'With job workers', type: 'job_work' },
       ])
       .onConflictDoNothing();
 

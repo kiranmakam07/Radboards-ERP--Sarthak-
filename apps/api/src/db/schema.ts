@@ -390,6 +390,90 @@ export const stockAdjustmentLines = pgTable('stock_adjustment_lines', {
 });
 
 // ----------------------------------------------------------------------------
+// Job work: our material sent to an outside worker on a challan, and what comes back
+// ----------------------------------------------------------------------------
+export const jobWorkStatusEnum = pgEnum('job_work_status', ['open', 'closed', 'cancelled']);
+
+/**
+ * The challan the material travels on. The material stays ours: it moves to the "With job
+ * workers" place in stock and its value does not change. The challan is open until every unit
+ * sent has been accounted for (come back, used up in what was made, or lost).
+ */
+export const jobWorks = pgTable('job_works', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  challanNo: text('challan_no').notNull().unique(),
+  challanDate: date('challan_date').notNull(),
+  jobWorkerId: uuid('job_worker_id').notNull().references(() => parties.id),
+  fromLocationId: uuid('from_location_id').notNull().references(() => locations.id),
+  /** What is to be done to the material: powder coating, welding, painting. Printed on the challan. */
+  process: text('process').notNull(),
+  expectedBackOn: date('expected_back_on'),
+  /** How it travels (vehicle number, transporter), for the challan. */
+  transport: text('transport'),
+  notes: text('notes'),
+  status: jobWorkStatusEnum('status').notNull().default('open'),
+  closedAt: ts('closed_at'),
+  ...stamps,
+}, (t) => [index('job_works_worker_idx').on(t.jobWorkerId), index('job_works_status_idx').on(t.status)]);
+
+/** What was sent, at what it stood in the books that day. How much is still out is worked out from the receipts. */
+export const jobWorkLines = pgTable('job_work_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  jobWorkId: uuid('job_work_id').notNull().references(() => jobWorks.id),
+  itemId: uuid('item_id').notNull().references(() => items.id),
+  qty: qty('qty').notNull(),
+  unitCost: money('unit_cost').notNull(),
+  value: numeric('value', { precision: 14, scale: 2 }).notNull(),
+  ...stamps,
+}, (t) => [
+  unique('job_work_lines_item_uq').on(t.jobWorkId, t.itemId),
+  check('job_work_lines_qty_pos', sql`${t.qty} > 0`),
+]);
+
+/**
+ * One occasion on which something came back (or was written off) against a challan. `charge` is
+ * the job worker's charge for this lot before GST, when it is to be part of the cost of the goods:
+ * it is added to their value and owed until the job worker's bill is booked.
+ */
+export const jobWorkReceipts = pgTable('job_work_receipts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  receiptNo: text('receipt_no').notNull().unique(),
+  jobWorkId: uuid('job_work_id').notNull().references(() => jobWorks.id),
+  receivedOn: date('received_on').notNull(),
+  toLocationId: uuid('to_location_id').notNull().references(() => locations.id),
+  workerChallanNo: text('worker_challan_no'),
+  charge: money('charge').notNull().default('0'),
+  notes: text('notes'),
+  status: postedStatusEnum('status').notNull().default('posted'),
+  ...stamps,
+}, (t) => [index('job_work_receipts_job_idx').on(t.jobWorkId), check('job_work_receipts_charge_chk', sql`${t.charge} >= 0`)]);
+
+/**
+ * What a receipt did, line by line:
+ * - returned: material that came back as the same item
+ * - consumed: material used up at the job worker in making the produced goods
+ * - produced: the goods made from it, valued at what was consumed (plus the charge)
+ * - lost:     material that will not come back (damaged or missing), written off
+ * `value` is the stock value the line moved, kept so that a receipt can be undone exactly.
+ */
+export const jobWorkReceiptLines = pgTable('job_work_receipt_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  receiptId: uuid('receipt_id').notNull().references(() => jobWorkReceipts.id),
+  kind: text('kind').notNull(),
+  /** The challan line this is about; empty for the produced goods. */
+  jobWorkLineId: uuid('job_work_line_id').references(() => jobWorkLines.id),
+  itemId: uuid('item_id').notNull().references(() => items.id),
+  qty: qty('qty').notNull(),
+  value: numeric('value', { precision: 14, scale: 2 }).notNull(),
+  /** For a returned line: the share of the charge added to its value on the way back in. */
+  chargeShare: money('charge_share').notNull().default('0'),
+}, (t) => [
+  index('job_work_receipt_lines_receipt_idx').on(t.receiptId),
+  check('job_work_receipt_lines_kind_chk', sql`${t.kind} in ('returned', 'consumed', 'produced', 'lost')`),
+  check('job_work_receipt_lines_qty_pos', sql`${t.qty} > 0`),
+]);
+
+// ----------------------------------------------------------------------------
 // 8.6 sales orders (a Draft order is the quote)
 // ----------------------------------------------------------------------------
 export const salesOrders = pgTable('sales_orders', {
@@ -566,6 +650,12 @@ export const purchaseBills = pgTable('purchase_bills', {
   grandTotal: money('grand_total').notNull(),
   /** Quantity/rate mismatches against the PO or receipt (PRD 7.7). */
   mismatches: jsonb('mismatches'),
+  /**
+   * A job worker's bill for a challan. `jobWorkCleared` is how much of the bill settled charges
+   * that had already been added to the cost of goods when they came back; the rest is an expense.
+   */
+  jobWorkId: uuid('job_work_id').references(() => jobWorks.id),
+  jobWorkCleared: money('job_work_cleared').notNull().default('0'),
   status: billStatusEnum('status').notNull().default('posted'),
   notes: text('notes'),
   ...stamps,
