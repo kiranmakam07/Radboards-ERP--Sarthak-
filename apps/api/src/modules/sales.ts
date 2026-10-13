@@ -553,13 +553,13 @@ export async function cancelInvoice(
     await unapplyAllOn(ctx, id, `Invoice ${inv!.invoiceNo} cancelled`);
 
     const paid = await rows<{ payment_id: string; payment_no: string; amount: string; allocated_here: string; allocated_all: string }>(tx, sql`
-      select p.id as payment_id, p.payment_no, p.amount::text,
+      select p.id as payment_id, p.payment_no, (p.amount + p.tds_amount)::text as amount,
              sum(pa.amount) filter (where pa.invoice_id = ${id})::text as allocated_here,
              sum(pa.amount)::text as allocated_all
         from payments p join payment_allocations pa on pa.payment_id = p.id
        where p.status = 'posted'
          and p.id in (select payment_id from payment_allocations where invoice_id = ${id})
-       group by p.id, p.payment_no, p.amount`);
+       group by p.id, p.payment_no, p.amount, p.tds_amount`);
     if (paid.length > 0) {
       if (!input.cancelPayments) {
         throw conflict('Payments are allocated to this invoice. Cancel them too, or raise a credit note instead.',

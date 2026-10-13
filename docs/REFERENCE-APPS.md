@@ -37,6 +37,10 @@ Status: ✅ in RadCore · 🔨 being built now · 🔌 built, waits for an accou
 | **Cash put in the bank, cash drawn, bank to bank** | ✅ | Accounts → Cash & bank transfers |
 | **Profit on each bill** | ✅ | Books & reports → Profit by bill |
 | Sales, stock, profit, GST reports; trial balance, P&L, balance sheet | ✅ | |
+| **Day book and all transactions** | ✅ | Books & reports → Day book: a day or a range, with money in and out |
+| **Party-wise profit** | ✅ | Books & reports → Profit by customer |
+| **Sales summary by HSN** | ✅ | Books & reports → Sales by HSN; the same figures as GSTR-1 |
+| **TDS payable and TDS receivable** | ✅ | Entered on the payment, expense or receipt; Books & reports → TDS adds it up and records deposits |
 | GSTR-1 for the portal | ✅ | |
 | E-invoice and e-way bill | ⏭ | Needs registration with a GST service provider |
 | Bill formats with logo; thermal printer | ✅ | Logo on the bill: ⏭ |

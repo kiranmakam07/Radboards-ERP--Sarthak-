@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { PARTY_TYPES, STATE_CODES, can } from '@radcore/shared';
+import { PARTY_TYPES, STATE_CODES, can, isValidPan, normalisePan } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { getCompany } from '../core/settings';
@@ -20,6 +20,8 @@ const zParty = z.object({
   phone: emptyToNull(zPhone).optional(),
   email: emptyToNull(z.string().email().max(200)).optional(),
   gstin: emptyToNull(zGstin).optional(),
+  // Asked for on TDS returns. With a GSTIN it is read from that, so this is for parties without one.
+  pan: emptyToNull(z.string().trim().transform(normalisePan).refine(isValidPan, 'PAN must look like ABCDE1234F')).optional(),
   state_code: emptyToNull(zStateCode).optional(),
   billing_address: zAddress.nullish(),
   shipping_address: zAddress.nullish(),
@@ -56,6 +58,7 @@ export async function createParty(ctx: Ctx, input: PartyInput & { lead_id?: stri
       phone: input.phone ?? null,
       email: input.email ?? null,
       gstin: input.gstin ?? null,
+      pan: input.pan ?? null,
       stateCode,
       billingAddress: input.billing_address ?? null,
       shippingAddress: input.shipping_address ?? null,
@@ -146,6 +149,7 @@ export function partiesRouter(db: DB) {
       if (body.phone !== undefined) patch.phone = body.phone;
       if (body.email !== undefined) patch.email = body.email;
       if (body.gstin !== undefined) patch.gstin = body.gstin;
+      if (body.pan !== undefined) patch.pan = body.pan;
       if (body.billing_address !== undefined) patch.billingAddress = body.billing_address;
       if (body.shipping_address !== undefined) patch.shippingAddress = body.shipping_address;
       if (body.price_list_id !== undefined) patch.priceListId = body.price_list_id;

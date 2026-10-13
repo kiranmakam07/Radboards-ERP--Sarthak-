@@ -2,11 +2,17 @@
 
 import { istDate } from '@radcore/shared';
 import { useState } from 'react';
+import { DayBook, HsnSummary, PartyProfit, Tds } from '@/components/reports';
 import { ActionButton, Badge, Card, CsvLink, Form, Loading, Page, Table, date, inr, label , num } from '@/components/ui';
 import { post, put, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
-const TABS = ['Trial balance', 'Profit & loss', 'Profit by bill', 'Balance sheet', 'Receivables', 'Payables', 'Ledger / cash & bank book', 'Financial years', 'Health check'] as const;
+const TABS = [
+  'Day book', 'Trial balance', 'Profit & loss', 'Profit by bill', 'Profit by customer', 'Sales by HSN', 'TDS', 'Balance sheet', 'Receivables', 'Payables',
+  'Ledger / cash & bank book', 'Financial years', 'Health check',
+] as const;
+// These look after their own dates and downloads.
+const OWN: readonly string[] = ['Day book', 'Profit by customer', 'Sales by HSN', 'TDS'];
 type Tab = (typeof TABS)[number];
 const today = () => istDate();
 
@@ -20,6 +26,7 @@ export default function ReportsPage() {
   const leaf = (accounts.data?.data ?? []).filter((a) => !a.is_group);
 
   const paths: Record<Tab, string | null> = {
+    'Day book': null, 'Profit by customer': null, 'Sales by HSN': null, TDS: null,
     'Trial balance': `/accounting/reports/trial-balance${qs({ as_of: to })}`,
     'Profit & loss': `/accounting/reports/profit-and-loss${qs({ from, to })}`,
     'Profit by bill': `/accounting/reports/invoice-profit${qs({ from, to })}`,
@@ -54,6 +61,11 @@ export default function ReportsPage() {
       <div className="filters">
         {TABS.map((t) => <button key={t} type="button" className={tab === t ? 'primary' : undefined} onClick={() => setTab(t)}>{t}</button>)}
       </div>
+      {tab === 'Day book' && <DayBook />}
+      {tab === 'Profit by customer' && <PartyProfit />}
+      {tab === 'Sales by HSN' && <HsnSummary />}
+      {tab === 'TDS' && <Tds />}
+      {!OWN.includes(tab) && (
       <div className="filters">
         {(tab === 'Profit & loss' || tab === 'Profit by bill' || tab === 'Ledger / cash & bank book') && <label>From <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>}
         {!['Receivables', 'Payables', 'Health check', 'Financial years'].includes(tab) && <label>{tab === 'Profit & loss' || tab === 'Profit by bill' || tab.startsWith('Ledger') ? 'To' : 'As of'} <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>}
@@ -64,6 +76,7 @@ export default function ReportsPage() {
           </select>
         )}
       </div>
+      )}
       <Loading loading={loading} error={error} />
 
       {tab === 'Trial balance' && data && (

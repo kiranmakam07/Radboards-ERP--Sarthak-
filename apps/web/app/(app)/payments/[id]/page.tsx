@@ -18,7 +18,9 @@ export default function PaymentReceiptPage() {
   if (!p || !c) return <Page title="Payment"><Loading loading={loading || settings.loading} error={error ?? settings.error} /></Page>;
   const received = p.direction === 'in';
   const allocated = p.allocations.reduce((s: number, a: any) => s + Number(a.amount), 0);
-  const advance = Math.round((Number(p.amount) - allocated) * 100) / 100;
+  const tds = Number(p.tds_amount);
+  const settled = Math.round((Number(p.amount) + tds) * 100) / 100;
+  const advance = Math.round((settled - allocated) * 100) / 100;
 
   return (
     <Page title={`${received ? 'Receipt' : 'Payment'} ${p.payment_no}`} actions={
@@ -50,6 +52,12 @@ export default function PaymentReceiptPage() {
           <strong>₹{inr(p.amount)}</strong>.
         </p>
         <p className="words">{amountInWords(p.amount)}</p>
+        {tds > 0 && (
+          <p>
+            Tax deducted at source{p.tds_rate_name ? ` (${p.tds_rate_name})` : ''}: <strong>₹{inr(tds)}</strong>
+            {p.tds_base ? <> on ₹{inr(p.tds_base)}</> : null}. Settled on the account: <strong>₹{inr(settled)}</strong>.
+          </p>
+        )}
         {p.allocations.length > 0 ? (
           <table>
             <thead><tr><th>Against</th><th className="right">Amount</th></tr></thead>

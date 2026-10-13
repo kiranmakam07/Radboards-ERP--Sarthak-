@@ -259,6 +259,8 @@ export const parties = pgTable('parties', {
   phone: text('phone'),
   email: text('email'),
   gstin: text('gstin'),
+  /** Needed on TDS returns. Read from the GSTIN when there is one. */
+  pan: text('pan'),
   stateCode: char('state_code', { length: 2 }),
   billingAddress: jsonb('billing_address'),
   shippingAddress: jsonb('shipping_address'),
@@ -651,6 +653,21 @@ export const purchaseReturnLines = pgTable('purchase_return_lines', {
 // ----------------------------------------------------------------------------
 // 8.9 payments
 // ----------------------------------------------------------------------------
+/**
+ * TDS (tax deducted at source): the kinds of payment tax is held back from, and at what rate.
+ * The law's own numbering changed on 1 April 2026, so the reference and the return's code are
+ * kept as text an accountant can correct, not built into the program.
+ */
+export const tdsRates = pgTable('tds_rates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull().unique(),
+  lawReference: text('law_reference'),
+  returnCode: text('return_code'),
+  rate: pct('rate').notNull(),
+  active: boolean('active').notNull().default(true),
+  ...stamps,
+}, (t) => [check('tds_rates_rate_chk', sql`${t.rate} > 0 and ${t.rate} <= 100`)]);
+
 export const payments = pgTable('payments', {
   id: uuid('id').primaryKey().defaultRandom(),
   paymentNo: text('payment_no').notNull().unique(),
@@ -658,7 +675,16 @@ export const payments = pgTable('payments', {
   partyId: uuid('party_id').references(() => parties.id),
   mode: paymentModeEnum('mode').notNull(),
   accountId: uuid('account_id').notNull().references(() => accounts.id),
+  /** The money that actually moved through cash or the bank. */
   amount: money('amount').notNull(),
+  /**
+   * Tax held back on this payment: by us from a supplier (money out), or by the customer from
+   * us (money in). The party's account is settled for amount + tds_amount, and that much can be
+   * set against invoices or bills. tds_base is what the tax was worked out on.
+   */
+  tdsAmount: money('tds_amount').notNull().default('0'),
+  tdsRateId: uuid('tds_rate_id').references(() => tdsRates.id),
+  tdsBase: money('tds_base'),
   reference: text('reference'),
   paidOn: date('paid_on').notNull(),
   status: postedStatusEnum('status').notNull().default('posted'),
@@ -667,6 +693,26 @@ export const payments = pgTable('payments', {
 }, (t) => [
   index('payments_party_idx').on(t.partyId),
   check('payments_amount_pos', sql`${t.amount} > 0`),
+  check('payments_tds_chk', sql`${t.tdsAmount} >= 0`),
+]);
+
+/** TDS paid over to the government: what we held back from vendors, or from salaries. */
+export const tdsDeposits = pgTable('tds_deposits', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  kind: text('kind').notNull(),
+  paidOn: date('paid_on').notNull(),
+  amount: money('amount').notNull(),
+  accountId: uuid('account_id').notNull().references(() => accounts.id),
+  /** The month whose deductions this pays, as YYYY-MM. */
+  month: char('month', { length: 7 }).notNull(),
+  challanNo: text('challan_no'),
+  bsrCode: text('bsr_code'),
+  notes: text('notes'),
+  status: postedStatusEnum('status').notNull().default('posted'),
+  ...stamps,
+}, (t) => [
+  check('tds_deposits_amount_pos', sql`${t.amount} > 0`),
+  check('tds_deposits_kind_chk', sql`${t.kind} in ('vendor', 'salary')`),
 ]);
 
 export const paymentAllocations = pgTable('payment_allocations', {
@@ -699,11 +745,18 @@ export const expenses = pgTable('expenses', {
   paidFromAccountId: uuid('paid_from_account_id').notNull().references(() => accounts.id),
   vendorName: text('vendor_name'),
   vendorGstin: text('vendor_gstin'),
+  /** Tax we held back when paying this (rent, a contractor, a professional): the vendor got the total less this. */
+  tdsAmount: money('tds_amount').notNull().default('0'),
+  tdsRateId: uuid('tds_rate_id').references(() => tdsRates.id),
+  vendorPan: text('vendor_pan'),
   attachmentUrl: text('attachment_url'),
   notes: text('notes'),
   status: postedStatusEnum('status').notNull().default('posted'),
   ...stamps,
-}, (t) => [check('expenses_amount_pos', sql`${t.amount} > 0`)]);
+}, (t) => [
+  check('expenses_amount_pos', sql`${t.amount} > 0`),
+  check('expenses_tds_chk', sql`${t.tdsAmount} >= 0 and ${t.tdsAmount} <= ${t.amount}`),
+]);
 
 // ----------------------------------------------------------------------------
 // 8.10 journal - append-only double entry (see triggers)
