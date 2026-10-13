@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { BarList, ChartCard } from '@/components/charts';
-import { ActionButton, Badge, Card, Loading, Notice, Page, Stat, Table, dateTime } from '@/components/ui';
+import { ActionButton, Badge, Card, ErrorBox, Loading, Notice, Page, Stat, Table, dateTime } from '@/components/ui';
 import { post, useGet } from '@/lib/api';
 
 const CHANNELS: Record<string, string> = { meta: 'Meta lead ads', google: 'Google Ads', whatsapp: 'WhatsApp' };
@@ -30,6 +30,10 @@ export default function LeadSourcesPage() {
   const { data, loading, error, reload } = useGet<{ data: any }>('/crm/integrations');
   const [origin, setOrigin] = useState('https://your-domain');
   const [notice, setNotice] = useState<string | null>(null);
+  // What Meta itself said when last asked: which Page and which number the tokens belong to.
+  const [checked, setChecked] = useState<any | null>(null);
+  const [days, setDays] = useState('30');
+  const [pulled, setPulled] = useState<any | null>(null);
   useEffect(() => setOrigin(window.location.origin), []);
   const d = data?.data;
   const of = (channel: string) => d?.by_channel.find((c: any) => c.channel === channel);
@@ -37,10 +41,15 @@ export default function LeadSourcesPage() {
   const metaReady = d && d.meta.app_secret && d.meta.verify_token;
 
   return (
-    <Page title="Lead sources" actions={failed > 0 ? (
-      <ActionButton kind="primary" onClick={() => post('/crm/integrations/retry')}
-        onDone={(r) => { setNotice(`${r.data.processed} became leads, ${r.data.failed} still could not.`); reload(); }}>Try the failed ones again</ActionButton>
-    ) : null}>
+    <Page title="Lead sources" actions={
+      <>
+        <ActionButton onClick={() => post('/crm/integrations/check')} onDone={(r) => { setChecked(r.data); reload(); }}>Check the connections</ActionButton>
+        {failed > 0 ? (
+          <ActionButton kind="primary" onClick={() => post('/crm/integrations/retry')}
+            onDone={(r) => { setNotice(`${r.data.processed} became leads, ${r.data.failed} still could not.`); reload(); }}>Try the failed ones again</ActionButton>
+        ) : null}
+      </>
+    }>
       <p className="muted">Every enquiry, wherever it comes from, lands in the same lead list: checked against existing phone numbers, given an owner and a first follow-up.</p>
       <Loading loading={loading && !d} error={error} />
       <Notice>{notice}</Notice>
@@ -60,6 +69,34 @@ export default function LeadSourcesPage() {
               <p className="muted small">Callback address to give Meta (Webhooks → Page → <code>leadgen</code>):</p>
               <Address url={`${origin}/api/hooks/meta`} />
               <p className="muted small">The three values are set on the server (<code>META_APP_SECRET</code>, <code>META_VERIFY_TOKEN</code>, <code>META_PAGE_ACCESS_TOKEN</code>). Until then this address refuses everything.</p>
+              <p className="small">{d.state?.meta_verified_at ? <>Meta accepted this address on {dateTime(d.state.meta_verified_at)}.</> : <span className="muted">Meta has not checked this address yet (it does when the webhook is subscribed).</span>}</p>
+              {checked?.meta && (
+                <div className="small" style={{ margin: '6px 0' }}>
+                  {checked.meta.page ? <p>The page access token belongs to the Page <strong>{checked.meta.page.name}</strong>.</p> : null}
+                  {checked.meta.page && checked.meta.leadgen_subscribed === true ? <p><Ready ok>The Page sends its lead forms to this app</Ready></p> : null}
+                  {checked.meta.page && checked.meta.leadgen_subscribed === false ? <p><Ready ok={false}>The Page does not send its lead forms to this app yet</Ready><span className="muted"> Subscribe the Page to the app with the <code>leadgen</code> field.</span></p> : null}
+                  {!d.meta.page_access_token ? <p className="muted">Nothing to ask Meta until the page access token is set.</p> : null}
+                  <ErrorBox error={checked.meta.problem} />
+                </div>
+              )}
+              {d.meta.page_access_token && (
+                <div style={{ borderTop: '1px solid var(--line, #ddd)', marginTop: 10, paddingTop: 10 }}>
+                  <p className="small"><strong>Leads already in the lead forms.</strong> Bring in the ones from before the connection was made, or any missed while something was down. A lead that is already here is not added again.</p>
+                  <span className="actions">
+                    <select value={days} onChange={(e) => setDays(e.target.value)} aria-label="How far back">
+                      <option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option>
+                    </select>
+                    <ActionButton onClick={() => post('/crm/integrations/meta/fetch', { days: Number(days) })} onDone={(r) => { setPulled(r.data); reload(); }}>Bring them in</ActionButton>
+                  </span>
+                  {pulled && (
+                    <Notice>
+                      {pulled.found} lead(s) in {pulled.forms} form(s): {pulled.leads} taken in, {pulled.already_here} were already here
+                      {pulled.not_usable ? `, ${pulled.not_usable} could not be used (listed below with the reason)` : ''}.
+                      {pulled.more ? ' There are more: press again to take the next lot.' : ''}
+                    </Notice>
+                  )}
+                </div>
+              )}
             </Card>
 
             <Card title="WhatsApp Business">
@@ -68,6 +105,9 @@ export default function LeadSourcesPage() {
               <p className="muted small">Callback address (Webhooks → WhatsApp Business Account → <code>messages</code>):</p>
               <Address url={`${origin}/api/hooks/whatsapp`} />
               <p><Ready ok={Boolean(d.whatsapp?.send)}>Sending from the app</Ready></p>
+              <p className="small">{d.state?.whatsapp_verified_at ? <>Meta accepted this address on {dateTime(d.state.whatsapp_verified_at)}.</> : <span className="muted">Meta has not checked this address yet.</span>}</p>
+              {checked?.whatsapp?.number ? <p className="small">Sending is connected to <strong>{checked.whatsapp.number.phone}</strong>{checked.whatsapp.number.name ? ` (${checked.whatsapp.number.name})` : ''}{checked.whatsapp.number.quality ? `, quality ${String(checked.whatsapp.number.quality).toLowerCase()}` : ''}.</p> : null}
+              <ErrorBox error={checked?.whatsapp?.problem} />
               <p className="muted small">This needs the business number to be on WhatsApp's Cloud API. Until sending is connected (<code>WHATSAPP_PHONE_NUMBER_ID</code> and <code>WHATSAPP_ACCESS_TOKEN</code> on the server), a quick reply on the lead's page opens WhatsApp with the message written.</p>
             </Card>
 
