@@ -1,4 +1,13 @@
-// Fixed vocabularies and state machines (PRD section 5 and 6). No free-text status anywhere.
+/**
+ * Fixed vocabularies and state machines (PRD section 5 and 6). No free-text status anywhere:
+ * every stage, status and kind a record can have is listed here, the database enums are built
+ * from these lists (apps/api/src/db/schema.ts), and the screens show them through `label`.
+ *
+ * Adding a value: add it at the END of its list (a database enum only ever grows), then run
+ * `npx drizzle-kit generate --name <what changed>` in apps/api to make the migration.
+ *
+ * The permission table (PERMISSIONS) is at the bottom of this file.
+ */
 
 // New roles are added at the end: the database enum only ever grows, and the order is relied on by the demo logins.
 export const ROLES = ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin', 'hr', 'operations'] as const;
@@ -133,10 +142,6 @@ export const EMPLOYEE_STATUSES = ['active', 'left'] as const;
 
 export const ATTENDANCE_STATUSES = ['present', 'half_day', 'absent', 'leave', 'weekly_off', 'holiday'] as const;
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
-/** How much of a working day each status counts for. */
-export const ATTENDANCE_DAY_VALUE: Record<AttendanceStatus, number> = {
-  present: 1, half_day: 0.5, absent: 0, leave: 0, weekly_off: 0, holiday: 0,
-};
 
 // ---------------------------------------------------------------------------
 // Operations (PRD 7.14, Tier 3): recurring tasks with checklists, assets and their maintenance
@@ -228,6 +233,8 @@ export const PERMISSIONS = {
   'ops:manage': ['operations', 'admin'],
 } as const satisfies Record<string, readonly Role[]>;
 
+// A new permission is one line in the table above, named in a route with requirePerm('area:action')
+// and in the menu (apps/web/app/(app)/layout.tsx) when a screen depends on it.
 export type Permission = keyof typeof PERMISSIONS;
 export type PermissionOverrides = Partial<Record<Permission, readonly Role[]>>;
 

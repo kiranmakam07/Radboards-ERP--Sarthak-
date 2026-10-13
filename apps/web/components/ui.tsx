@@ -5,17 +5,28 @@ import { useContext, useState, type FormEvent, type ReactNode } from 'react';
 import { formatDate, formatINR } from '@radcore/shared';
 import { SessionContext } from '@/lib/session';
 
+/**
+ * The building blocks every screen is made of: how money, quantities and dates are shown, the
+ * page frame, tables, forms, buttons that act and report what went wrong, and small layout pieces.
+ * A screen should be these plus its own data; anything two screens need belongs here or in a
+ * component of its own beside this file.
+ */
+
+// ---- how values are shown ---------------------------------------------------
 export const inr = (v: unknown) => (v === null || v === undefined || v === '' ? '' : formatINR(v as string));
 export const num = (v: unknown) => (v === null || v === undefined || v === '' ? '' : String(Number(v)));
 /** a - b for quantities, without float dust (0.1 + 0.2 style). */
 export const sub = (a: unknown, b: unknown) => Number((Number(a ?? 0) - Number(b ?? 0)).toFixed(3));
 export const date = (v: unknown) => formatDate(v ? String(v) : '');
+/** An address on one line, as the printed documents show it. */
+export const addr = (a: any) => (a ? [a.line1, a.line2, a.city, a.state, a.pincode].filter(Boolean).join(', ') : '');
 export const dateTime = (v: unknown) =>
   v ? new Date(String(v)).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 const SHORT_FORMS = /\b(hr|upi|gst|qc|neft|rtgs|imps|emi)\b/gi;
 export const label = (v: unknown) =>
   String(v ?? '').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()).replace(SHORT_FORMS, (w) => w.toUpperCase());
 
+// ---- the page frame and its messages -----------------------------------------
 export function Page({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
   return (
     <div className="page">
@@ -62,6 +73,7 @@ export function Badge({ value }: { value: unknown }) {
   return <span className={`badge ${TONES[v] ?? 'grey'}`}>{label(v)}</span>;
 }
 
+// ---- tables ---------------------------------------------------------------
 export type Column<T> = {
   key: string;
   title: string;
@@ -110,6 +122,7 @@ export function Table<T extends Record<string, any>>({
   );
 }
 
+// ---- forms ----------------------------------------------------------------
 export type Field = {
   name: string;
   label: string;
@@ -246,6 +259,7 @@ export function UploadField({ purpose, value, onChange }: { purpose: string; val
   );
 }
 
+// ---- buttons and small layout pieces ----------------------------------------
 /** A button that runs an action, shows the server's error, and can ask for confirmation first. */
 export function ActionButton({
   children, onClick, confirm, onDone, kind, disabled,

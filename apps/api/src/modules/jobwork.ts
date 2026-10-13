@@ -29,6 +29,9 @@ import { emptyToNull, inTx, sendList, zDate, zId, zMoney, zQty, zQtyNonNeg, zTex
 
 type JobWork = typeof jobWorks.$inferSelect;
 
+// ---------------------------------------------------------------------------
+// Where a challan stands
+// ---------------------------------------------------------------------------
 /** Under GST, inputs sent for job work must be back within a year, or the sending counts as a sale. */
 export const dueBackBy = (challanDate: string): string => addMonths(challanDate, 12);
 
@@ -76,6 +79,9 @@ async function place(tx: DB, id: string) {
   return loc;
 }
 
+// ---------------------------------------------------------------------------
+// Sending material out
+// ---------------------------------------------------------------------------
 export type JobWorkInput = {
   jobWorkerId: string; fromLocationId: string; challanDate: string; process: string; expectedBackOn?: string | null;
   transport?: string | null; notes?: string | null; lines: { itemId: string; qty: string }[];
@@ -146,6 +152,9 @@ export async function cancelJobWork(ctx: Ctx, id: string, reason: string): Promi
   return updated!;
 }
 
+// ---------------------------------------------------------------------------
+// Recording what came back
+// ---------------------------------------------------------------------------
 export type ReceiveInput = {
   receivedOn: string; toLocationId: string; workerChallanNo?: string | null; charge?: string | null; notes?: string | null;
   /** For each challan line: how much came back as it is, how much was used up, how much is lost. */
@@ -315,6 +324,9 @@ export async function cancelReceipt(ctx: Ctx, receiptId: string, reason: string)
   await audit(ctx, 'job_work_receipt', receiptId, 'cancel', { status: 'posted' }, { status: 'cancelled', reason });
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 // A box left empty or at 0 means "none of this".
 const zQtyOrBlank = emptyToNull(zQtyNonNeg).optional();
 

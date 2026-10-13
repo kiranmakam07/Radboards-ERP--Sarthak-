@@ -3,10 +3,8 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { STATE_CODES } from '@radcore/shared';
-import { Loading, Page, date, inr, num } from '@/components/ui';
+import { Loading, Page, addr, date, inr, num } from '@/components/ui';
 import { useGet } from '@/lib/api';
-
-const addr = (a: any) => (a ? [a.line1, a.line2, a.city, a.state, a.pincode].filter(Boolean).join(', ') : '');
 
 /**
  * The delivery challan the material travels on. No tax is charged: this is not a sale, the goods

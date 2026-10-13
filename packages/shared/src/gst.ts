@@ -1,5 +1,12 @@
 import { D, Decimal, round2, type Num } from './money';
 
+/**
+ * GST arithmetic, used by every document that carries tax (orders, invoices, credit notes,
+ * purchase bills, debit notes, expenses) and by the screens that preview one before it is saved.
+ * Tax is worked out line by line and rounded per line; a document's totals are the sum of its
+ * lines, and the grand total is rounded to the whole rupee with the difference shown as round-off.
+ */
+
 /** GST state codes (first two digits of a GSTIN). */
 export const STATE_CODES: Record<string, string> = {
   '01': 'Jammu & Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh', '05': 'Uttarakhand',
@@ -45,8 +52,6 @@ export function stateCodeFromGstin(raw: string): string | null {
   return isValidGstin(g) ? g.slice(0, 2) : null;
 }
 
-export type TaxSplit = { cgst: Decimal; sgst: Decimal; igst: Decimal };
-
 /**
  * THE place-of-supply rule (PRD 7.9). Same state as the company -> CGST + SGST,
  * different state -> IGST. Every document goes through this one function.
@@ -55,14 +60,7 @@ export function isInterState(companyStateCode: string, placeOfSupply: string): b
   return companyStateCode !== placeOfSupply;
 }
 
-export function splitTax(totalTax: Num, interState: boolean): TaxSplit {
-  const tax = round2(totalTax);
-  if (interState) return { cgst: D(0), sgst: D(0), igst: tax };
-  // Halve, and give any odd paisa to neither: CGST and SGST must be equal by law,
-  // so we round each half and let the line total follow.
-  const half = round2(tax.div(2));
-  return { cgst: half, sgst: half, igst: D(0) };
-}
+type TaxSplit = { cgst: Decimal; sgst: Decimal; igst: Decimal };
 
 export type LineInput = {
   qty: Num;

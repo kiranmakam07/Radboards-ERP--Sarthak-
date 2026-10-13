@@ -8,6 +8,12 @@ import { zDate } from '../lib/http';
 import { gstSummary } from './gst';
 import { LATE, ensureTasks } from './ops';
 
+/**
+ * Dashboards. Read-only: every figure is worked out from the records at the moment it is asked for,
+ * so a dashboard cannot disagree with the screen behind it. One route per dashboard. The HR and
+ * Operations dashboards live with their own modules (hr.ts, ops.ts).
+ */
+
 /** Default range: month to date (IST). Every figure is computed live from the records (PRD 7.10). */
 function range(query: unknown) {
   const today = istDate();
@@ -32,6 +38,7 @@ function salesByChannel(db: DB, from: string, to: string) {
 export function dashboardsRouter(db: DB) {
   const r = Router();
 
+  // ---- the home screen ----
   /**
    * The picture on the home screen: how many things are sitting at each step of
    * lead-to-cash and purchase-to-stock right now. Each person gets only the steps their
@@ -129,6 +136,7 @@ export function dashboardsRouter(db: DB) {
     res.json({ data });
   });
 
+  // ---- sales ----
   r.get('/sales', requirePerm('dashboard:sales'), async (req, res) => {
     const { from, to, today } = range(req.query);
     // Week starts Monday.
@@ -201,6 +209,7 @@ export function dashboardsRouter(db: DB) {
     });
   });
 
+  // ---- marketing ----
   r.get('/marketing', requirePerm('dashboard:marketing'), async (req, res) => {
     const { from, to } = range(req.query);
     const data: Record<string, any> = {
@@ -297,6 +306,7 @@ export function dashboardsRouter(db: DB) {
     res.json({ data });
   });
 
+  // ---- stores ----
   /** Stores: what the stock is worth and where, what is running low, what is stuck, and what has stopped moving. */
   r.get('/stores', requirePerm('dashboard:stores'), async (req, res) => {
     const { from, to, today } = range(req.query);
@@ -360,6 +370,7 @@ export function dashboardsRouter(db: DB) {
     });
   });
 
+  // ---- the owner's summary ----
   /** The owner's one page: the few numbers that say how the whole business is doing today. */
   r.get('/owner', requirePerm('dashboard:owner'), async (_req, res) => {
     const today = istDate();
@@ -444,6 +455,7 @@ export function dashboardsRouter(db: DB) {
     });
   });
 
+  // ---- accounts ----
   r.get('/accounts', requirePerm('dashboard:accounts'), async (req, res) => {
     const { from, to, today } = range(req.query);
     const monthStart = `${today.slice(0, 7)}-01`;

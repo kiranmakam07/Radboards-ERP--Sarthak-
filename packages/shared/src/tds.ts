@@ -1,5 +1,7 @@
 import { D, Decimal, type Num } from './money';
 
+/** PAN checks and the arithmetic of tax deducted at source. Which rates apply is data, kept in the tds_rates table. */
+
 /** A PAN is five letters, four digits and a letter (ABCDE1234F). */
 export const normalisePan = (pan: string): string => pan.replace(/\s+/g, '').toUpperCase();
 export const isValidPan = (pan: string): boolean => /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(normalisePan(pan));

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
@@ -13,7 +14,7 @@ import { getCompany } from '../core/settings';
 import { locationByType, lockItems, stockIn, stockOut } from '../core/stock';
 import { rows, type DB } from '../db/client';
 import {
-  deliveries, deliveryLines, invoiceLines, invoices, items, locations, parties, salesOrderLines, salesOrders,
+  deliveries, deliveryLines, invoiceLines, invoiceLinks, invoices, items, locations, parties, salesOrderLines, salesOrders,
 } from '../db/schema';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
 import {
@@ -21,10 +22,23 @@ import {
 } from '../lib/http';
 import { priceFor, priceListFor } from './items';
 import { captureLead, convertLead, sourceIdByName } from './leads';
-import { shareTokenFor } from './collect';
 import { applyCredit, assertCreditsCovered, creditsFor, unapplyAllOn, unapplyCredit } from './credits';
 import { cancelPayment, createPayment } from './payments';
 import { partyBalance, type Party } from './parties';
+
+/**
+ * Selling, from the quote to the invoice.
+ *
+ *   draft (a quote) -> confirmed -> delivered -> invoiced        cancelled: any time before delivery
+ *
+ * - Confirming checks the customer's credit limit.
+ * - Delivering is the step that takes stock out, at average cost (Dr Cost of Goods Sold, Cr Stock).
+ * - Invoicing bills what has been delivered and not yet billed, takes the next invoice number and
+ *   freezes the totals and the customer's details on the document.
+ * - The store's quick bill does all of that and takes the payment, in one transaction.
+ * - An issued invoice is never edited. It is corrected by a credit note (a return) or cancelled,
+ *   and either way the original stays on record.
+ */
 
 export type Order = typeof salesOrders.$inferSelect;
 export type OrderLine = typeof salesOrderLines.$inferSelect;
@@ -43,6 +57,9 @@ export type OrderInput = {
   lines: OrderLineInput[];
 };
 
+// ---------------------------------------------------------------------------
+// Orders: a quote, then a confirmed order
+// ---------------------------------------------------------------------------
 async function loadParty(tx: DB, partyId: string | null): Promise<Party | null> {
   if (!partyId) return null;
   const [party] = await tx.select().from(parties).where(eq(parties.id, partyId));
@@ -73,6 +90,7 @@ async function buildLines(tx: DB, party: Party | null, input: OrderLineInput[], 
   return { lines, taxInclusive };
 }
 
+/** A new order in draft, which is what a quote is. Prices come from the party's price list; GST follows the place of supply. */
 export async function createOrder(ctx: Ctx, input: OrderInput): Promise<Order> {
   const { tx } = ctx;
   const party = await loadParty(tx, input.partyId);
@@ -106,6 +124,7 @@ export async function createOrder(ctx: Ctx, input: OrderInput): Promise<Order> {
 
 type TotalsLine = { qty: string; rate: string; discount: string; gstRate: string };
 
+/** The tax and totals of an order as they stand now: the same sums the invoice will freeze. */
 export async function orderTotals(tx: DB, order: Order, lines: TotalsLine[]) {
   const company = await getCompany(tx);
   const inter = isInterState(company.state_code, order.placeOfSupply);
@@ -134,6 +153,7 @@ async function refreshOrderStatus(ctx: Ctx, orderId: string): Promise<Order> {
   return updated!;
 }
 
+/** Draft to confirmed. This is where a dealer's credit limit is checked. */
 export async function confirmOrder(ctx: Ctx, id: string, opts: { overrideCredit?: boolean; skipCreditCheck?: boolean } = {}): Promise<Order> {
   const { tx } = ctx;
   const { order, lines } = await lockOrder(tx, id);
@@ -162,6 +182,7 @@ export async function confirmOrder(ctx: Ctx, id: string, opts: { overrideCredit?
   return updated!;
 }
 
+/** Cancel an order nothing has been delivered on. After delivery the way back is a credit note. */
 export async function cancelOrder(ctx: Ctx, id: string, reason: string): Promise<Order> {
   const { tx } = ctx;
   const { order, lines } = await lockOrder(tx, id);
@@ -173,6 +194,9 @@ export async function cancelOrder(ctx: Ctx, id: string, reason: string): Promise
   return updated!;
 }
 
+// ---------------------------------------------------------------------------
+// Delivery: the step that takes stock out
+// ---------------------------------------------------------------------------
 /**
  * Delivery: the step that takes stock out (partial deliveries allowed).
  * One transaction: delivery note + stock movements + Dr COGS / Cr Stock at moving-average cost.
@@ -245,6 +269,9 @@ export async function deliverOrder(
   return { delivery: delivery!, order: updatedOrder };
 }
 
+// ---------------------------------------------------------------------------
+// Invoices
+// ---------------------------------------------------------------------------
 /**
  * Invoice everything delivered and not yet invoiced on an order.
  * Draft -> lines -> Issued in one transaction: the gap-free number is taken at issue, the
@@ -338,6 +365,9 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
   return issued!;
 }
 
+// ---------------------------------------------------------------------------
+// Quick bill: order, delivery, invoice and payment in one go
+// ---------------------------------------------------------------------------
 export type QuickBillInput = {
   partyId?: string | null;
   customer?: { phone: string; name: string } | null;
@@ -404,6 +434,9 @@ export async function quickBill(ctx: Ctx, input: QuickBillInput) {
   return { order_id: order.id, invoice, payments: made, balance_due: money(D(invoice.grandTotal).minus(paid)) };
 }
 
+// ---------------------------------------------------------------------------
+// Corrections: credit notes and cancelling an invoice
+// ---------------------------------------------------------------------------
 /**
  * Credit note = sales return (PRD 7.8). Amounts are pro-rated from the original invoice
  * lines so that crediting a whole invoice reverses it to the paisa. With restock, the
@@ -647,6 +680,26 @@ export async function cancelInvoice(
   return cancelled!;
 }
 
+// ---------------------------------------------------------------------------
+// The invoice as a document, and the link that shows it
+// ---------------------------------------------------------------------------
+/** The link's key for an invoice, made the first time the invoice is shared. It says nothing about the invoice. */
+export async function shareTokenFor(ctx: Ctx, invoiceId: string): Promise<string> {
+  const [inv] = await ctx.tx.select({ id: invoices.id, status: invoices.status }).from(invoices).where(eq(invoices.id, invoiceId));
+  must(inv, 'Invoice');
+  if (inv!.status === 'draft') throw badRequest('This invoice has not been issued yet');
+  // Two people sharing the same bill at the same moment get the same link.
+  const [made] = await ctx.tx.insert(invoiceLinks)
+    .values({ invoiceId, token: crypto.randomBytes(16).toString('base64url'), createdBy: ctx.user?.id ?? null })
+    .onConflictDoNothing().returning({ token: invoiceLinks.token });
+  if (made) {
+    await audit(ctx, 'invoice', invoiceId, 'share', null, { shared: true });
+    return made.token;
+  }
+  const [kept] = await ctx.tx.select({ token: invoiceLinks.token }).from(invoiceLinks).where(eq(invoiceLinks.invoiceId, invoiceId));
+  return kept!.token;
+}
+
 /** Everything needed to show or print a tax invoice / credit note (PRD 7.9, 7.11). */
 export async function invoiceDocument(tx: DB, id: string) {
   const [inv] = await tx.select().from(invoices).where(eq(invoices.id, id));
@@ -701,6 +754,7 @@ const toLine = (l: z.infer<typeof zLine>): OrderLineInput => ({ itemId: l.item_i
 export function salesRouter(db: DB) {
   const r = Router();
 
+  // ---- quotes and orders ----
   r.get('/orders', requirePerm('sales:read'), async (req, res) => {
     const q = zListQuery.extend({
       status: z.enum(ORDER_STATUSES).optional(), channel: z.enum(CHANNELS).optional(), party_id: zId.optional(),
@@ -842,6 +896,7 @@ export function salesRouter(db: DB) {
     res.json({ data: { ...delivery, lines, company: await getCompany(db) } });
   });
 
+  // ---- quick bill ----
   /** Store quick bill - the whole sale in one request and one transaction (PRD 7.4). */
   r.post('/quick-bill', requirePerm('quickbill:create'), async (req, res) => {
     const b = z.object({

@@ -14,6 +14,7 @@ apps/api         Express + TypeScript REST API (the backend — where the rules 
 apps/web         Next.js web app (deliberately simple; every rule is enforced by the API)
 packages/shared  Money, GST, phone, financial-year helpers, state machines, permission matrix
 docs/            PROGRESS.md (tracker + decisions)
+                 ARCHITECTURE.md (how it is put together; read this first to change the code)
 ```
 
 ## Try it in two minutes (demo data, nothing saved)

@@ -2,12 +2,11 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { istDate, tdsQuarter } from '@radcore/shared';
+import { istDate, monthName, tdsQuarter } from '@radcore/shared';
 import { ActionButton, Badge, Card, CsvLink, Form, Loading, Stat, Table, Toggle, date, inr, label, num } from '@/components/ui';
 import { patch, post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
-const monthName = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
 // Where a line in the day book leads: the document behind the entry.
 const DOCUMENT: Record<string, (id: string) => string> = {

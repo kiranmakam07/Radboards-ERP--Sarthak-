@@ -8,9 +8,21 @@ import { rows, type DB } from '../db/client';
 import { badRequest } from '../lib/errors';
 import { sendList, zDate } from '../lib/http';
 
+/**
+ * GST returns, read straight from the documents: what we charged from issued invoices and credit
+ * notes, what we can claim from purchase bills, debit notes and expenses. Nothing is stored for a
+ * return, so correcting a document corrects the return.
+ *   gstSummary        the GSTR-3B figures for a period
+ *   gstr1Sections     GSTR-1, section by section
+ *   gstr1PortalFile   GSTR-1 for a month as the file the GST portal accepts
+ */
+
 /** B2C invoices above this value to another state are reported invoice-wise (B2CL) in GSTR-1. */
 export const B2CL_THRESHOLD = '100000';
 
+// ---------------------------------------------------------------------------
+// GSTR-3B: the summary
+// ---------------------------------------------------------------------------
 type Tax = { taxable: string; igst: string; cgst: string; sgst: string };
 const zero = (): Tax => ({ taxable: '0.00', igst: '0.00', cgst: '0.00', sgst: '0.00' });
 const net = (a: Tax, b: Tax): Tax => ({
@@ -67,6 +79,9 @@ export async function gstSummary(db: DB, from: string, to: string) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// GSTR-1, section by section
+// ---------------------------------------------------------------------------
 /** The GSTR-1 sections for a period, each as a query. `home` is the company's own state code. */
 function gstr1Sections(db: DB, from: string, to: string, home: string) {
   const invoiceWise = (b2b: boolean) => rows(db, sql`
@@ -139,6 +154,9 @@ function gstr1Sections(db: DB, from: string, to: string, home: string) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// GSTR-1 as the file the GST portal accepts
+// ---------------------------------------------------------------------------
 // The GST portal's unit codes (UQC) for the units RadCore uses; anything else goes as "OTH" (Others).
 const UQC: Record<string, string> = {
   nos: 'NOS', pcs: 'PCS', set: 'SET', kg: 'KGS', gm: 'GMS', mtr: 'MTR', ltr: 'LTR', box: 'BOX', pair: 'PRS', roll: 'ROL',
@@ -227,6 +245,9 @@ export async function gstr1PortalFile(db: DB, month: string) {
   return file;
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 function period(q: { month?: string; from?: string; to?: string }): { from: string; to: string } {
   if (q.from && q.to) return { from: q.from, to: q.to };
   const month = q.month ?? istDate().slice(0, 7);

@@ -1,13 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { istDate } from '@radcore/shared';
+import { istDate, monthName } from '@radcore/shared';
 import { PayDetails } from '@/components/payroll';
 import { ActionButton, Badge, Card, Form, Loading, Page, Table, Toggle, date, inr, num } from '@/components/ui';
 import { post, put, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
-const monthName = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 /** The month before this one: the one whose salary is usually due. */
 const lastMonth = () => {
   const [y, m] = istDate().slice(0, 7).split('-').map(Number) as [number, number];

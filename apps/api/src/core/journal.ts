@@ -7,6 +7,16 @@ import { AppError, conflict } from '../lib/errors';
 import type { Ctx } from '../lib/http';
 import { getSetting } from './settings';
 
+/**
+ * The books. Every amount in every report comes from journal_lines, and this file is the only code
+ * that writes them: a module describes an entry (postJournal) or asks for a document's entries to
+ * be undone (reverseJournals); it never inserts journal rows itself.
+ *
+ * Accounts are named by a stable key (SystemAccount) rather than by code or id, so the chart of
+ * accounts can be renumbered or renamed on screen without touching a posting rule. To post to an
+ * account that has no key yet: add the key here, add the account with that key in db/seed.ts.
+ */
+
 /** Stable keys for the accounts the posting rules use. Seeded in db/seed.ts. */
 export type SystemAccount =
   | 'cash' | 'bank' | 'debtors' | 'stock' | 'input_cgst' | 'input_sgst' | 'input_igst'
@@ -34,6 +44,7 @@ export type JournalInput = {
   reversesEntryId?: string | null;
 };
 
+/** Refuse a date on or before the period lock (set on the Setup screen when a month is closed). */
 export async function assertPeriodOpen(tx: DB, date: string): Promise<void> {
   const lock = await getSetting(tx, 'period_lock_date');
   if (lock && date <= lock) {
@@ -41,6 +52,7 @@ export async function assertPeriodOpen(tx: DB, date: string): Promise<void> {
   }
 }
 
+/** The account ids behind a list of system keys. A missing key is a set-up fault, so it throws rather than guesses. */
 export async function systemAccountIds(tx: DB, keys: SystemAccount[]): Promise<Record<string, string>> {
   if (keys.length === 0) return {};
   const found = await tx

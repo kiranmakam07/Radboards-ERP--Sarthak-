@@ -10,6 +10,17 @@ import {
   accounts, expenseCategories, leadSources, locations, lostReasons, messageTemplates, priceLists, settings, tdsRates, users,
 } from './schema';
 
+/**
+ * What a new installation needs before anyone can use it: the chart of accounts, the stock places,
+ * the usual lead sources and lost reasons, price lists, expense categories, TDS rates and a few
+ * quick replies (seedDefaults), and one admin to sign in with when there is no user at all
+ * (ensureAdmin). Everything here is "add if missing", so it is safe to run at every start and it
+ * never overwrites what has since been changed on screen.
+ *
+ * To add an account the posting rules can use, add it to COA with a `key` and name that key in
+ * SystemAccount (core/journal.ts).
+ */
+
 type Coa = { code: string; name: string; type: AccountType; key?: string; group?: boolean; subtype?: 'cash' | 'bank'; parent?: string };
 
 /** Indian chart of accounts (PRD 7.8). Accounts with a `key` are used by the posting service. */

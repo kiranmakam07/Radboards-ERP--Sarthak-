@@ -12,6 +12,15 @@ import { badRequest, conflict, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zMoneyPos, zText, type Ctx } from '../lib/http';
 import { assertCreditsCovered } from './credits';
 
+/**
+ * Payments: money received from customers and paid to suppliers.
+ *
+ * A payment is set against invoices (money in) or purchase bills (money out). Whatever is not set
+ * against anything stays on the party's account as an advance and can be allocated later. Tax held
+ * back at source (TDS) is recorded on the payment and settles the party just as the money does.
+ * Cancelling writes the mirror entry in the books and frees what had been allocated.
+ */
+
 export type Payment = typeof payments.$inferSelect;
 export type AllocationInput = { invoiceId?: string | null; purchaseBillId?: string | null; amount: string };
 
@@ -155,6 +164,7 @@ export async function createPayment(ctx: Ctx, input: PaymentInput): Promise<Paym
   return payment!;
 }
 
+/** Cancel a payment: its entry is reversed and its allocations stop counting, so the invoices or bills it paid are owed again. */
 export async function cancelPayment(ctx: Ctx, id: string, reason: string): Promise<Payment> {
   const { tx } = ctx;
   const [payment] = await tx.select().from(payments).where(eq(payments.id, id)).for('update');
@@ -171,6 +181,9 @@ export async function cancelPayment(ctx: Ctx, id: string, reason: string): Promi
   return updated!;
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 export function paymentsRouter(db: DB) {
   const r = Router();
 

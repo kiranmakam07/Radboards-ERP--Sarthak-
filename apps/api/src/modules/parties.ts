@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { PARTY_TYPES, STATE_CODES, can, isValidPan, normalisePan } from '@radcore/shared';
+import { PARTY_TYPES, STATE_CODES, can, isValidPan, normalisePan, stateCodeFromGstin } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { getCompany } from '../core/settings';
@@ -11,6 +11,12 @@ import { badRequest, forbidden, must } from '../lib/errors';
 import {
   emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zMoney, zPhone, zStateCode, zText, wantsFile, type Ctx,
 } from '../lib/http';
+
+/**
+ * Parties: everyone we sell to or buy from (customer, dealer, supplier), with the details a tax
+ * invoice needs and the terms a sale checks (price list, credit limit, payment terms).
+ * A party's balance is not kept here: it is read from the books (partyBalance).
+ */
 
 export type Party = typeof parties.$inferSelect;
 
@@ -37,9 +43,10 @@ export type PartyInput = z.infer<typeof zParty>;
  * otherwise the one given, otherwise the company's own state (a local customer).
  */
 async function resolveStateCode(tx: DB, gstin: string | null | undefined, given: string | null | undefined) {
-  if (gstin) {
-    if (given && given !== gstin.slice(0, 2)) throw badRequest(`State code ${given} does not match the GSTIN (${gstin.slice(0, 2)})`);
-    return gstin.slice(0, 2);
+  const fromGstin = gstin ? stateCodeFromGstin(gstin) : null;
+  if (fromGstin) {
+    if (given && given !== fromGstin) throw badRequest(`State code ${given} does not match the GSTIN (${fromGstin})`);
+    return fromGstin;
   }
   if (given) {
     if (!STATE_CODES[given]) throw badRequest('Unknown state code');
@@ -48,6 +55,7 @@ async function resolveStateCode(tx: DB, gstin: string | null | undefined, given:
   return (await getCompany(tx)).state_code;
 }
 
+/** Add a customer, dealer or supplier. Called from the Parties screen, from converting a lead, and when an online order brings a new customer. */
 export async function createParty(ctx: Ctx, input: PartyInput & { lead_id?: string | null }): Promise<Party> {
   const stateCode = await resolveStateCode(ctx.tx, input.gstin, input.state_code);
   const [row] = await ctx.tx
@@ -80,6 +88,9 @@ export async function partyBalance(tx: DB, partyId: string): Promise<string> {
   return r?.balance ?? '0.00';
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 export function partiesRouter(db: DB) {
   const r = Router();
 

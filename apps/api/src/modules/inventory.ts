@@ -16,6 +16,19 @@ import {
   emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSignedQty, zText, wantsFile, type Ctx,
 } from '../lib/http';
 
+/**
+ * Stock as the stores see it: what is on hand and where, what is running low, what it is worth,
+ * every movement, moving stock between places, and correcting it (an adjustment, a physical count,
+ * opening stock).
+ *
+ * A transfer changes where stock is, not what it is worth, so it posts nothing to the books.
+ * A correction changes the value, so it waits for approval and then posts the difference: to Stock
+ * Adjustment, or for opening stock to Opening Balance Equity.
+ */
+
+// ---------------------------------------------------------------------------
+// Transfers between places
+// ---------------------------------------------------------------------------
 async function activeLocation(tx: DB, id: string) {
   const [loc] = await tx.select().from(locations).where(eq(locations.id, id));
   if (!loc || !loc.active) throw badRequest('Location not found');
@@ -64,6 +77,9 @@ export async function createTransfer(
   return transfer!;
 }
 
+// ---------------------------------------------------------------------------
+// Adjustments, counts and opening stock
+// ---------------------------------------------------------------------------
 type AdjLine = { itemId: string; qtyChange: string; unitCost?: string | null; systemQty?: string | null; countedQty?: string | null };
 
 /**
@@ -93,6 +109,7 @@ export async function createAdjustment(
   return adj!;
 }
 
+/** Approve or reject a pending adjustment. Approving is what moves the stock and posts the difference to the books. */
 export async function decideAdjustment(ctx: Ctx, id: string, approve: boolean, note?: string | null) {
   const { tx } = ctx;
   const [adj] = await tx.select().from(stockAdjustments).where(eq(stockAdjustments.id, id)).for('update');
@@ -148,6 +165,9 @@ export async function decideAdjustment(ctx: Ctx, id: string, approve: boolean, n
   return updated!;
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 export function inventoryRouter(db: DB) {
   const r = Router();
 

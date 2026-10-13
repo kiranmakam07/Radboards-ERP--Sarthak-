@@ -14,6 +14,15 @@ import { assets, maintenanceLogs, maintenanceSchedules, projects, settings, task
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zClock, zDate, zId, zListQuery, zMoney, zText, type Ctx } from '../lib/http';
 
+/**
+ * Operations: routines, tasks, assets and their maintenance.
+ *
+ * A routine (a task template) says what must be done, by whom and how often. The tasks it calls for
+ * are created by ensureTasks the first time anyone opens a task screen each day, so there is no
+ * background job to keep running. An asset has maintenance schedules, each with a next due date
+ * that moves on when the work is logged. Projects and who is promised to them are in projects.ts.
+ */
+
 type Template = typeof taskTemplates.$inferSelect;
 type Task = typeof tasks.$inferSelect;
 type Schedule = typeof maintenanceSchedules.$inferSelect;
@@ -21,6 +30,7 @@ type Schedule = typeof maintenanceSchedules.$inferSelect;
 /** After a long gap (holidays, a server that was off) only this many days of missed tasks are created. */
 const BACKFILL_DAYS = 31;
 
+/** A person work can be given to: someone with a sign-in that is switched on. */
 export async function activeUser(tx: DB, id: string): Promise<{ id: string; name: string }> {
   const [u] = await tx.select({ id: users.id, name: users.name, active: users.active }).from(users).where(eq(users.id, id));
   if (!u || !u.active) throw badRequest('Pick a person who has an active sign-in');
@@ -118,6 +128,7 @@ export async function deadlineFitsProject(tx: DB, projectId: string | null, dueD
   }
 }
 
+/** Take a task for changing, so two people acting on it at once go one after the other. */
 export async function lockTask(tx: DB, id: string): Promise<Task> {
   const [t] = await tx.select().from(tasks).where(eq(tasks.id, id)).for('update');
   return must(t, 'Task');
@@ -130,6 +141,7 @@ function mustBeMine(ctx: Ctx, task: Task): void {
   }
 }
 
+/** Mark a task done. Every checklist item must be ticked first. */
 export async function completeTask(ctx: Ctx, id: string, noteText: string | null): Promise<Task> {
   const task = await lockTask(ctx.tx, id);
   mustBeMine(ctx, task);

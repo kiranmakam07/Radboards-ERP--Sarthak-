@@ -362,7 +362,7 @@ export const stockTransferLines = pgTable('stock_transfer_lines', {
   transferId: uuid('transfer_id').notNull().references(() => stockTransfers.id),
   itemId: uuid('item_id').notNull().references(() => items.id),
   qty: qty('qty').notNull(),
-}, (t) => [check('stock_transfer_lines_qty_pos', sql`${t.qty} > 0`)]);
+}, (t) => [index('stock_transfer_lines_transfer_idx').on(t.transferId), check('stock_transfer_lines_qty_pos', sql`${t.qty} > 0`)]);
 
 /** Adjustments, physical counts and opening stock. Posts to the ledger only when approved. */
 export const stockAdjustments = pgTable('stock_adjustments', {
@@ -387,7 +387,7 @@ export const stockAdjustmentLines = pgTable('stock_adjustment_lines', {
   qtyChange: qty('qty_change').notNull(),
   /** Cost for stock coming in; null means use the current valuation rate. */
   unitCost: money('unit_cost'),
-});
+}, (t) => [index('stock_adjustment_lines_adjustment_idx').on(t.adjustmentId)]);
 
 // ----------------------------------------------------------------------------
 // Job work: our material sent to an outside worker on a challan, and what comes back
@@ -469,6 +469,7 @@ export const jobWorkReceiptLines = pgTable('job_work_receipt_lines', {
   chargeShare: money('charge_share').notNull().default('0'),
 }, (t) => [
   index('job_work_receipt_lines_receipt_idx').on(t.receiptId),
+  index('job_work_receipt_lines_line_idx').on(t.jobWorkLineId),
   check('job_work_receipt_lines_kind_chk', sql`${t.kind} in ('returned', 'consumed', 'produced', 'lost')`),
   check('job_work_receipt_lines_qty_pos', sql`${t.qty} > 0`),
 ]);
@@ -522,7 +523,7 @@ export const deliveries = pgTable('deliveries', {
   deliveredAt: ts('delivered_at').notNull().defaultNow(),
   notes: text('notes'),
   ...stamps,
-});
+}, (t) => [index('deliveries_order_idx').on(t.orderId)]);
 
 export const deliveryLines = pgTable('delivery_lines', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -532,7 +533,7 @@ export const deliveryLines = pgTable('delivery_lines', {
   qty: qty('qty').notNull(),
   /** Valuation rate at the moment of delivery (drives COGS). */
   unitCost: money('unit_cost').notNull(),
-}, (t) => [check('delivery_lines_qty_pos', sql`${t.qty} > 0`)]);
+}, (t) => [index('delivery_lines_delivery_idx').on(t.deliveryId), check('delivery_lines_qty_pos', sql`${t.qty} > 0`)]);
 
 // ----------------------------------------------------------------------------
 // 8.7 invoices - legal record, immutable once issued (see triggers)
@@ -575,6 +576,8 @@ export const invoices = pgTable('invoices', {
   unique('invoices_no_fy_uq').on(t.docType, t.invoiceNo, t.fy),
   index('invoices_party_idx').on(t.partyId),
   index('invoices_date_idx').on(t.invoiceDate),
+  index('invoices_order_idx').on(t.orderId),
+  index('invoices_against_idx').on(t.againstInvoiceId),
   check('invoices_no_len_chk', sql`${t.invoiceNo} is null or char_length(${t.invoiceNo}) <= 16`),
   check('invoices_issued_no_chk', sql`${t.status} = 'draft' or ${t.invoiceNo} is not null`),
 ]);
@@ -601,7 +604,7 @@ export const invoiceLines = pgTable('invoice_lines', {
   /** Cost of the goods on this line (from the delivery) - used when a return restocks. */
   unitCost: money('unit_cost').notNull().default('0'),
   sort: integer('sort').notNull().default(0),
-}, (t) => [index('invoice_lines_invoice_idx').on(t.invoiceId)]);
+}, (t) => [index('invoice_lines_invoice_idx').on(t.invoiceId), index('invoice_lines_against_idx').on(t.againstLineId)]);
 
 // ----------------------------------------------------------------------------
 // Purchasing: PO -> supplier bill -> goods receipt with QC -> supplier return
@@ -615,7 +618,7 @@ export const purchaseOrders = pgTable('purchase_orders', {
   expectedDate: date('expected_date'),
   notes: text('notes'),
   ...stamps,
-});
+}, (t) => [index('purchase_orders_supplier_idx').on(t.supplierId)]);
 
 export const purchaseOrderLines = pgTable('purchase_order_lines', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -627,7 +630,7 @@ export const purchaseOrderLines = pgTable('purchase_order_lines', {
   /** Quantity physically received so far (accepted + rejected). */
   receivedQty: qty('received_qty').notNull().default('0'),
   sort: integer('sort').notNull().default(0),
-}, (t) => [check('pol_qty_pos', sql`${t.qty} > 0`)]);
+}, (t) => [index('purchase_order_lines_po_idx').on(t.purchaseOrderId), check('pol_qty_pos', sql`${t.qty} > 0`)]);
 
 export const purchaseBills = pgTable('purchase_bills', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -664,6 +667,9 @@ export const purchaseBills = pgTable('purchase_bills', {
   uniqueIndex('purchase_bills_supplier_inv_uq').on(t.supplierId, t.supplierInvoiceNo)
     .where(sql`${t.docType} = 'bill' and ${t.status} = 'posted' and ${t.supplierInvoiceNo} is not null`),
   index('purchase_bills_supplier_idx').on(t.supplierId),
+  index('purchase_bills_po_idx').on(t.purchaseOrderId),
+  index('purchase_bills_against_idx').on(t.againstBillId),
+  index('purchase_bills_job_work_idx').on(t.jobWorkId),
 ]);
 
 export const purchaseBillLines = pgTable('purchase_bill_lines', {
@@ -682,7 +688,7 @@ export const purchaseBillLines = pgTable('purchase_bill_lines', {
   igst: money('igst').notNull().default('0'),
   lineTotal: money('line_total').notNull(),
   sort: integer('sort').notNull().default(0),
-});
+}, (t) => [index('purchase_bill_lines_bill_idx').on(t.billId)]);
 
 export const goodsReceipts = pgTable('goods_receipts', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -694,7 +700,7 @@ export const goodsReceipts = pgTable('goods_receipts', {
   status: grnStatusEnum('status').notNull().default('received'),
   notes: text('notes'),
   ...stamps,
-});
+}, (t) => [index('goods_receipts_po_idx').on(t.purchaseOrderId)]);
 
 export const goodsReceiptLines = pgTable('goods_receipt_lines', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -712,6 +718,7 @@ export const goodsReceiptLines = pgTable('goods_receipt_lines', {
   qcBy: uuid('qc_by').references(() => users.id),
   qcAt: ts('qc_at'),
 }, (t) => [
+  index('goods_receipt_lines_grn_idx').on(t.grnId),
   check('grl_received_pos', sql`${t.receivedQty} > 0`),
   check('grl_qc_split_chk',
     sql`${t.acceptedQty} is null or (${t.acceptedQty} >= 0 and ${t.rejectedQty} >= 0 and ${t.acceptedQty} + ${t.rejectedQty} = ${t.receivedQty})`),
@@ -729,7 +736,7 @@ export const purchaseReturns = pgTable('purchase_returns', {
   returnedAt: ts('returned_at').notNull().defaultNow(),
   notes: text('notes'),
   ...stamps,
-});
+}, (t) => [index('purchase_returns_grn_idx').on(t.grnId)]);
 
 export const purchaseReturnLines = pgTable('purchase_return_lines', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -738,7 +745,7 @@ export const purchaseReturnLines = pgTable('purchase_return_lines', {
   itemId: uuid('item_id').notNull().references(() => items.id),
   qty: qty('qty').notNull(),
   rate: money('rate').notNull(),
-});
+}, (t) => [index('purchase_return_lines_return_idx').on(t.returnId)]);
 
 // ----------------------------------------------------------------------------
 // 8.9 payments
@@ -813,6 +820,7 @@ export const paymentAllocations = pgTable('payment_allocations', {
   amount: money('amount').notNull(),
   ...stamps,
 }, (t) => [
+  index('payment_allocations_payment_idx').on(t.paymentId),
   index('payment_allocations_invoice_idx').on(t.invoiceId),
   index('payment_allocations_bill_idx').on(t.purchaseBillId),
   check('payment_allocations_amount_pos', sql`${t.amount} > 0`),
@@ -865,6 +873,8 @@ export const journalEntries = pgTable('journal_entries', {
 }, (t) => [
   index('journal_entries_date_idx').on(t.entryDate),
   index('journal_entries_ref_idx').on(t.refType, t.refId),
+  // "Has this entry been reversed?" is asked of every entry by the reports, the day book and the bank screen.
+  index('journal_entries_reverses_idx').on(t.reversesEntryId),
 ]);
 
 export const journalLines = pgTable('journal_lines', {

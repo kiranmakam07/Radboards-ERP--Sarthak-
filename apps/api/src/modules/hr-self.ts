@@ -36,6 +36,7 @@ const awayFrom = async (tx: DB, at: Place | null | undefined) => {
   return place && at ? Math.round(distanceMetres(place, at)) : null;
 };
 
+/** Start my day. Where I am is kept if the phone gives it, with how far that is from the workplace. */
 export async function clockIn(ctx: Ctx, at: Place | null | undefined) {
   const { tx } = ctx;
   const me = await myEmployee(tx, ctx.user!.id);
@@ -55,6 +56,7 @@ export async function clockIn(ctx: Ctx, at: Place | null | undefined) {
   return today;
 }
 
+/** End my day. Needs a clock-in today, and can be done once. */
 export async function clockOut(ctx: Ctx, at: Place | null | undefined) {
   const { tx } = ctx;
   const me = await myEmployee(tx, ctx.user!.id);
@@ -72,6 +74,7 @@ export async function clockOut(ctx: Ctx, at: Place | null | undefined) {
   return today;
 }
 
+/** Ask for leave between two dates. It waits for HR to approve or refuse; nothing is in the register until then. */
 export async function askForLeave(ctx: Ctx, input: { from: string; to: string; reason: string }) {
   const { tx } = ctx;
   const me = await myEmployee(tx, ctx.user!.id);
@@ -121,6 +124,9 @@ export async function decideLeave(ctx: Ctx, id: string, approve: boolean, note: 
   return row!;
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 export function hrSelfRouter(db: DB) {
   const r = Router();
 

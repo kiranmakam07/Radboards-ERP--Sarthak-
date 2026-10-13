@@ -3,10 +3,8 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { STATE_CODES, amountInWords } from '@radcore/shared';
-import { Loading, Page, date, inr, num } from '@/components/ui';
+import { Loading, Page, addr, date, inr, num } from '@/components/ui';
 import { useGet } from '@/lib/api';
-
-const addr = (a: any) => (a ? [a.line1, a.line2, a.city, a.state, a.pincode].filter(Boolean).join(', ') : '');
 
 /** The quotation, or the order confirmation once the quote is accepted, as a document to print or send (PRD 7.11). */
 export default function OrderPrintPage() {

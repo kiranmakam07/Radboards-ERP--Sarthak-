@@ -4,6 +4,14 @@ import type { DB } from '../db/client';
 import { settings } from '../db/schema';
 import { badRequest } from '../lib/errors';
 
+/**
+ * Settings: the few things an admin changes on screen (company profile, period lock, the rules
+ * for attendance and payroll, who holds which permission), and some small pieces of state the
+ * system keeps for itself. One row per key in the `settings` table. SettingsMap gives each key
+ * its type and SETTING_DEFAULTS what it is until someone sets it, so adding a setting is two lines
+ * here and no migration.
+ */
+
 export type CompanyProfile = {
   name: string;
   legal_name?: string;
@@ -101,6 +109,7 @@ export async function loadPermissionOverrides(tx: DB): Promise<void> {
   setPermissionOverrides(valid);
 }
 
+/** The company profile, for anything that prints it or works out tax from its state. */
 export async function getCompany(tx: DB): Promise<CompanyProfile> {
   const company = await getSetting(tx, 'company');
   if (!company.state_code) throw badRequest('Company state is not set. Ask an admin to fill in the company profile.');

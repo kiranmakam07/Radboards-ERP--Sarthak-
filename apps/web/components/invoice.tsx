@@ -1,9 +1,7 @@
 'use client';
 
 import { STATE_CODES } from '@radcore/shared';
-import { date, inr, num } from '@/components/ui';
-
-const addr = (a: any) => (a ? [a.line1, a.line2, a.city, a.state, a.pincode].filter(Boolean).join(', ') : '');
+import { addr, date, inr, num } from '@/components/ui';
 
 /**
  * A tax invoice or credit note as a document, laid out for A4 or a thermal printer (PRD 7.9, 7.11).

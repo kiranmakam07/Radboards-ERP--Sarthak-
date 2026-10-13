@@ -1,10 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { ErrorBox, date, inr, num } from '@/components/ui';
+import { ErrorBox, addr, date, inr, num } from '@/components/ui';
 import { put } from '@/lib/api';
-
-const addr = (a: any) => (a ? [a.line1, a.line2, a.city, a.state, a.pincode].filter(Boolean).join(', ') : '');
 
 /**
  * A payslip as a document: what was earned, what was taken off and why, and what is paid. The same

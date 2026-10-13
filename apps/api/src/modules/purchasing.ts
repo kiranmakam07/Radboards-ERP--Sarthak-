@@ -23,9 +23,24 @@ import {
 
 import { chargeState } from './jobwork';
 
+/**
+ * Buying, from the order to the supplier's bill.
+ *
+ *   purchase order -> goods received -> quality check -> purchase bill -> payment (payments.ts)
+ *                                            '-> rejected goods -> supplier return + debit note
+ *
+ * Goods enter stock at the quality check, not when they are counted in: accepted goods go to
+ * Stores and rejected ones to the Rejected place, both at the order rate, against Goods Received
+ * Not Billed. The bill later clears that account and sets up what is owed to the supplier.
+ * A bill can also be for a service with no order behind it, such as a job worker's charge.
+ */
+
 type PO = typeof purchaseOrders.$inferSelect;
 type Bill = typeof purchaseBills.$inferSelect;
 
+// ---------------------------------------------------------------------------
+// Purchase orders
+// ---------------------------------------------------------------------------
 async function loadSupplier(tx: DB, id: string) {
   const [s] = await tx.select().from(parties).where(eq(parties.id, id));
   if (!s) throw badRequest('Supplier not found');
@@ -85,6 +100,9 @@ async function refreshPoStatus(ctx: Ctx, poId: string): Promise<void> {
   await setPoStatus(ctx, po, all ? 'received' : any ? 'partly_received' : 'sent');
 }
 
+// ---------------------------------------------------------------------------
+// Goods received and the quality check
+// ---------------------------------------------------------------------------
 /**
  * Goods received (PRD 6.2): counted at stores, waiting for QC. NOT in stock yet -
  * nothing is posted to the stock ledger until the QC split is recorded.
@@ -188,6 +206,9 @@ export async function qcGoodsReceipt(
   return updated!;
 }
 
+// ---------------------------------------------------------------------------
+// Purchase bills
+// ---------------------------------------------------------------------------
 export type BillLineInput = { poLineId?: string | null; itemId?: string | null; qty: string; rate: string; description?: string | null };
 
 /**
@@ -317,6 +338,7 @@ export async function createPurchaseBill(
   return bill!;
 }
 
+/** Cancel a bill entered wrongly: its entry is reversed. Refused while a payment or a debit note stands against it. */
 export async function cancelPurchaseBill(ctx: Ctx, id: string, reason: string): Promise<Bill> {
   const { tx } = ctx;
   const [bill] = await tx.select().from(purchaseBills).where(eq(purchaseBills.id, id)).for('update');
@@ -332,6 +354,9 @@ export async function cancelPurchaseBill(ctx: Ctx, id: string, reason: string): 
   return updated!;
 }
 
+// ---------------------------------------------------------------------------
+// Supplier returns (debit notes)
+// ---------------------------------------------------------------------------
 /**
  * Supplier return (PRD 7.7): one action on the rejected lines sends the stock out of the
  * Rejected location and raises a debit note against the supplier's bill

@@ -5,6 +5,14 @@ import { createDb } from './db/client';
 import { seedReviewCopy } from './db/demo';
 import { ensureAdmin, seedDefaults } from './db/seed';
 
+/**
+ * `npm run dev` and `npm start`: the API as a long-running server. It opens the database (applying
+ * any migration not yet applied), loads what a new installation needs, and listens.
+ *
+ * Where there is no long-running server (Vercel) the same steps are split in two: prepare.ts does
+ * the database part once, when the app is built, and serverless.ts answers the requests.
+ */
+
 const handle = await createDb(config.databaseUrl, config.migrationsFolder);
 await seedDefaults(handle.db);
 await loadPermissionOverrides(handle.db);

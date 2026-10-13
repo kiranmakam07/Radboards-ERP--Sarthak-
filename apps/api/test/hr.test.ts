@@ -188,7 +188,6 @@ describe('HR: hiring creates the employee', () => {
   });
 
   it('will not put the same person on the rolls twice', async () => {
-    const hr = await w.as('hr');
     const dup = await (await w.as('admin')).post('/api/hr/employees').send({ name: 'Priya again', phone: '9820011111', department: 'Sales', designation: 'x', join_date: today }).expect(409);
     expect(dup.body.error.message).toContain('EMP001');
   });
@@ -217,7 +216,6 @@ describe('HR: hiring creates the employee', () => {
 
 describe('HR: employees', () => {
   it('adds existing staff, edits one field without touching the rest, and links a sign-in once', async () => {
-    const hr = await w.as('hr');
     const arjun = await (await w.as('admin')).post('/api/hr/employees').send({
       name: 'Arjun Mehta', phone: '9833000001', department: 'Stores', designation: 'Stores Assistant', join_date: '2026-01-01', monthly_salary: 22000,
     }).expect(201);

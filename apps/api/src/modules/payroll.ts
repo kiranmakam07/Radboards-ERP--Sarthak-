@@ -3,7 +3,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  D, addDays, amountInWords, computePay, istDate, lastDayOfMonth, money, weekdayOf, type PayrollRules,
+  D, addDays, amountInWords, computePay, istDate, lastDayOfMonth, money, monthName, weekdayOf, type PayrollRules,
 } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requireAuth, requirePerm } from '../core/auth';
@@ -12,7 +12,7 @@ import { getCompany, getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { advanceRecoveries, employees, payrollRuns, payslips, salaryAdvances } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zId, zMoney, zMoneyPos, wantsFile, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zDate, zId, zMoney, zMoneyPos, zMonth, wantsFile, type Ctx } from '../lib/http';
 
 /**
  * Payroll: the month's salary worked out from the attendance register.
@@ -27,13 +27,14 @@ import { emptyToNull, inTx, sendList, zDate, zId, zMoney, zMoneyPos, wantsFile, 
 
 type Run = typeof payrollRuns.$inferSelect;
 type Slip = typeof payslips.$inferSelect;
-const zMonth = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'must be a month (YYYY-MM)');
 const monthSpan = (month: string) => {
   const from = `${month}-01`;
   return { from, to: `${month}-${String(lastDayOfMonth(from)).padStart(2, '0')}`, days: lastDayOfMonth(from) };
 };
-const monthName = (month: string) => new Date(`${month}-01T00:00:00Z`).toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
+// ---------------------------------------------------------------------------
+// Working out the month
+// ---------------------------------------------------------------------------
 /** What is due this month against each person's advances: the monthly amount, or what is left if that is less. */
 async function advancesDue(tx: DB, upTo: string) {
   return rows<{ id: string; employee_id: string; due: string; outstanding: string }>(tx, sql`
@@ -96,6 +97,9 @@ export async function calculateRun(ctx: Ctx, run: Run): Promise<void> {
   for (const [employeeId, slip] of kept) if (!seen.includes(employeeId)) await tx.delete(payslips).where(eq(payslips.id, slip.id));
 }
 
+// ---------------------------------------------------------------------------
+// Approving, reopening and paying
+// ---------------------------------------------------------------------------
 const sum = (slips: Slip[], pick: (s: Slip) => string) => slips.reduce((a, s) => a.plus(pick(s)), D(0));
 
 /** Put the month's salary in the books and take the advances off. From here the payslips are fixed. */
@@ -162,6 +166,7 @@ export async function reopenRun(ctx: Ctx, id: string): Promise<Run> {
   return updated!;
 }
 
+/** Record that the net salaries of an approved month went out of a bank or cash account. */
 export async function payRun(ctx: Ctx, id: string, input: { accountId: string; paidOn: string; reference?: string | null }): Promise<Run> {
   const { tx } = ctx;
   const [run] = await tx.select().from(payrollRuns).where(eq(payrollRuns.id, id)).for('update');
@@ -182,6 +187,9 @@ export async function payRun(ctx: Ctx, id: string, input: { accountId: string; p
   return updated!;
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 /** A payslip as a document: the figures, the month in words, and whose it is. */
 async function payslipDocument(tx: DB, slip: Slip) {
   const [run] = await tx.select().from(payrollRuns).where(eq(payrollRuns.id, slip.runId));
@@ -445,6 +453,9 @@ export function payrollRouter(db: DB) {
   return r;
 }
 
+// ---------------------------------------------------------------------------
+// Payslips as their owner sees them
+// ---------------------------------------------------------------------------
 /** A person's own payslips as they see them on "My work": the ones for their sign-in, opened by id. */
 export function myPayslipRouter(db: DB) {
   const r = Router();

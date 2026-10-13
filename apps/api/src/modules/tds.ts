@@ -1,14 +1,14 @@
 import { asc, eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { D, addMonths, formatDate, fyOf, fyRange, istDate, money } from '@radcore/shared';
+import { D, addMonths, formatDate, fyOf, fyRange, istDate, money, monthName } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requireAuth, requirePerm } from '../core/auth';
 import { assertMoneyAccount, postJournal, reverseJournals, systemAccountIds, type SystemAccount } from '../core/journal';
 import { rows, type DB } from '../db/client';
 import { accounts, tdsDeposits, tdsRates } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zText, wantsFile, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zMonth, zText, wantsFile, type Ctx } from '../lib/http';
 
 /**
  * TDS (tax deducted at source), both ways round.
@@ -21,8 +21,6 @@ import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zText, wantsFile, t
  */
 
 const PAYABLE: Record<'vendor' | 'salary', SystemAccount> = { vendor: 'tds_payable_vendors', salary: 'tds_payable' };
-const zMonth = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'month must be YYYY-MM');
-const monthName = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
 /** TDS held back in a month is due by the 7th of the next month; March's is due by 30 April. */
 export const tdsDueOn = (month: string): string => (month.endsWith('-03') ? `${month.slice(0, 4)}-04-30` : `${addMonths(`${month}-01`, 1).slice(0, 7)}-07`);
@@ -68,6 +66,7 @@ export function deductions(db: DB, from: string, to: string): Promise<Deduction[
     ) x order by x.date, x.doc_no`);
 }
 
+/** Record TDS paid over to the government for a month. It cannot be more than is owed. */
 export async function recordDeposit(
   ctx: Ctx,
   input: { kind: 'vendor' | 'salary'; paidOn: string; amount: string; accountId: string; month: string; challanNo?: string | null; bsrCode?: string | null; notes?: string | null },
@@ -98,6 +97,9 @@ export async function recordDeposit(
   return deposit!;
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 export function tdsRouter(db: DB) {
   const r = Router();
 

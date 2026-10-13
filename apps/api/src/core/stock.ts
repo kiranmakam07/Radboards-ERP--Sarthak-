@@ -8,6 +8,22 @@ import type { Ctx } from '../lib/http';
 import { getSetting } from './settings';
 
 /**
+ * The stock ledger. Stock on hand is never stored: it is the sum of stock_movements, one row for
+ * every time stock came in, went out or changed place.
+ *
+ * Valuation is a moving average per item, across all places together. Stock coming in carries its
+ * own cost (stockIn); stock going out takes the average at that moment (stockOut). The module that
+ * moves the stock posts the same value to the Stock in Hand account, which is why the stock report
+ * and the balance sheet agree (checked by GET /api/accounting/reports/integrity).
+ *
+ * Two modules write movement rows themselves, because they must carry an exact value across rather
+ * than re-price it: a transfer between places (modules/inventory.ts) and what comes back from job
+ * work (modules/jobwork.ts). Everything else goes through stockIn and stockOut.
+ *
+ * The order is always: lock the items (lockItems), then read, then move.
+ */
+
+/**
  * Serialise every stock change per item: lock the item rows (in id order, so two
  * transactions can never deadlock) before reading stock on hand or valuation.
  */
@@ -19,6 +35,7 @@ export async function lockItems(tx: DB, itemIds: string[]) {
   return found;
 }
 
+/** How much of an item is in one place right now. */
 export async function onHand(tx: DB, itemId: string, locationId: string): Promise<Decimal> {
   const [r] = await rows<{ qty: string | null }>(tx, sql`
     select coalesce(sum(qty), 0)::text as qty from stock_movements
@@ -34,6 +51,7 @@ export async function valuation(tx: DB, itemId: string): Promise<{ qty: Decimal;
   return { qty: D(r?.qty ?? 0), value: D(r?.value ?? 0) };
 }
 
+/** The place of a given kind that documents use when none is named: the oldest active one. */
 export async function locationByType(tx: DB, type: 'stores' | 'showroom' | 'rejected' | 'job_work'): Promise<string> {
   const [loc] = await tx
     .select({ id: locations.id })

@@ -15,6 +15,18 @@ import { badRequest, conflict, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zDate, zLink, zId, zListQuery, zMoney, zMoneyPos, zText, wantsFile, type Ctx } from '../lib/http';
 
 /**
+ * Accounts: the chart of accounts, expenses, journal entries made by hand, money moved between our
+ * own accounts, the accounting reports, and closing the year.
+ *
+ * Every report here is a query over journal_lines, never a stored total, so a report always matches
+ * the entries behind it. Sales, purchases, payments and payroll post their own entries from their
+ * own modules; this one posts only expenses, manual entries, transfers and the year-end close.
+ */
+
+// ---------------------------------------------------------------------------
+// Expenses
+// ---------------------------------------------------------------------------
+/**
  * Expense (PRD 7.8): Dr expense account - Dr Input GST (when claimable) - Cr the cash/bank
  * account it was paid from.
  *
@@ -80,6 +92,9 @@ export async function createExpense(
   return expense!;
 }
 
+// ---------------------------------------------------------------------------
+// Balances for a period (what the reports are built from)
+// ---------------------------------------------------------------------------
 /** Signed balance of each account for a period, in the account's natural direction. */
 type AccountTotal = { id: string; code: string; name: string; type: (typeof ACCOUNT_TYPES)[number]; debit: string; credit: string };
 
@@ -189,6 +204,9 @@ export async function reopenYear(ctx: Ctx, fy: string): Promise<void> {
   await audit(ctx, 'fiscal_year', fy, 'reopen', { profit: close.profit }, null);
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 export function accountingRouter(db: DB) {
   const r = Router();
 

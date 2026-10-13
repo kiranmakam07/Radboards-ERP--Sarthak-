@@ -23,7 +23,6 @@ beforeAll(async () => {
   w = await setup();
   m = await masters(w.db);
   const admin = await w.as('admin');
-  const accounts = await w.as('accounts');
   // Bought at 500, sold to dealers at 1,000 before GST.
   id.board = (await admin.post('/api/items').send({ sku: 'BRD-1', name: 'Board', item_type: 'finished_good', hsn_sac: '950699', gst_rate: 18, retail_price: 1180, dealer_price: 1000, purchase_cost: 500 }).expect(201)).body.data.id;
   await openingStock(w, m.stores, [{ item_id: id.board!, qty_change: '100', unit_cost: '500.00' }]);

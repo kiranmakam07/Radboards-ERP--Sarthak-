@@ -2,6 +2,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
+/**
+ * The settings the running API takes from the environment, read once, in one place. A blank value
+ * always means "this feature is off", never "use some default account".
+ * What each one is for, and what to put in it, is in .env.example and .env.production.example.
+ *
+ * The few environment variables read elsewhere are start-up switches, not settings of the running
+ * API: SEED_DEMO_DATA and DEMO_PASSWORD (db/demo.ts, server.ts, prepare.ts), SEED_ADMIN_* (db/seed.ts)
+ * and BCRYPT_ROUNDS (core/auth.ts, lowered by the tests).
+ */
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const API_ROOT = path.resolve(here, '..');
 export const REPO_ROOT = path.resolve(API_ROOT, '../..');
