@@ -1,26 +1,32 @@
 import { asc, eq, inArray, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { ACCOUNT_TYPES, D, addDays, formatDate, fyOf, fyRange, isValidGstin, istDate, money, normaliseGstin } from '@radcore/shared';
+import {
+  ACCOUNT_TYPES, D, addDays, formatDate, fyOf, fyRange, isValidGstin, isValidPan, istDate, money, normaliseGstin, normalisePan, panFromGstin,
+} from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requireAuth, requirePerm } from '../core/auth';
 import { assertMoneyAccount, postJournal, reverseJournals, type JLine } from '../core/journal';
 import { nextNumber } from '../core/numbering';
 import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
-import { accounts, expenseCategories, expenses, fiscalCloses, journalEntries } from '../db/schema';
+import { accounts, expenseCategories, expenses, fiscalCloses, journalEntries, tdsRates } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zDate, zLink, zId, zListQuery, zMoney, zMoneyPos, zText, wantsFile, type Ctx } from '../lib/http';
 
 /**
  * Expense (PRD 7.8): Dr expense account - Dr Input GST (when claimable) - Cr the cash/bank
  * account it was paid from.
+ *
+ * When tax is held back (rent, a contractor, a professional) the vendor is paid the total less
+ * the TDS, and the TDS is owed to the government: Cr cash/bank (total - TDS) - Cr TDS Payable.
  */
 export async function createExpense(
   ctx: Ctx,
   input: {
     expenseDate: string; categoryId: string; amount: string; gstAmount?: string | null; gstType: 'none' | 'intra' | 'inter';
     paidFromAccountId: string; vendorName?: string | null; vendorGstin?: string | null; attachmentUrl?: string | null; notes?: string | null;
+    tdsAmount?: string | null; tdsRateId?: string | null; vendorPan?: string | null;
   },
 ) {
   const { tx } = ctx;
@@ -34,6 +40,18 @@ export async function createExpense(
   const sgst = input.gstType === 'intra' ? gst.minus(cgst) : D(0);
   const igst = input.gstType === 'inter' ? gst : D(0);
   const total = D(input.amount).plus(gst);
+  const tds = D(input.tdsAmount ?? 0);
+  let vendorPan = input.vendorPan ? normalisePan(input.vendorPan) : null;
+  if (vendorPan && !isValidPan(vendorPan)) throw badRequest('The PAN must look like ABCDE1234F');
+  if (tds.gt(0)) {
+    // The return names who the tax was held back from, and under which head.
+    if (!input.vendorName) throw badRequest('Name the vendor the TDS was held back from');
+    const [rate] = input.tdsRateId ? await tx.select().from(tdsRates).where(eq(tdsRates.id, input.tdsRateId)) : [];
+    if (!rate || !rate.active) throw badRequest('Pick the kind of payment the TDS is for');
+    // TDS is worked out on the amount before GST, so it can never reach it.
+    if (tds.gte(D(input.amount))) throw badRequest('The TDS must be less than the amount before GST');
+    vendorPan = vendorPan ?? panFromGstin(input.vendorGstin);
+  } else if (input.tdsRateId) throw badRequest('Enter the TDS amount, or leave the kind of payment blank');
 
   const { number } = await nextNumber(tx, 'expense', input.expenseDate);
   const [expense] = await tx
@@ -42,18 +60,20 @@ export async function createExpense(
       expenseNo: number, expenseDate: input.expenseDate, categoryId: category.id, amount: money(input.amount),
       cgst: money(cgst), sgst: money(sgst), igst: money(igst), gstAmount: money(gst), paidFromAccountId: input.paidFromAccountId,
       vendorName: input.vendorName ?? null, vendorGstin: input.vendorGstin ?? null, attachmentUrl: input.attachmentUrl ?? null,
+      tdsAmount: money(tds), tdsRateId: tds.gt(0) ? input.tdsRateId! : null, vendorPan,
       notes: input.notes ?? null, createdBy: ctx.user?.id ?? null,
     })
     .returning();
   await postJournal(ctx, {
     date: input.expenseDate, refType: 'expense', refId: expense!.id,
-    narration: `${category.name}${input.vendorName ? ` - ${input.vendorName}` : ''} (${number})`,
+    narration: `${category.name}${input.vendorName ? ` - ${input.vendorName}` : ''} (${number})${tds.gt(0) ? `, TDS ${money(tds)}` : ''}`,
     lines: [
       { account: { id: category.accountId }, debit: input.amount },
       { account: 'input_cgst', debit: cgst },
       { account: 'input_sgst', debit: sgst },
       { account: 'input_igst', debit: igst },
-      { account: { id: input.paidFromAccountId }, credit: total },
+      { account: { id: input.paidFromAccountId }, credit: total.minus(tds) },
+      { account: 'tds_payable_vendors', credit: tds },
     ],
   });
   await audit(ctx, 'expense', expense!.id, 'create', null, expense);
@@ -220,8 +240,10 @@ export function accountingRouter(db: DB) {
   r.get('/expenses', requirePerm('expenses:read'), async (req, res) => {
     const q = zListQuery.extend({ category_id: zId.optional(), from: zDate.optional(), to: zDate.optional() }).parse(req.query);
     const data = await rows(db, sql`
-      select e.*, c.name as category_name, a.name as paid_from, (e.amount + e.gst_amount) as total
+      select e.*, c.name as category_name, a.name as paid_from, (e.amount + e.gst_amount) as total,
+             (e.amount + e.gst_amount - e.tds_amount) as paid, t.name as tds_rate_name
         from expenses e join expense_categories c on c.id = e.category_id join accounts a on a.id = e.paid_from_account_id
+        left join tds_rates t on t.id = e.tds_rate_id
        where (${q.category_id ?? null}::uuid is null or e.category_id = ${q.category_id ?? null}::uuid)
          and (${q.from ?? null}::date is null or e.expense_date >= ${q.from ?? null}::date)
          and (${q.to ?? null}::date is null or e.expense_date <= ${q.to ?? null}::date)
@@ -241,6 +263,9 @@ export function accountingRouter(db: DB) {
       vendor_gstin: emptyToNull(z.string().trim().max(15)).optional(),
       attachment_url: emptyToNull(zLink).optional(),
       notes: emptyToNull(z.string().trim().max(1000)).optional(),
+      tds_amount: emptyToNull(zMoney).optional(),
+      tds_rate_id: emptyToNull(zId).optional(),
+      vendor_pan: emptyToNull(z.string().trim().max(12)).optional(),
     }).parse(req.body);
     if (b.vendor_gstin && !isValidGstin(b.vendor_gstin)) throw badRequest('Vendor GSTIN is not valid');
     // Input credit needs the vendor's GSTIN on the bill.
@@ -250,6 +275,7 @@ export function accountingRouter(db: DB) {
         expenseDate: b.expense_date, categoryId: b.category_id, amount: b.amount, gstAmount: b.gst_amount, gstType: b.gst_type,
         paidFromAccountId: b.paid_from_account_id, vendorName: b.vendor_name,
         vendorGstin: b.vendor_gstin ? normaliseGstin(b.vendor_gstin) : null, attachmentUrl: b.attachment_url, notes: b.notes,
+        tdsAmount: b.tds_amount, tdsRateId: b.tds_rate_id, vendorPan: b.vendor_pan,
       }));
     res.status(201).json({ data: expense });
   });
@@ -386,6 +412,77 @@ export function accountingRouter(db: DB) {
   });
 
   // ---- reports (all are queries over journal_lines - PRD 8.12) ----
+  /**
+   * Day book: everything that was entered in the books on a day (or between two days), one line per
+   * transaction - what it was, who with, how much, and the cash or bank money it brought in or
+   * took out. A cancelled document shows twice, as it does in the books: the entry and its reversal.
+   */
+  r.get('/reports/day-book', requirePerm('accounts:read'), async (req, res) => {
+    const q = z.object({ from: zDate.optional(), to: zDate.optional(), type: emptyToNull(z.string().trim().max(40)).optional() }).parse(req.query);
+    const today = istDate();
+    const from = q.from ?? q.to ?? today;
+    const to = q.to ?? q.from ?? today;
+    if (from > to) throw badRequest('The first date is after the last');
+    type Row = { type: string; amount: string; money_in: string; money_out: string; reversal: boolean };
+    const data = await rows<Row>(db, sql`
+      select e.id, e.entry_date, e.entry_no::int as entry_no, e.ref_type as type, e.ref_id, e.narration,
+             e.reverses_entry_id is not null as reversal,
+             (select p.name from journal_lines l join parties p on p.id = l.party_id where l.entry_id = e.id order by l.id limit 1) as party_name,
+             t.amount::numeric(16,2)::text as amount, t.money_in::numeric(16,2)::text as money_in, t.money_out::numeric(16,2)::text as money_out
+        from journal_entries e
+        join lateral (
+          select sum(l.debit) as amount,
+                 coalesce(sum(l.debit) filter (where a.subtype is not null), 0) as money_in,
+                 coalesce(sum(l.credit) filter (where a.subtype is not null), 0) as money_out
+            from journal_lines l join accounts a on a.id = l.account_id where l.entry_id = e.id
+        ) t on true
+       where e.entry_date between ${from}::date and ${to}::date
+         and (${q.type ?? null}::text is null or e.ref_type = ${q.type ?? null})
+       order by e.entry_date, e.entry_no limit 5000`);
+    if (wantsFile(req)) return sendList(req, res, data, `day-book-${from}${to === from ? '' : `-to-${to}`}`);
+    const add = (list: Row[], k: 'amount' | 'money_in' | 'money_out') => money(list.reduce((s, x) => s.plus(x[k]), D(0)));
+    const types = [...new Set(data.map((x) => x.type))].sort();
+    res.json({
+      data, from, to,
+      totals: { entries: data.length, money_in: add(data, 'money_in'), money_out: add(data, 'money_out'), net: money(D(add(data, 'money_in')).minus(add(data, 'money_out'))) },
+      by_type: types.map((type) => {
+        const list = data.filter((x) => x.type === type);
+        return { type, entries: list.length, amount: add(list, 'amount'), money_in: add(list, 'money_in'), money_out: add(list, 'money_out') };
+      }),
+    });
+  });
+
+  /**
+   * Profit by customer: the same figures as profit by bill, added up for each party. Returns are
+   * taken off. Counter sales with no named customer are one line, "Cash Sale".
+   */
+  r.get('/reports/party-profit', requirePerm('accounts:read'), async (req, res) => {
+    const q = z.object({ from: zDate.optional(), to: zDate.optional() }).parse(req.query);
+    const today = istDate();
+    const from = q.from ?? `${today.slice(0, 7)}-01`;
+    const to = q.to ?? today;
+    const data = await rows<{ sale: string; cost: string; profit: string }>(db, sql`
+      select x.party_id, x.party_name, max(x.party_type) as party_type,
+             count(*) filter (where x.sign = 1)::int as bills, count(*) filter (where x.sign = -1)::int as returns,
+             sum(x.sign * x.taxable_total)::numeric(14,2)::text as sale,
+             sum(x.sign * x.cost)::numeric(14,2)::text as cost,
+             sum(x.sign * (x.taxable_total - x.cost))::numeric(14,2)::text as profit,
+             case when sum(x.sign * x.taxable_total) > 0
+                  then round(100 * sum(x.sign * (x.taxable_total - x.cost)) / sum(x.sign * x.taxable_total), 1) end as margin_pct
+        from (
+          select i.party_id, coalesce(p.name, i.party_name, 'Cash Sale') as party_name, p.party_type::text as party_type, i.taxable_total,
+                 case when i.doc_type = 'credit_note' then -1 else 1 end as sign,
+                 coalesce((select sum(l.qty * l.unit_cost) from invoice_lines l where l.invoice_id = i.id), 0) as cost
+            from invoices i left join parties p on p.id = i.party_id
+           where i.status = 'issued' and i.invoice_date between ${from}::date and ${to}::date
+        ) x
+       group by x.party_id, x.party_name
+       order by sum(x.sign * (x.taxable_total - x.cost)) desc, x.party_name limit 5000`);
+    if (wantsFile(req)) return sendList(req, res, data.map(({ party_id: _id, ...x }: any) => x), `profit-by-party-${from}-to-${to}`);
+    const sum = (k: 'sale' | 'cost' | 'profit') => money(data.reduce((a, x) => a.plus(x[k]), D(0)));
+    res.json({ data, from, to, totals: { sale: sum('sale'), cost: sum('cost'), profit: sum('profit') } });
+  });
+
   /**
    * Profit on each bill: what the goods on it sold for (before GST) less what they cost us, taken
    * from the cost recorded when they were delivered. A credit note takes its sale and its cost

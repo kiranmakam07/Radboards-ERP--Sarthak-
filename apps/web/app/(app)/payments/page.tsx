@@ -2,7 +2,7 @@
 
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
-import { istDate, PAYMENT_MODES } from '@radcore/shared';
+import { istDate, PAYMENT_MODES, tdsOn } from '@radcore/shared';
 import { ActionButton, Badge, Card, CsvLink, ErrorBox, Loading, Page, Table, Toggle, date, inr, label } from '@/components/ui';
 import { api, post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -30,6 +30,7 @@ function Payments() {
         { key: 'party_name', title: 'Party', render: (r) => r.party_name ?? 'Cash sale' },
         { key: 'mode', title: 'Mode', render: (r) => label(r.mode) }, { key: 'account_name', title: 'Account' }, { key: 'reference', title: 'Reference' },
         { key: 'amount', title: 'Amount', align: 'right', render: (r) => inr(r.amount) },
+        { key: 'tds_amount', title: 'TDS', align: 'right', render: (r) => (Number(r.tds_amount) ? inr(r.tds_amount) : '') },
         { key: 'unallocated', title: 'Advance (unallocated)', align: 'right', render: (r) => (Number(r.unallocated) > 0 ? inr(r.unallocated) : '') },
         { key: 'status', title: 'Status', render: (r) => <Badge value={r.status} /> },
         { key: 'x', title: '', render: (r) => (r.status === 'posted' && can('payments:write') ? (
@@ -45,6 +46,8 @@ function Payments() {
 function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () => void }) {
   const parties = useGet<{ data: any[] }>('/parties?limit=2000');
   const accounts = useGet<{ data: any[] }>('/accounting/money-accounts');
+  const rates = useGet<{ data: any[] }>('/tds/rates');
+  const [tds, setTds] = useState({ on: false, rate_id: '', base: '', amount: '' });
   const [partyId, setPartyId] = useState(presetParty);
   const [party, setParty] = useState<any>(null);
   const [v, setV] = useState({ amount: '', mode: 'bank_transfer', account_id: '', reference: '', paid_on: istDate(), direction: '' });
@@ -61,10 +64,20 @@ function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () 
   const open: any[] = party ? (direction === 'in' ? party.open_invoices : party.open_bills) : [];
   const idKey = direction === 'in' ? 'invoice_id' : 'bill_id';
   const allocated = Object.values(alloc).reduce((s, a) => s + Number(a || 0), 0);
+  // With TDS the party is settled for the money that moved plus the tax held back.
+  const held = tds.on ? Number(tds.amount || 0) : 0;
+  const settles = Math.round((Number(v.amount || 0) + held) * 100) / 100;
+  const rate = (rates.data?.data ?? []).find((r) => r.id === tds.rate_id);
+  // Paying out, TDS belongs to suppliers; coming in, it is the customer who held it back.
+  const canHold = Boolean(party) && (direction === 'in' ? party.party_type !== 'supplier' : party.party_type === 'supplier');
+  const setBase = (base: string, rateId = tds.rate_id) => {
+    const r = (rates.data?.data ?? []).find((x) => x.id === rateId);
+    setTds({ on: true, rate_id: rateId, base, amount: r && Number(base) > 0 ? String(Number(tdsOn(base, r.rate))) : tds.amount });
+  };
 
   // Oldest first, until the amount runs out.
   function autoAllocate() {
-    let left = Number(v.amount || 0);
+    let left = settles;
     const next: Record<string, string> = {};
     for (const doc of open) {
       if (left <= 0) break;
@@ -82,8 +95,9 @@ function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () 
         direction, party_id: partyId, mode: v.mode, account_id: v.account_id, amount: v.amount, reference: v.reference, paid_on: v.paid_on,
         allocations: Object.entries(alloc).filter(([, a]) => Number(a) > 0)
           .map(([docId, amount]) => (direction === 'in' ? { invoice_id: docId, amount } : { purchase_bill_id: docId, amount })),
+        ...(held > 0 ? { tds_amount: tds.amount, tds_rate_id: tds.rate_id, tds_base: tds.base } : {}),
       });
-      setV({ ...v, amount: '', reference: '' }); setAlloc({});
+      setV({ ...v, amount: '', reference: '' }); setAlloc({}); setTds({ on: false, rate_id: '', base: '', amount: '' });
       const fresh = await api(`/parties/${partyId}`);
       setParty(fresh.data);
       onDone();
@@ -105,7 +119,7 @@ function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () 
             <option value="in">Money in (received)</option><option value="out">Money out (paid)</option>
           </select>
         </label>
-        <label><span>Amount ₹ *</span><input type="number" min="0" step="any" value={v.amount} onChange={(e) => setV({ ...v, amount: e.target.value })} /></label>
+        <label><span>{held > 0 ? (direction === 'in' ? 'Money received ₹ *' : 'Money paid ₹ *') : 'Amount ₹ *'}</span><input type="number" min="0" step="any" value={v.amount} onChange={(e) => setV({ ...v, amount: e.target.value })} /></label>
         <label><span>Mode *</span>
           <select value={v.mode} onChange={(e) => setV({ ...v, mode: e.target.value })}>{PAYMENT_MODES.map((m) => <option key={m} value={m}>{label(m)}</option>)}</select>
         </label>
@@ -116,7 +130,27 @@ function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () 
         </label>
         <label><span>Reference (UTR / cheque no)</span><input value={v.reference} onChange={(e) => setV({ ...v, reference: e.target.value })} /></label>
         <label><span>Date *</span><input type="date" value={v.paid_on} onChange={(e) => setV({ ...v, paid_on: e.target.value })} /></label>
+        {canHold && (
+          <label className="check"><input type="checkbox" checked={tds.on} onChange={(e) => setTds({ ...tds, on: e.target.checked })} />
+            <span>{direction === 'in' ? 'The customer held back TDS' : 'TDS was held back from this payment'}</span></label>
+        )}
+        {canHold && tds.on && (
+          <>
+            <label><span>Kind of payment{direction === 'out' ? ' *' : ''}</span>
+              <select value={tds.rate_id} onChange={(e) => setBase(tds.base, e.target.value)}>
+                <option value="">—</option>{(rates.data?.data ?? []).filter((r) => r.active).map((r) => <option key={r.id} value={r.id}>{r.name} ({Number(r.rate)}%)</option>)}
+              </select>
+            </label>
+            <label><span>TDS is worked out on ₹</span><input type="number" min="0" step="any" value={tds.base} onChange={(e) => setBase(e.target.value)} />
+              <small className="muted">The amount before GST</small></label>
+            <label><span>TDS ₹ *</span><input type="number" min="0" step="any" value={tds.amount} onChange={(e) => setTds({ ...tds, amount: e.target.value })} />
+              <small className="muted">{rate ? `${Number(rate.rate)}% of the amount above, to the rupee. Change it if a lower rate applies.` : 'What was held back'}</small></label>
+          </>
+        )}
       </div>
+      {held > 0 && v.amount ? (
+        <p className="muted small">₹{inr(v.amount)} {direction === 'in' ? 'received' : 'paid'} + ₹{inr(held)} TDS = <strong>₹{inr(settles)}</strong> settled on {party?.name}&apos;s account.</p>
+      ) : null}
       {party && (
         <Card title={direction === 'in' ? 'Allocate to invoices' : 'Allocate to bills'} actions={<button type="button" onClick={autoAllocate}>Auto-allocate oldest first</button>}>
           <Table rows={open} empty="Nothing outstanding — the whole amount will be kept as an advance." columns={[
@@ -127,7 +161,7 @@ function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () 
               <input type="number" min="0" step="any" style={{ width: 120 }} value={alloc[r[idKey]] ?? ''} onChange={(e) => setAlloc({ ...alloc, [r[idKey]]: e.target.value })} />
             ) },
           ]} />
-          <p className="muted small">Allocated ₹{inr(allocated)} of ₹{inr(v.amount || 0)}. Anything left over is kept as an advance.</p>
+          <p className="muted small">Allocated ₹{inr(allocated)} of ₹{inr(settles)}. Anything left over is kept as an advance.</p>
         </Card>
       )}
       <div className="form-foot"><button type="button" className="primary" disabled={!partyId || !v.amount} onClick={save}>Save payment</button><ErrorBox error={error} /></div>

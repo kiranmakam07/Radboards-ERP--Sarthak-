@@ -7,9 +7,9 @@ import { requirePerm } from '../core/auth';
 import { assertMoneyAccount, defaultMoneyAccount, postJournal, reverseJournals, type SystemAccount } from '../core/journal';
 import { nextNumber } from '../core/numbering';
 import { rows, type DB } from '../db/client';
-import { invoices, parties, paymentAllocations, payments, purchaseBills } from '../db/schema';
+import { invoices, parties, paymentAllocations, payments, purchaseBills, tdsRates } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoneyPos, zText, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zMoneyPos, zText, type Ctx } from '../lib/http';
 import { assertCreditsCovered } from './credits';
 
 export type Payment = typeof payments.$inferSelect;
@@ -25,7 +25,15 @@ export type PaymentInput = {
   paidOn: string;
   notes?: string | null;
   allocations?: AllocationInput[];
+  /** Tax held back on top of `amount`: by us from a supplier, or by the customer from us. */
+  tdsAmount?: string | null;
+  tdsRateId?: string | null;
+  /** What the tax was worked out on; the whole settlement when not given. */
+  tdsBase?: string | null;
 };
+
+/** What a payment settles on the party's account: the money that moved plus any tax held back. */
+export const settles = (p: { amount: string; tdsAmount: string }) => D(p.amount).plus(p.tdsAmount);
 
 /** Which control account a party's money sits in: customers/dealers -> Debtors, suppliers -> Creditors. */
 function controlAccount(partyType: string | null): SystemAccount {
@@ -65,12 +73,16 @@ async function allocate(ctx: Ctx, payment: Payment, allocations: AllocationInput
   }
   const [t] = await rows<{ total: string }>(tx, sql`
     select coalesce(sum(amount), 0)::text as total from payment_allocations where payment_id = ${payment.id}`);
-  if (D(t?.total ?? 0).gt(D(payment.amount))) throw badRequest('Allocations add up to more than the payment');
+  if (D(t?.total ?? 0).gt(settles(payment))) throw badRequest('Allocations add up to more than the payment');
 }
 
 /**
  * Payment in or out (PRD 7.8 / 8.9). Posts Dr Cash/Bank - Cr party (in) or the reverse (out),
  * and allocates across invoices/bills. Whatever is left unallocated is an advance.
+ *
+ * With TDS the party is settled for more than the money that moved. Paying a supplier 9,000 with
+ * 1,000 held back: Dr Creditors 10,000 - Cr Bank 9,000 - Cr TDS Payable 1,000. A customer paying
+ * 9,000 after holding back 1,000: Dr Bank 9,000 - Dr TDS Receivable 1,000 - Cr Debtors 10,000.
  */
 export async function createPayment(ctx: Ctx, input: PaymentInput): Promise<Payment> {
   const { tx } = ctx;
@@ -88,6 +100,22 @@ export async function createPayment(ctx: Ctx, input: PaymentInput): Promise<Paym
       throw badRequest('A payment without a party must be fully allocated to a cash-sale invoice');
     }
   }
+  const tds = D(input.tdsAmount ?? 0);
+  let tdsRate: typeof tdsRates.$inferSelect | undefined;
+  if (tds.gt(0)) {
+    if (!input.partyId) throw badRequest('TDS needs a named party');
+    if (input.direction === 'out' && partyType !== 'supplier') throw badRequest('TDS is held back from payments to suppliers');
+    if (input.tdsRateId) {
+      [tdsRate] = await tx.select().from(tdsRates).where(eq(tdsRates.id, input.tdsRateId));
+      if (!tdsRate || !tdsRate.active) throw badRequest('Pick the kind of payment the TDS is for');
+    } else if (input.direction === 'out') {
+      // What we hold back has to be reported under its head; what a customer held back is theirs to report.
+      throw badRequest('Pick the kind of payment the TDS is for');
+    }
+  } else if (input.tdsRateId) throw badRequest('Enter the TDS amount, or leave the kind of payment blank');
+  const settled = D(input.amount).plus(tds);
+  const tdsBase = tds.gt(0) ? D(input.tdsBase ?? settled) : null;
+  if (tdsBase && (tdsBase.lte(0) || tds.gte(tdsBase))) throw badRequest('The TDS must be less than the amount it is worked out on');
   const accountId = input.accountId ?? (await defaultMoneyAccount(tx, input.mode));
   await assertMoneyAccount(tx, accountId);
 
@@ -101,6 +129,9 @@ export async function createPayment(ctx: Ctx, input: PaymentInput): Promise<Paym
       mode: input.mode,
       accountId,
       amount: money(input.amount),
+      tdsAmount: money(tds),
+      tdsRateId: tds.gt(0) ? (tdsRate?.id ?? null) : null,
+      tdsBase: tdsBase ? money(tdsBase) : null,
       reference: input.reference ?? null,
       paidOn: input.paidOn,
       notes: input.notes ?? null,
@@ -114,11 +145,11 @@ export async function createPayment(ctx: Ctx, input: PaymentInput): Promise<Paym
     date: input.paidOn,
     refType: 'payment',
     refId: payment!.id,
-    narration: `${input.direction === 'in' ? 'Received from' : 'Paid to'} ${partyName} (${number}, ${input.mode})`,
+    narration: `${input.direction === 'in' ? 'Received from' : 'Paid to'} ${partyName} (${number}, ${input.mode})${tds.gt(0) ? `, TDS ${money(tds)}` : ''}`,
     lines:
       input.direction === 'in'
-        ? [{ account: { id: accountId }, debit: input.amount }, { account: control, partyId: input.partyId, credit: input.amount }]
-        : [{ account: control, partyId: input.partyId, debit: input.amount }, { account: { id: accountId }, credit: input.amount }],
+        ? [{ account: { id: accountId }, debit: input.amount }, { account: 'tds_receivable', debit: tds }, { account: control, partyId: input.partyId, credit: settled }]
+        : [{ account: control, partyId: input.partyId, debit: settled }, { account: { id: accountId }, credit: input.amount }, { account: 'tds_payable_vendors', credit: tds }],
   });
   await audit(ctx, 'payment', payment!.id, 'create', null, { ...payment, allocations: input.allocations ?? [] });
   return payment!;
@@ -150,9 +181,11 @@ export function paymentsRouter(db: DB) {
     const data = await rows(db, sql`
       select p.*, pt.name as party_name, a.name as account_name,
              coalesce(al.allocated, 0) as allocated,
-             case when p.status = 'posted' then p.amount - coalesce(al.allocated, 0) else 0 end as unallocated
+             case when p.status = 'posted' then p.amount + p.tds_amount - coalesce(al.allocated, 0) else 0 end as unallocated,
+             t.name as tds_rate_name
         from payments p
         left join parties pt on pt.id = p.party_id
+        left join tds_rates t on t.id = p.tds_rate_id
         join accounts a on a.id = p.account_id
         left join (select payment_id, sum(amount) as allocated from payment_allocations group by payment_id) al on al.payment_id = p.id
        where (${q.direction ?? null}::text is null or p.direction::text = ${q.direction ?? null})
@@ -167,8 +200,9 @@ export function paymentsRouter(db: DB) {
   r.get('/:id', requirePerm('payments:read'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const [payment] = await rows(db, sql`
-      select p.*, pt.name as party_name, a.name as account_name
+      select p.*, pt.name as party_name, a.name as account_name, t.name as tds_rate_name, t.rate as tds_rate
         from payments p left join parties pt on pt.id = p.party_id join accounts a on a.id = p.account_id
+        left join tds_rates t on t.id = p.tds_rate_id
        where p.id = ${id}`);
     must(payment, 'Payment');
     const allocations = await rows(db, sql`
@@ -198,11 +232,15 @@ export function paymentsRouter(db: DB) {
       paid_on: zDate.default(() => istDate()),
       notes: emptyToNull(z.string().trim().max(1000)).optional(),
       allocations: z.array(zAlloc).max(200).default([]),
+      tds_amount: emptyToNull(zMoney).optional(),
+      tds_rate_id: emptyToNull(zId).optional(),
+      tds_base: emptyToNull(zMoneyPos).optional(),
     }).parse(req.body);
     const payment = await inTx(db, req, (ctx) =>
       createPayment(ctx, {
         direction: b.direction, partyId: b.party_id, mode: b.mode, accountId: b.account_id, amount: b.amount,
         reference: b.reference, paidOn: b.paid_on, notes: b.notes, allocations: b.allocations.map(toAlloc),
+        tdsAmount: b.tds_amount, tdsRateId: b.tds_rate_id, tdsBase: b.tds_base,
       }));
     res.status(201).json({ data: payment });
   });

@@ -7,7 +7,7 @@ import { hashPassword } from '../core/auth';
 import { SETTING_DEFAULTS } from '../core/settings';
 import { createDb, type DB } from './client';
 import {
-  accounts, expenseCategories, leadSources, locations, lostReasons, messageTemplates, priceLists, settings, users,
+  accounts, expenseCategories, leadSources, locations, lostReasons, messageTemplates, priceLists, settings, tdsRates, users,
 } from './schema';
 
 type Coa = { code: string; name: string; type: AccountType; key?: string; group?: boolean; subtype?: 'cash' | 'bank'; parent?: string };
@@ -23,6 +23,7 @@ const COA: Coa[] = [
   { code: '1410', name: 'Input SGST', type: 'asset', key: 'input_sgst', parent: '1000' },
   { code: '1420', name: 'Input IGST', type: 'asset', key: 'input_igst', parent: '1000' },
   { code: '1500', name: 'Staff Advances', type: 'asset', key: 'staff_advances', parent: '1000' },
+  { code: '1510', name: 'TDS Receivable', type: 'asset', key: 'tds_receivable', parent: '1000' },
 
   { code: '2000', name: 'Liabilities', type: 'liability', group: true },
   { code: '2100', name: 'Creditors (Accounts Payable)', type: 'liability', key: 'creditors', parent: '2000' },
@@ -35,6 +36,7 @@ const COA: Coa[] = [
   { code: '2420', name: 'ESIC Payable', type: 'liability', key: 'esic_payable', parent: '2000' },
   { code: '2430', name: 'Professional Tax Payable', type: 'liability', key: 'pt_payable', parent: '2000' },
   { code: '2440', name: 'TDS Payable (Salaries)', type: 'liability', key: 'tds_payable', parent: '2000' },
+  { code: '2450', name: 'TDS Payable (Vendors)', type: 'liability', key: 'tds_payable_vendors', parent: '2000' },
 
   { code: '3000', name: 'Equity', type: 'equity', group: true },
   { code: '3100', name: "Owner's Capital", type: 'equity', key: 'capital', parent: '3000' },
@@ -80,6 +82,22 @@ const QUICK_REPLIES: [string, string][] = [
   ['Visit the showroom', 'Hi {first_name}, you are welcome to visit our showroom to try {products} yourself. Shall I book a time for you?'],
 ];
 const LOST_REASONS = ['Price', 'Bought elsewhere', 'Not reachable', 'Just browsing', 'Other'];
+
+/**
+ * The usual kinds of payment tax is held back from, at the rates in general use. From 1 April 2026
+ * they sit in section 393 of the Income-tax Act, 2025; the earlier section is named beside each so
+ * it can be recognised. Accounts can change a rate, add a kind, or fill in the return's code.
+ */
+const TDS_RATES: [string, string, string][] = [
+  ['Contractor (individual or HUF)', 'Section 393(1); earlier 194C', '1'],
+  ['Contractor (company or firm)', 'Section 393(1); earlier 194C', '2'],
+  ['Professional fees', 'Section 393(1); earlier 194J', '10'],
+  ['Technical services', 'Section 393(1); earlier 194J', '2'],
+  ['Rent of land, building or furniture', 'Section 393(1); earlier 194I', '10'],
+  ['Rent of plant or machinery', 'Section 393(1); earlier 194I', '2'],
+  ['Commission or brokerage', 'Section 393(1); earlier 194H', '2'],
+  ['Purchase of goods', 'Section 393(1); earlier 194Q', '0.1'],
+];
 
 /**
  * Idempotent: creates the masters the system cannot run without. Safe to run on every boot.
@@ -136,6 +154,7 @@ export async function seedDefaults(db: DB): Promise<void> {
 
     await tx.insert(leadSources).values(LEAD_SOURCES.map((name) => ({ name }))).onConflictDoNothing();
     await tx.insert(lostReasons).values(LOST_REASONS.map((name) => ({ name }))).onConflictDoNothing();
+    await tx.insert(tdsRates).values(TDS_RATES.map(([name, lawReference, rate]) => ({ name, lawReference, rate }))).onConflictDoNothing();
     await tx.insert(messageTemplates).values(QUICK_REPLIES.map(([name, body], i) => ({ name, body, sortOrder: i }))).onConflictDoNothing();
   });
 }

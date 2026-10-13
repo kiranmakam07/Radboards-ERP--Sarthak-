@@ -29,7 +29,7 @@ export default function PartyPage() {
     }>
       <Card>
         <KV rows={[
-          ['Type', <><Badge value={p.party_type} />{p.active ? null : <> <Badge value="closed" /></>}</>], ['Phone', p.phone], ['Email', p.email], ['GSTIN', p.gstin],
+          ['Type', <><Badge value={p.party_type} />{p.active ? null : <> <Badge value="closed" /></>}</>], ['Phone', p.phone], ['Email', p.email], ['GSTIN', p.gstin], ['PAN', p.pan],
           ['State', `${STATE_CODES[p.state_code] ?? ''} (${p.state_code})`],
           ['Address', [a.line1, a.city, a.pincode].filter(Boolean).join(', ')],
           ['Credit limit', p.credit_limit ? `₹${inr(p.credit_limit)}` : null],
@@ -43,7 +43,7 @@ export default function PartyPage() {
         <Toggle label="Edit party">
           <Form key={p.updated_at} fields={[...partyFields(priceLists.data?.data ?? [], false), { name: 'active', label: 'Active (untick to switch this party off)', type: 'checkbox' }]}
             initial={{
-              name: p.name, phone: p.phone ?? '', email: p.email ?? '', gstin: p.gstin ?? '', state_code: p.gstin ? '' : p.state_code,
+              name: p.name, phone: p.phone ?? '', email: p.email ?? '', gstin: p.gstin ?? '', pan: p.pan ?? '', state_code: p.gstin ? '' : p.state_code,
               line1: a.line1 ?? '', city: a.city ?? '', pincode: a.pincode ?? '', price_list_id: p.price_list_id ?? '',
               credit_limit: p.credit_limit ?? '', payment_terms_days: p.payment_terms_days ?? '', active: p.active,
             }}

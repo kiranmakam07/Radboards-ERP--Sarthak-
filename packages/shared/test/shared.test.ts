@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   PAYROLL_RULES_DEFAULT, ROLES, addMonths, amountInWords, canMoveApplicant, canMoveLead, computeLine, computePay, computeTotals, formatINR, fyOf, fyShort, gstinCheckChar,
-  isInterState, isTaskDueOn, isValidGstin, leaveEntitlement, money, normalisePhone, peakLoad, stateCodeFromGstin, can, weekStart, weekdayOf,
+  isInterState, isTaskDueOn, isValidGstin, isValidPan, leaveEntitlement, money, normalisePhone, panFromGstin, peakLoad, stateCodeFromGstin, can, tdsOn,
+  tdsQuarter, weekStart, weekdayOf,
 } from '../src';
 
 describe('money', () => {
@@ -248,5 +249,34 @@ describe('salary for a month', () => {
   it('follows the rules when they are changed', () => {
     const rules = { ...PAYROLL_RULES_DEFAULT, basic_pct: 40, pf_wage_ceiling: 100000 };
     expect(computePay({ ...base, pf: true }, rules)).toMatchObject({ basicEarned: '12000.00', allowanceEarned: '18000.00', pfEmployee: '1440.00' });
+  });
+});
+
+describe('TDS', () => {
+  it('works the tax out on the amount before GST, to the nearest rupee', () => {
+    expect(tdsOn(50000, 10)).toBe('5000.00');
+    expect(tdsOn('35400.00', 2)).toBe('708.00');
+    expect(tdsOn(12345, 1)).toBe('123.00'); // 123.45
+    expect(tdsOn(12350, 1)).toBe('124.00'); // 123.50 goes up
+    expect(tdsOn(6000000, '0.1')).toBe('6000.00');
+    expect(tdsOn(0, 10)).toBe('0.00');
+  });
+
+  it('knows a PAN when it sees one, and finds it inside a GSTIN', () => {
+    expect(isValidPan('abcde1234f')).toBe(true);
+    expect(isValidPan('ABCDE 1234 F')).toBe(true);
+    expect(isValidPan('ABCD1234F')).toBe(false);
+    expect(isValidPan('ABCDE12345')).toBe(false);
+    expect(panFromGstin('27AAPFU0939F1ZV')).toBe('AAPFU0939F');
+    expect(panFromGstin(null)).toBeNull();
+    expect(panFromGstin('27')).toBeNull();
+  });
+
+  it('puts a date in its quarter of the financial year', () => {
+    expect(tdsQuarter('2026-04-01')).toEqual({ fy: '2026-27', quarter: 1, from: '2026-04-01', to: '2026-06-30' });
+    expect(tdsQuarter('2026-10-13')).toEqual({ fy: '2026-27', quarter: 3, from: '2026-10-01', to: '2026-12-31' });
+    expect(tdsQuarter('2027-02-10')).toEqual({ fy: '2026-27', quarter: 4, from: '2027-01-01', to: '2027-03-31' });
+    expect(tdsQuarter('2026-03-31')).toEqual({ fy: '2025-26', quarter: 4, from: '2026-01-01', to: '2026-03-31' });
+    expect(tdsQuarter('2026-09-30').to).toBe('2026-09-30');
   });
 });
