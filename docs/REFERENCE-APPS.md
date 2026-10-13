@@ -50,6 +50,7 @@ Status: ✅ in RadCore · 🔨 being built now · 🔌 built, waits for an accou
 | Purchase bill read from a photo | ⏭ | |
 | Online store | ➖ | Shopify is the store; its orders come in |
 | Raw material used up in making goods (bill of materials) | ⏭ | Not in the PRD; say if wanted |
+| **Job work out (challan)** | ✅ | Stores → Job work: material sent out on a challan, tracked until it is back, used or lost; what is made takes the cost of what was used |
 | Tally import / export | ⏭ | |
 
 ## CRM (reference: Privyr)

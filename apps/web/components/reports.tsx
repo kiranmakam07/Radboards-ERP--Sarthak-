@@ -21,6 +21,7 @@ const KIND: Record<string, string> = {
   purchase_bill: 'Purchase bill', purchase_return: 'Purchase return', goods_receipt: 'Goods received', delivery: 'Goods delivered',
   expense: 'Expense', manual: 'Journal', transfer: 'Cash / bank transfer', stock_adjustment: 'Stock adjustment', stock_transfer: 'Stock transfer',
   payroll: 'Salaries', payroll_payment: 'Salaries paid', salary_advance: 'Salary advance', tds_deposit: 'TDS deposit', year_close: 'Year-end close',
+  job_work_receipt: 'Job work',
 };
 const kind = (t: string) => KIND[t] ?? label(t);
 

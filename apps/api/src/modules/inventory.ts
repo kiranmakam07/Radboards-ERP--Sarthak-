@@ -34,6 +34,7 @@ export async function createTransfer(
   if (input.fromLocationId === input.toLocationId) throw badRequest('Pick two different locations');
   const from = await activeLocation(tx, input.fromLocationId);
   const to = await activeLocation(tx, input.toLocationId);
+  if (from.type === 'job_work' || to.type === 'job_work') throw badRequest('Stock goes to and comes back from job workers on a job work challan, not by a transfer');
   if (input.lines.length === 0) throw badRequest('Add at least one item');
   const itemRows = await lockItems(tx, input.lines.map((l) => l.itemId));
   const byId = new Map(itemRows.map((i) => [i.id, i]));
@@ -74,7 +75,8 @@ export async function createAdjustment(
   input: { kind: 'adjustment' | 'count' | 'opening'; locationId: string; reason: string; lines: AdjLine[] },
 ) {
   const { tx } = ctx;
-  await activeLocation(tx, input.locationId);
+  const where = await activeLocation(tx, input.locationId);
+  if (where.type === 'job_work') throw badRequest('Stock that is with job workers is put right on its job work challan (record it as come back, used or lost)');
   if (input.lines.length === 0) throw badRequest('Add at least one item');
   const { number } = await nextNumber(tx, 'stock_adjustment', istDate());
   const [adj] = await tx
@@ -160,7 +162,8 @@ export function inventoryRouter(db: DB) {
              coalesce(sum(s.qty) filter (where l.type = 'stores'), 0) as stores_qty,
              coalesce(sum(s.qty) filter (where l.type = 'showroom'), 0) as showroom_qty,
              coalesce(sum(s.qty) filter (where l.type = 'rejected'), 0) as rejected_qty,
-             coalesce(sum(s.qty) filter (where l.type <> 'rejected'), 0) as available_qty,
+             coalesce(sum(s.qty) filter (where l.type = 'job_work'), 0) as job_work_qty,
+             coalesce(sum(s.qty) filter (where l.type in ('stores', 'showroom')), 0) as available_qty,
              coalesce(max(v.value), 0) as value, max(v.avg_cost) as avg_cost
         from items i
         left join v_stock_on_hand s on s.item_id = i.id
@@ -184,7 +187,7 @@ export function inventoryRouter(db: DB) {
              (i.reorder_level - coalesce(s.qty, 0)) as shortfall
         from items i
         left join (select m.item_id, sum(m.qty) as qty from stock_movements m join locations l on l.id = m.location_id
-                    where l.type <> 'rejected' group by m.item_id) s on s.item_id = i.id
+                    where l.type in ('stores', 'showroom') group by m.item_id) s on s.item_id = i.id
        where i.is_stock_item and i.active and i.reorder_level is not null and coalesce(s.qty, 0) < i.reorder_level
        order by (i.reorder_level - coalesce(s.qty, 0)) desc`);
     sendList(req, res, data, 'low-stock');

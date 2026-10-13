@@ -86,7 +86,7 @@ export function dashboardsRouter(db: DB) {
       data.stock = await one(sql`
         select (select count(*) from items i
                   left join (select m.item_id, sum(m.qty) as qty from stock_movements m join locations l on l.id = m.location_id
-                              where l.type <> 'rejected' group by m.item_id) s on s.item_id = i.id
+                              where l.type in ('stores', 'showroom') group by m.item_id) s on s.item_id = i.id
                  where i.is_stock_item and i.active and i.reorder_level is not null and coalesce(s.qty, 0) < i.reorder_level)::int as low_stock,
                (select count(*) from stock_adjustments where status = 'pending')::int as adjustments_pending`);
     }
@@ -315,7 +315,7 @@ export function dashboardsRouter(db: DB) {
           select i.id, i.sku, i.name, i.unit, i.reorder_level, coalesce(s.qty, 0) as qty
             from items i
             left join (select m.item_id, sum(m.qty) as qty from stock_movements m join locations l on l.id = m.location_id
-                        where l.type <> 'rejected' group by m.item_id) s on s.item_id = i.id
+                        where l.type in ('stores', 'showroom') group by m.item_id) s on s.item_id = i.id
            where i.is_stock_item and i.active and i.reorder_level is not null and coalesce(s.qty, 0) < i.reorder_level
            order by coalesce(s.qty, 0) / nullif(i.reorder_level, 0), i.name limit 50`),
         awaiting_goods: await rows(db, sql`
@@ -425,7 +425,7 @@ export function dashboardsRouter(db: DB) {
         stores: await one(sql`
           select (select count(*) from items i
                     left join (select m.item_id, sum(m.qty) as qty from stock_movements m join locations l on l.id = m.location_id
-                                where l.type <> 'rejected' group by m.item_id) s on s.item_id = i.id
+                                where l.type in ('stores', 'showroom') group by m.item_id) s on s.item_id = i.id
                    where i.is_stock_item and i.active and i.reorder_level is not null and coalesce(s.qty, 0) < i.reorder_level)::int as low_stock,
                  (select count(*) from goods_receipts where status = 'received')::int as waiting_qc,
                  (select count(*) from purchase_orders where status in ('sent','partly_received'))::int as awaiting_goods`),

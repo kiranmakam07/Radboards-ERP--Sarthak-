@@ -34,6 +34,7 @@ export default function BillPage() {
         <KV rows={[
           ['Status', b.status === 'cancelled' ? <Badge value="cancelled" /> : isDn ? <Badge value="posted" /> : <Badge value={b.payment_status} />],
           ['Supplier', <Link href={`/parties/${b.supplier_id}`}>{b.supplier_name}</Link>], ['Supplier GSTIN', b.supplier_gstin],
+          ['Job work challan', b.job_work_id ? <><Link href={`/jobwork/${b.job_work_id}`}>{b.job_work_challan_no}</Link>{Number(b.job_work_cleared) ? <span className="muted small"> · ₹{inr(b.job_work_cleared)} of this was already in the cost of the goods</span> : null}</> : null],
           ['Supplier invoice no', b.supplier_invoice_no], ['Date', date(b.bill_date)], ['Due', date(b.due_date)],
           ['PO', b.purchase_order_id ? <Link href={`/purchasing/orders/${b.purchase_order_id}`}>{b.po_no}</Link> : null],
           ['Outstanding', !isDn && b.outstanding !== null ? `₹${inr(b.outstanding)}` : null], ['Notes', b.notes],
