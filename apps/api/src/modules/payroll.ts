@@ -188,7 +188,7 @@ export async function payRun(ctx: Ctx, id: string, input: { accountId: string; p
 }
 
 // ---------------------------------------------------------------------------
-// Routes
+// The payslip as a document, and the routes
 // ---------------------------------------------------------------------------
 /** A payslip as a document: the figures, the month in words, and whose it is. */
 async function payslipDocument(tx: DB, slip: Slip) {
