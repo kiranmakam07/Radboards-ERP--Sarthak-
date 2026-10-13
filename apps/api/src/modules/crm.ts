@@ -2,11 +2,11 @@ import crypto from 'node:crypto';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { LEAD_STAGE_LABELS, OPEN_LEAD_STAGES, normalisePhone } from '@radcore/shared';
+import { LEAD_STAGE_LABELS, OPEN_LEAD_STAGES, formatDate, istDate, normalisePhone } from '@radcore/shared';
 import { config } from '../config';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
-import { getSetting } from '../core/settings';
+import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { adSpends, campaigns, channelEvents, items, leadActivities, leadSources, leads, messageTemplates } from '../db/schema';
 import { AppError, badRequest, conflict, forbidden, must } from '../lib/errors';
@@ -97,6 +97,11 @@ async function capture(
   return lead;
 }
 
+type MetaLead = {
+  field_data: { name: string; values: string[] }[]; campaign_name?: string; ad_name?: string; form_id?: string; form_name?: string;
+  platform?: string; created_time?: string;
+};
+
 async function fetchMetaLead(deps: CrmDeps, leadgenId: string) {
   if (!config.metaPageAccessToken) throw new NotReady('The Meta page access token is not set yet (META_PAGE_ACCESS_TOKEN), so the answers of this lead form cannot be read');
   const url = `https://graph.facebook.com/${config.metaGraphVersion}/${encodeURIComponent(leadgenId)}`
@@ -110,7 +115,7 @@ async function fetchMetaLead(deps: CrmDeps, leadgenId: string) {
   if (res.status !== 200 || !Array.isArray(res.body?.field_data)) {
     throw new NotReady(`Meta refused to hand over this lead (${res.body?.error?.message ?? `HTTP ${res.status}`}). Check the page access token and its leads_retrieval permission.`);
   }
-  return res.body as { field_data: { name: string; values: string[] }[]; campaign_name?: string; ad_name?: string; form_id?: string; platform?: string };
+  return res.body as MetaLead;
 }
 
 /** Text of a WhatsApp message, or a short description when it is not text. */
@@ -138,10 +143,14 @@ async function handle(ctx: Ctx, e: Event, fetched: Awaited<ReturnType<typeof fet
   }
   if (e.channel === 'meta') {
     const incoming = fromMetaFields(fetched!.field_data);
-    const detail = fetched!.campaign_name ?? fetched!.ad_name ?? (fetched!.form_id ? `Lead form ${fetched!.form_id}` : null);
+    const detail = fetched!.campaign_name ?? fetched!.ad_name ?? fetched!.form_name ?? (fetched!.form_id ? `Lead form ${fetched!.form_id}` : null);
+    // A lead brought in later than it was filled in says when, so nobody takes a month-old enquiry for today's.
+    const filled = fetched!.created_time ? new Date(fetched!.created_time) : null;
+    const old = filled && !Number.isNaN(filled.getTime()) && Date.now() - filled.getTime() > 86_400_000;
     const lead = await capture(ctx, incoming, {
       sourceId: await sourceIdByName(ctx.tx, 'Meta Ads'), sourceDetail: detail, externalRef: `meta:${e.externalId}`,
       fallbackName: fetched!.platform === 'ig' ? 'Instagram enquiry' : 'Facebook enquiry',
+      notes: old ? `Filled in on ${formatDate(istDate(filled!))}` : null,
     });
     return { leadId: lead.id, summary: `${lead.name}, ${lead.phone}${detail ? ` · ${detail}` : ''}` };
   }
@@ -179,7 +188,9 @@ export async function processEvent(db: DB, deps: CrmDeps, id: string): Promise<'
     const [seen] = await db.select().from(channelEvents).where(eq(channelEvents.id, id));
     if (!seen || (seen.status !== 'received' && seen.status !== 'failed')) return 'skipped';
     // The call to Meta happens before the transaction, so no database lock is held while waiting on the network.
-    const fetched = seen.channel === 'meta' ? await fetchMetaLead(deps, seen.externalId) : null;
+    // A lead brought in from Meta's lead forms already carries its answers; one announced by webhook has to be read.
+    const carried = seen.channel === 'meta' && Array.isArray((seen.payload as any)?.field_data) ? (seen.payload as MetaLead) : null;
+    const fetched = seen.channel === 'meta' ? (carried ?? await fetchMetaLead(deps, seen.externalId)) : null;
     return await db.transaction(async (trx) => {
       const tx = trx as unknown as DB;
       const [e] = await tx.select().from(channelEvents).where(eq(channelEvents.id, id)).for('update');
@@ -236,6 +247,120 @@ function signedByMeta(req: Request): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Asking Meta: is the connection right, and what leads are already there
+// ---------------------------------------------------------------------------
+/** Meta said no. The message is Meta's own, which names the token or permission at fault. */
+class MetaRefused extends Error {}
+
+/** One call to Meta's Graph API. `path` may be a full address (the "next page" link Meta gives). */
+async function graph(deps: CrmDeps, path: string, token: string): Promise<any> {
+  const url = path.startsWith('https://') ? path
+    : `https://graph.facebook.com/${config.metaGraphVersion}/${path}${path.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}`;
+  let res;
+  try {
+    res = await deps.getJson(url);
+  } catch {
+    throw new MetaRefused('Meta could not be reached. Try again in a while.');
+  }
+  if (res.status !== 200 || !res.body) throw new MetaRefused(String(res.body?.error?.message ?? `Meta answered with HTTP ${res.status}`).slice(0, 300));
+  return res.body;
+}
+
+const said = (e: unknown) => (e instanceof MetaRefused ? e.message : 'Something unexpected went wrong; it is in the server log');
+
+/** What each connection is actually connected to, asked of Meta just now. */
+export async function checkConnections(db: DB, deps: CrmDeps) {
+  const state = await getSetting(db, 'crm_state');
+  const meta = {
+    set: { app_secret: Boolean(config.metaAppSecret), verify_token: Boolean(config.metaVerifyToken), page_access_token: Boolean(config.metaPageAccessToken) },
+    verified_at: state.meta_verified_at, page: null as { id: string; name: string } | null,
+    /** True or false once Meta has said whether the Page sends its lead forms to this app; null when it would not say. */
+    leadgen_subscribed: null as boolean | null, problem: null as string | null,
+  };
+  if (config.metaPageAccessToken) {
+    try {
+      const page = await graph(deps, 'me?fields=id,name', config.metaPageAccessToken);
+      meta.page = { id: String(page.id), name: String(page.name ?? page.id) };
+      try {
+        const apps = await graph(deps, `${encodeURIComponent(meta.page.id)}/subscribed_apps?fields=subscribed_fields`, config.metaPageAccessToken);
+        meta.leadgen_subscribed = (Array.isArray(apps.data) ? apps.data : []).some((a: any) => Array.isArray(a?.subscribed_fields) && a.subscribed_fields.includes('leadgen'));
+      } catch (e) {
+        if (!(e instanceof MetaRefused)) console.error(e);
+      }
+    } catch (e) {
+      if (!(e instanceof MetaRefused)) console.error(e);
+      meta.problem = `The page access token does not work: ${said(e)}`;
+    }
+  }
+  const whatsapp = {
+    receiving: Boolean(config.metaAppSecret && config.metaVerifyToken), verified_at: state.whatsapp_verified_at,
+    send_set: Boolean(config.whatsappPhoneNumberId && config.whatsappAccessToken),
+    number: null as { phone: string; name: string | null; quality: string | null } | null, problem: null as string | null,
+  };
+  if (whatsapp.send_set) {
+    try {
+      const n = await graph(deps, `${encodeURIComponent(config.whatsappPhoneNumberId)}?fields=display_phone_number,verified_name,quality_rating`, config.whatsappAccessToken);
+      whatsapp.number = { phone: String(n.display_phone_number ?? ''), name: clean(n.verified_name), quality: clean(n.quality_rating) };
+    } catch (e) {
+      if (!(e instanceof MetaRefused)) console.error(e);
+      whatsapp.problem = `The WhatsApp number or its token does not work: ${said(e)}`;
+    }
+  }
+  return { meta, whatsapp };
+}
+
+/** How many leads one run takes in, so that it finishes in the time a request is allowed. Pressing again takes the next lot. */
+const PULL_PER_RUN = 300;
+const PULL_MAX_PAGES = 60;
+
+/** Read the leads of the last `days` days out of every lead form of the Page, and take in the ones not here yet. */
+export async function pullMetaLeads(db: DB, deps: CrmDeps, days: number) {
+  const token = config.metaPageAccessToken;
+  if (!token) throw new AppError(503, 'not_configured', 'The Meta page access token is not set yet (META_PAGE_ACCESS_TOKEN), so the lead forms cannot be read.');
+  const since = Math.floor(Date.now() / 1000) - days * 86_400;
+  const out = { forms: 0, found: 0, already_here: 0, leads: 0, not_usable: 0, more: false };
+  const fresh: string[] = [];
+  try {
+    const page = await graph(deps, 'me?fields=id,name', token);
+    const forms: { id: string; name?: string }[] = [];
+    for (let next: string | null = `${encodeURIComponent(String(page.id))}/leadgen_forms?fields=id,name,status&limit=100`, n = 0; next && n < 10; n++) {
+      const body: any = await graph(deps, next, token);
+      forms.push(...(Array.isArray(body.data) ? body.data : []));
+      next = body.paging?.next ?? null;
+    }
+    out.forms = forms.length;
+    const filter = encodeURIComponent(JSON.stringify([{ field: 'time_created', operator: 'GREATER_THAN', value: since }]));
+    let pages = 0;
+    for (const form of forms) {
+      const first = `${encodeURIComponent(String(form.id))}/leads?fields=id,created_time,field_data,ad_name,adset_name,campaign_name,form_id,platform&limit=100&filtering=${filter}`;
+      for (let next: string | null = first; next && !out.more; ) {
+        if (++pages > PULL_MAX_PAGES) { out.more = true; break; }
+        const body: any = await graph(deps, next, token);
+        for (const lead of Array.isArray(body.data) ? body.data : []) {
+          if (!lead?.id || !Array.isArray(lead.field_data)) continue;
+          out.found++;
+          if (fresh.length >= PULL_PER_RUN) { out.more = true; break; }
+          const id = await record(db, { channel: 'meta', eventType: 'leadgen', externalId: String(lead.id), payload: { ...lead, form_name: form.name ?? null, pulled: true } });
+          if (id) fresh.push(id);
+          else out.already_here++;
+        }
+        next = body.paging?.next ?? null;
+      }
+      if (out.more) break;
+    }
+  } catch (e) {
+    if (!(e instanceof MetaRefused)) throw e;
+    throw new AppError(502, 'meta_refused', `Meta would not hand over the leads: ${e.message}. The page access token needs leads_retrieval, pages_read_engagement and pages_manage_ads.`);
+  }
+  for (const id of fresh) {
+    const r = await processEvent(db, deps, id);
+    if (r === 'processed') out.leads++;
+    else if (r === 'failed') out.not_usable++;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Incoming webhooks (no login: each one proves itself with a signature or a key)
 // ---------------------------------------------------------------------------
 export function hooksRouter(db: DB, deps: CrmDeps = defaultDeps) {
@@ -256,14 +381,17 @@ export function hooksRouter(db: DB, deps: CrmDeps = defaultDeps) {
   }
 
   /** Meta's one-time check when the webhook is subscribed: echo the challenge if the verify token matches. */
-  function verify(req: Request, res: Response) {
+  const verify = (which: 'meta' | 'whatsapp') => async (req: Request, res: Response) => {
     const token = String(req.query['hub.verify_token'] ?? '');
     if (req.query['hub.mode'] === 'subscribe' && config.metaVerifyToken && safeEqual(token, config.metaVerifyToken)) {
+      // Remembered, so the Lead sources screen can say that Meta has accepted this address.
+      const state = await getSetting(db, 'crm_state');
+      await setSetting(db, 'crm_state', { ...state, [`${which}_verified_at`]: new Date().toISOString() }, null);
       res.type('text/plain').send(String(req.query['hub.challenge'] ?? ''));
       return;
     }
     throw forbidden('Verify token does not match');
-  }
+  };
 
   /** Lead ads (object "page") and WhatsApp messages (object "whatsapp_business_account") arrive in the same envelope. */
   async function fromMeta(req: Request, res: Response) {
@@ -294,9 +422,9 @@ export function hooksRouter(db: DB, deps: CrmDeps = defaultDeps) {
     await finish(res, ids, { received: ids.length });
   }
 
-  r.get('/meta', verify);
+  r.get('/meta', verify('meta'));
   r.post('/meta', fromMeta);
-  r.get('/whatsapp', verify);
+  r.get('/whatsapp', verify('whatsapp'));
   r.post('/whatsapp', fromMeta);
 
   /**
@@ -489,11 +617,28 @@ export function crmRouter(db: DB, deps: CrmDeps = defaultDeps) {
       data: {
         meta: { app_secret: Boolean(config.metaAppSecret), verify_token: Boolean(config.metaVerifyToken), page_access_token: Boolean(config.metaPageAccessToken) },
         whatsapp: { send: Boolean(config.whatsappPhoneNumberId && config.whatsappAccessToken) },
+        state: await getSetting(db, 'crm_state'),
         campaign_links: links,
         by_channel: byChannel,
         events,
       },
     });
+  });
+
+  /** Ask Meta whether the tokens work and what they are connected to, so a wrong value is found here and not by a lost lead. */
+  r.post('/integrations/check', requirePerm('crm:manage'), async (_req, res) => {
+    res.json({ data: await checkConnections(db, deps) });
+  });
+
+  /**
+   * Bring in the leads already sitting in Meta's lead forms: the ones from before the connection was
+   * made, or any that were missed while something was down. A lead that is already here is not added again.
+   */
+  r.post('/integrations/meta/fetch', requirePerm('crm:manage'), async (req, res) => {
+    const b = z.object({ days: z.coerce.number().int().min(1).max(90).default(30) }).parse(req.body ?? {});
+    const result = await pullMetaLeads(db, deps, b.days);
+    await inTx(db, req, (ctx) => audit(ctx, 'crm', 'meta', 'fetch_leads', null, { days: b.days, ...result }));
+    res.json({ data: result });
   });
 
   r.post('/integrations/retry', requirePerm('crm:manage'), async (_req, res) => {

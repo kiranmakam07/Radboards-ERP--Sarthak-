@@ -47,6 +47,8 @@ export type SettingsMap = {
   payroll_rules: PayrollRules;
   /** When the statements mailbox was last read, how many new mails that found, and what went wrong if it could not be read. */
   bank_mail_state: { last_checked_at: string | null; last_found: number; last_error: string | null };
+  /** When Meta last confirmed our webhook addresses (its one-time check when a webhook is subscribed). */
+  crm_state: { meta_verified_at: string | null; whatsapp_verified_at: string | null };
 };
 
 export const SETTING_DEFAULTS: SettingsMap = {
@@ -68,6 +70,7 @@ export const SETTING_DEFAULTS: SettingsMap = {
   attendance_rules: { start: null, grace_min: 10, weekly_off: [0], place: null },
   payroll_rules: PAYROLL_RULES_DEFAULT,
   bank_mail_state: { last_checked_at: null, last_found: 0, last_error: null },
+  crm_state: { meta_verified_at: null, whatsapp_verified_at: null },
 };
 
 export async function getSetting<K extends keyof SettingsMap>(tx: DB, key: K): Promise<SettingsMap[K]> {

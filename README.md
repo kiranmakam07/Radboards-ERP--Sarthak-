@@ -163,6 +163,16 @@ it is connected, and everything that has come in.
   on the Lead sources screen as a test and creates no lead.
 - Anything that could not become a lead (no phone number, a number outside India, Meta refusing
   to hand the lead over) stays on that screen with the reason and a retry button.
+- **Check the connections** (button on the Lead sources screen) asks Meta, there and then, which
+  Page the page access token belongs to, whether that Page sends its lead forms to the app, and
+  which WhatsApp number sending is connected to. A wrong or expired token shows Meta's own
+  message. The screen also says when Meta last accepted each callback address.
+- **Leads already in the lead forms.** Once the page access token is set, *Bring them in* on the
+  Meta card reads the leads of the last 7, 30 or 90 days out of every lead form of the Page: the
+  ones from before the connection was made, or any missed while something was down. This needs
+  only the token, not the webhook. A lead already here is never added again, whether it came by
+  the webhook or by this; an older one says on its notes when it was filled in. Besides
+  `leads_retrieval` the token needs `pages_read_engagement` and `pages_manage_ads`.
 
 ### Sending WhatsApp messages from the app
 
