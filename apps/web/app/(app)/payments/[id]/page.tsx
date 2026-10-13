@@ -3,10 +3,8 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { STATE_CODES, amountInWords } from '@radcore/shared';
-import { Badge, Loading, Page, date, inr, label } from '@/components/ui';
+import { Badge, Loading, Page, addr, date, inr, label } from '@/components/ui';
 import { useGet } from '@/lib/api';
-
-const addr = (a: any) => (a ? [a.line1, a.line2, a.city, a.state, a.pincode].filter(Boolean).join(', ') : '');
 
 /** Payment receipt (money in) or payment voucher (money out), laid out for printing (PRD 7.11). */
 export default function PaymentReceiptPage() {

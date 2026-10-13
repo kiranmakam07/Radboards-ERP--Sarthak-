@@ -3,10 +3,8 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { STATE_CODES } from '@radcore/shared';
-import { Loading, Page, date, num } from '@/components/ui';
+import { Loading, Page, addr, date, num } from '@/components/ui';
 import { useGet } from '@/lib/api';
-
-const addr = (a: any) => (a ? [a.line1, a.line2, a.city, a.state, a.pincode].filter(Boolean).join(', ') : '');
 
 /** Delivery challan: the paper that travels with a dispatch (PRD 7.11). Quantities only, no prices. */
 export default function DeliveryChallanPage() {

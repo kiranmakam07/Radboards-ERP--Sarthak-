@@ -2,6 +2,15 @@ import type { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 import { config } from '../config';
 
+/**
+ * Errors. Code anywhere in the API throws and nothing in between catches: errorHandler, mounted
+ * last in app.ts, turns whatever was thrown into the one shape the screens expect,
+ *   { error: { code, message, details? } }
+ * Throw an AppError (or one of the helpers below) for anything the person can act on, in words
+ * they can act on. Failed zod checks and the rules the database itself enforces are put into the
+ * same shape here, so a route never has to.
+ */
+
 export class AppError extends Error {
   constructor(
     public status: number,

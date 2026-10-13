@@ -17,8 +17,23 @@ import { emptyToNull, inTx, sendList, zDate, zId, zText, wantsFile, type Ctx } f
 import { createExpense } from './accounting';
 import { createPayment } from './payments';
 
+/**
+ * Bank reconciliation: the bank's statement set beside our own entries on that bank account.
+ *
+ * A statement (CSV or PDF, read by lib/bank-csv.ts and lib/bank-pdf.ts) is kept line by line, each
+ * line once however many times the file is imported. A line is then
+ *   matched    to one book entry, or to several that add up to it
+ *   ignored    by a person, when there is nothing in the books it should match
+ *   unmatched  until one of those; if the books are missing the entry, it can be made from the line
+ * Matching never changes the books. It only records which entries the bank agrees with.
+ * Statements that arrive by email are fetched by bank-mail.ts and handed to the same import.
+ */
+
 type Line = typeof bankStatementLines.$inferSelect;
 
+// ---------------------------------------------------------------------------
+// Statement passwords
+// ---------------------------------------------------------------------------
 /** A header's value as typed: sent URL-encoded so that any character survives the journey. */
 const decodeHeader = (value: string | undefined): string | null => {
   if (!value) return null;
@@ -39,6 +54,9 @@ export async function savePassword(ctx: Ctx, accountId: string, password: string
   await audit(ctx, 'bank_feed', accountId, 'password_saved', null, { saved: true });
 }
 
+// ---------------------------------------------------------------------------
+// Matching statement lines to the books
+// ---------------------------------------------------------------------------
 /** How far apart the bank's date and our entry's date may be for an automatic match. */
 const MATCH_WINDOW_DAYS = 5;
 
@@ -110,6 +128,9 @@ export async function autoMatch(ctx: Ctx, accountId: string): Promise<number> {
   return matched;
 }
 
+// ---------------------------------------------------------------------------
+// Importing a statement
+// ---------------------------------------------------------------------------
 /**
  * Import a bank statement (CSV text). All or nothing: if any transaction row cannot be read,
  * nothing is saved. Rows already imported before (same or overlapping file) are skipped.
@@ -190,6 +211,9 @@ export async function importParsed(ctx: Ctx, accountId: string, parsed: ParsedSt
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Matching by hand, and filling a gap in the books
+// ---------------------------------------------------------------------------
 async function lockLine(tx: DB, id: string): Promise<Line> {
   const [line] = await tx.select().from(bankStatementLines).where(eq(bankStatementLines.id, id)).for('update');
   return must(line, 'Statement line');
@@ -296,6 +320,9 @@ export async function createEntryForLine(
   await audit(ctx, 'bank_statement_line', lineId, 'create_entry', { status: line.status }, { status: 'matched', kind: input.kind, refId });
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 export function bankRouter(db: DB) {
   const r = Router();
 

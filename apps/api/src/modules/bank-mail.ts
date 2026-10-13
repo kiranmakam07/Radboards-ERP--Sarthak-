@@ -180,6 +180,9 @@ export async function checkMailbox(db: DB, deps: MailDeps) {
   return { configured: true as const, found, ...counts, error };
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 export function bankMailRouter(db: DB, deps: MailDeps) {
   const r = Router();
 

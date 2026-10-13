@@ -3,13 +3,10 @@
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { STATE_CODES } from '@radcore/shared';
 import { InvoiceDocument } from '@/components/invoice';
 import { ActionButton, Badge, Card, ErrorBox, Loading, Page, Table, Toggle, date, inr, num } from '@/components/ui';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
-
-const addr = (a: any) => (a ? [a.line1, a.line2, a.city, a.state, a.pincode].filter(Boolean).join(', ') : '');
 
 /** Send the bill to the customer: a link that opens it, by WhatsApp to their number when we have one, or copied. */
 function ShareBill({ id, phone, text }: { id: string; phone: string; text: string }) {
@@ -59,7 +56,6 @@ export default function InvoicePage() {
 
   const isCn = inv.doc_type === 'credit_note';
   const c = inv.company;
-  const title = isCn ? 'CREDIT NOTE' : inv.is_b2b ? 'TAX INVOICE' : 'TAX INVOICE (B2C)';
   const waText = `${c.name}\n${isCn ? 'Credit note' : 'Invoice'} ${inv.invoice_no} dated ${date(inv.invoice_date)}\nAmount: Rs ${inr(inv.grand_total)}\nThank you!`;
   const waPhone = (inv.party_phone ?? '').replace(/\D/g, '');
 

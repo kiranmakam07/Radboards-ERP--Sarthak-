@@ -2,6 +2,11 @@
 
 import { createContext, useContext } from 'react';
 
+/**
+ * Who is signed in and what they may do, loaded once by the frame around every screen
+ * (app/(app)/layout.tsx) and read anywhere below it with useSession() or useCan().
+ * This only decides what is shown. The API checks every permission itself.
+ */
 export type Session = {
   user: { id: string; name: string; role: string; phone: string };
   permissions: string[];

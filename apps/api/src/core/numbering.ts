@@ -3,6 +3,13 @@ import { fyOf, fyShort } from '@radcore/shared';
 import type { DB } from '../db/client';
 import { numberSeries } from '../db/schema';
 
+/**
+ * Document numbers. Each kind of document has its own series; nextNumber hands out the next one
+ * inside the caller's transaction, so a number is used only if the document is saved.
+ * To number a new kind of document, add one line to SERIES: the series row in the database is
+ * made the first time it is asked for.
+ */
+
 type SeriesDef = { prefix: (fyShortLabel: string) => string; pad: number; perFy: boolean; start?: number };
 
 /**

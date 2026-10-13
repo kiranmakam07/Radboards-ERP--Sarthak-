@@ -1,4 +1,10 @@
 /**
+ * Small helpers both the API and the screens need to agree on: phone numbers, dates and the
+ * Indian financial year, the India clock, and the arithmetic behind recurring tasks, resource
+ * load and leave. Dates are plain YYYY-MM-DD text throughout, so no time zone can shift a day.
+ */
+
+/**
  * Phone is the dedupe key for leads, parties and walk-ins (PRD 7.1).
  * Normalised to +91XXXXXXXXXX. Returns null when it is not a valid Indian mobile.
  */
@@ -62,6 +68,11 @@ export function weekdayOf(date: string): number {
 
 export function lastDayOfMonth(date: string): number {
   return new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0)).getUTCDate();
+}
+
+/** A month (YYYY-MM) in words: "October 2026". */
+export function monthName(month: string): string {
+  return new Date(`${month}-01T00:00:00Z`).toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
 /** Add calendar months. The day is kept when the month has it, otherwise the month's last day: 31 Aug + 6 months = 28 Feb. */

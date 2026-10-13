@@ -9,6 +9,18 @@ import { sessions, users } from '../db/schema';
 import { forbidden, unauthorized } from '../lib/errors';
 import type { AuthUser } from '../lib/http';
 
+/**
+ * Sign-in and permissions.
+ *
+ * A session is a random token kept in an HttpOnly cookie; the database holds only its hash.
+ *   authenticate   turns the cookie into req.user on every request (it never refuses)
+ *   requireAuth    refuses a request that has no signed-in user
+ *   requirePerm    refuses unless the user's role holds one of the permissions named
+ *
+ * Which role holds which permission is one table, PERMISSIONS in packages/shared/src/constants.ts,
+ * which an admin can change on screen (see core/settings.ts, loadPermissionOverrides).
+ */
+
 const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 
 // Cost 12 in real use; tests drop it so the suite is not spent hashing.
@@ -18,6 +30,7 @@ export const hashPassword = (plain: string) => bcrypt.hash(plain, ROUNDS);
 // Compared against when the user does not exist, so login timing does not reveal who has an account.
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', ROUNDS);
 
+/** Check a phone or email and password, and start a session. The same error whatever was wrong, so it cannot be used to find out who has an account. */
 export async function login(db: DB, identifier: string, password: string): Promise<{ token: string; user: AuthUser }> {
   const phone = normalisePhone(identifier);
   const email = identifier.trim().toLowerCase();
@@ -40,6 +53,7 @@ export async function logout(db: DB, token: string | undefined): Promise<void> {
   if (token) await db.delete(sessions).where(eq(sessions.tokenHash, sha256(token)));
 }
 
+/** Sign a person out everywhere: used when their password or role changes, or they are switched off. */
 export async function revokeUserSessions(db: DB, userId: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.userId, userId));
 }

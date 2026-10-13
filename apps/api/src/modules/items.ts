@@ -9,9 +9,19 @@ import { channelItemMap, itemImages, items, priceListItems, priceLists } from '.
 import { badRequest, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zGstRate, zLink, zId, zListQuery, zMoney, zQtyNonNeg, zText } from '../lib/http';
 
+/**
+ * The item master: what we buy, make and sell, with HSN, GST rate, unit, prices, pictures and the
+ * listing each item corresponds to on an online channel. It also answers the one pricing question
+ * every sale asks: which price list applies to this customer, and what is this item's rate on it
+ * (priceListFor, priceFor).
+ */
+
 export type PriceList = typeof priceLists.$inferSelect;
 export type Item = typeof items.$inferSelect;
 
+// ---------------------------------------------------------------------------
+// Prices
+// ---------------------------------------------------------------------------
 /** Price list for a sale: the party's own list, else the default for its type (dealer / retail). */
 export async function priceListFor(tx: DB, party: { priceListId: string | null; partyType: string } | null): Promise<PriceList> {
   if (party?.priceListId) {
@@ -39,6 +49,9 @@ export async function priceFor(tx: DB, item: Item, priceList: PriceList): Promis
   return priceList.basePrice === 'dealer' ? item.dealerPrice : item.retailPrice;
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 const zItem = z.object({
   sku: zText(60).transform((s) => s.toUpperCase()),
   name: zText(200),

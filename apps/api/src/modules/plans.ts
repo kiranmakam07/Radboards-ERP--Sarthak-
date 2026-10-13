@@ -22,6 +22,7 @@ async function note(ctx: Ctx, leadId: string, text: string) {
   await ctx.tx.insert(leadActivities).values({ leadId, type: 'note', note: text, userId: ctx.user?.id ?? null });
 }
 
+/** Put a lead on a plan, from its first step. The follow-up date becomes the day that step is due. */
 export async function startPlan(ctx: Ctx, leadId: string, planId: string): Promise<void> {
   const [lead] = await ctx.tx.select().from(leads).where(eq(leads.id, leadId)).for('update');
   must(lead, 'Lead');
@@ -43,6 +44,7 @@ export async function startDefaultPlan(ctx: Ctx, leadId: string): Promise<void> 
   if (plan) await startPlan(ctx, leadId, plan.id);
 }
 
+/** Take a lead off its plan. `why` is written on the lead when given (it replied, it was won or lost). */
 export async function stopPlan(ctx: Ctx, leadId: string, why: string | null): Promise<void> {
   const [lead] = await ctx.tx.select().from(leads).where(eq(leads.id, leadId)).for('update');
   if (!lead?.planId) return;

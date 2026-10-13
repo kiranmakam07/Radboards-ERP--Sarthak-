@@ -18,10 +18,26 @@ import {
 } from '../lib/http';
 import { createParty, type Party } from './parties';
 
+/**
+ * Leads: every enquiry, from first contact to won or lost.
+ *
+ * captureLead is the single way in, whatever the source (someone typing it in, a walk-in, the public
+ * form, a webhook in crm.ts, a file in lead-tools.ts), so every lead is checked for a phone number
+ * we already have, given an owner and given a first follow-up in the same way.
+ *
+ *   new -> contacted -> interested -> meeting booked -> converted / lost      (LEAD_TRANSITIONS)
+ *
+ * Converting creates the customer in parties.ts, or links the one that already has that phone
+ * number. From there on it is a sale.
+ */
+
 export type Lead = typeof leads.$inferSelect;
 
 const zWhen = z.coerce.date();
 
+// ---------------------------------------------------------------------------
+// Capturing a lead
+// ---------------------------------------------------------------------------
 export type CaptureInput = {
   name: string;
   phone: string; // already normalised
@@ -39,6 +55,7 @@ export type CaptureInput = {
   gstin?: string | null;
 };
 
+/** Who a new lead belongs to: the person named, else the source's own owner, else whoever took the enquiry, else the sales team in turn. */
 async function pickOwner(ctx: Ctx, sourceDefaultOwner: string | null, explicit?: string | null): Promise<string | null> {
   if (explicit) return explicit;
   if (sourceDefaultOwner) return sourceDefaultOwner; // source rule
@@ -146,6 +163,10 @@ export async function captureLead(ctx: Ctx, input: CaptureInput): Promise<{ lead
   return { lead: lead!, duplicate: false };
 }
 
+// ---------------------------------------------------------------------------
+// Stages and conversion
+// ---------------------------------------------------------------------------
+/** Move a lead to another stage, by the rules in LEAD_TRANSITIONS. Lost needs a reason; an open stage needs a next follow-up. */
 export async function moveLead(
   ctx: Ctx,
   id: string,
@@ -242,12 +263,16 @@ export async function convertLead(
   return { lead: updated!, party };
 }
 
+/** The id of a lead source the system itself relies on ("Walk-in", "Meta Ads", "WhatsApp"). */
 export async function sourceIdByName(tx: DB, name: string): Promise<string> {
   const [s] = await tx.select({ id: leadSources.id }).from(leadSources).where(eq(leadSources.name, name));
   if (!s) throw badRequest(`Lead source "${name}" is missing`);
   return s.id;
 }
 
+// ---------------------------------------------------------------------------
+// Lists: saved views and the score
+// ---------------------------------------------------------------------------
 /** Saved views (PRD 7.3) as SQL filters - "saved filters, not questions". */
 const VIEWS: Record<string, ReturnType<typeof sql>> = {
   followups_due: sql`l.stage in ('new','contacted','interested','meeting_booked') and l.next_follow_up_at < (date_trunc('day', now() at time zone 'Asia/Kolkata') + interval '1 day') at time zone 'Asia/Kolkata'`,
@@ -293,6 +318,9 @@ const SCORE_JOIN = sql`
   ) sc on pts.stage_pts is not null`;
 const SCORE_COLS = sql`sc.score, case when sc.score is null then null when sc.score >= 60 then 'hot' when sc.score >= 35 then 'warm' else 'cold' end as score_label`;
 
+// ---------------------------------------------------------------------------
+// Routes (signed in)
+// ---------------------------------------------------------------------------
 export function leadsRouter(db: DB) {
   const r = Router();
 
@@ -575,6 +603,9 @@ export function leadsRouter(db: DB) {
   return r;
 }
 
+// ---------------------------------------------------------------------------
+// The public enquiry form (no sign-in)
+// ---------------------------------------------------------------------------
 /**
  * Ask Cloudflare whether the "are you a person" check on the form was really passed. Held in an
  * object so tests can stand in for the network call.

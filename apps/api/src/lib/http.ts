@@ -4,6 +4,15 @@ import { D, isIsoDate, isValidGstin, normaliseGstin, normalisePhone, type Permis
 import type { DB } from '../db/client';
 import { toXlsx } from './xlsx';
 
+/**
+ * What every route is built from.
+ *   Ctx, inTx     one request is one database transaction, and every service function is told
+ *                 which transaction it is in and who is acting
+ *   the z* checks money, quantities, dates, phone numbers and GSTINs are read from a request the
+ *                 same way everywhere; money and quantities stay as text, never floating point
+ *   sendList      any list or report as JSON, or as a CSV or Excel file with ?format=
+ */
+
 export type AuthUser = { id: string; name: string; role: Role; phone: string };
 
 /** What every service function receives: the open transaction and who is acting. */
@@ -55,6 +64,8 @@ export const zGstRate = z.union([z.string(), z.number()]).transform((v, c) => {
   return n.toFixed(2);
 });
 export const zDate = z.string().refine(isIsoDate, 'must be a date (YYYY-MM-DD)');
+/** A calendar month, as payroll and TDS name one. */
+export const zMonth = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'must be a month (YYYY-MM)');
 /** A time of day as HH:MM (24-hour). */
 export const zClock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be a time like 09:30');
 export const zPhone = z.string().transform((v, c) => {

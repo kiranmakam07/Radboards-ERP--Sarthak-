@@ -11,6 +11,14 @@ import { badRequest, conflict, forbidden, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zClock, zDate, zId, zText, type Ctx } from '../lib/http';
 import { LATE, TASK_SELECT, activeUser, deadlineFitsProject } from './ops';
 
+/**
+ * Projects, and who and what is promised to them.
+ *
+ * A project groups tasks (which live in ops.ts) and has allocations: a person or a machine, for a
+ * share of their time, between two dates. An allocation that would take anyone past all of their
+ * time on any day is refused, with a list of what it clashes with.
+ */
+
 type Project = typeof projects.$inferSelect;
 
 const LIVE: ProjectStatus[] = ['planned', 'active', 'on_hold'];
@@ -38,6 +46,7 @@ async function releaseResources(ctx: Ctx, projectId: string, today: string): Pro
     .where(and(eq(allocations.projectId, projectId), lte(allocations.fromDate, today), gt(allocations.toDate, today)));
 }
 
+/** What changing a project's status brings with it: Done needs every task finished, Cancelled closes the open ones, and both free the people and machines promised to it. */
 export async function setProjectStatus(ctx: Ctx, project: Project, status: ProjectStatus): Promise<Partial<typeof projects.$inferInsert>> {
   const today = istDate();
   if (status === 'done') {

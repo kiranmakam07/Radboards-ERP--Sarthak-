@@ -4,7 +4,7 @@ import { asc, desc, eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
-import { PERMISSIONS, ROLES, STATE_CODES, can, isIsoDate, istDate, rolesFor, type Permission } from '@radcore/shared';
+import { PERMISSIONS, ROLES, STATE_CODES, can, isIsoDate, istDate, rolesFor, stateCodeFromGstin, type Permission } from '@radcore/shared';
 import { config } from '../config';
 import { audit } from '../core/audit';
 import {
@@ -20,6 +20,20 @@ import { badRequest, forbidden, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zAddress, zGstin, zHttpUrl, zId, zMoney, zPhone, zStateCode, zText } from '../lib/http';
 import { toWorkbook, type Sheet } from '../lib/xlsx';
 
+/**
+ * Four routers the rest of the system leans on:
+ *   authRouter      signing in and out, and what the screens need to know about the session
+ *   usersRouter     who can sign in, and in which role
+ *   settingsRouter  company profile, period lock, stock rule, who holds which permission, audit trail
+ *   mastersRouter   the small lists every module reads (lead sources, lost reasons, campaigns, item
+ *                   categories, locations, expense categories, price lists), and the download of all
+ *                   the master data as one workbook
+ * The larger masters have modules of their own: items.ts, parties.ts, and employees in hr.ts.
+ */
+
+// ---------------------------------------------------------------------------
+// Signing in and out
+// ---------------------------------------------------------------------------
 const zPassword = z.string().min(8, 'must be at least 8 characters').max(200);
 
 /** What the screens need to know about this installation, sent along with who is signed in. */
@@ -65,6 +79,9 @@ export function authRouter(db: DB) {
   return r;
 }
 
+// ---------------------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------------------
 function permissionsFor(role: (typeof ROLES)[number]): string[] {
   return (Object.keys(PERMISSIONS) as Permission[]).filter((p) => can(role, p));
 }
@@ -129,6 +146,9 @@ export function usersRouter(db: DB) {
   return r;
 }
 
+// ---------------------------------------------------------------------------
+// Settings, permissions and the audit trail
+// ---------------------------------------------------------------------------
 export function settingsRouter(db: DB) {
   const r = Router();
 
@@ -200,8 +220,9 @@ export function settingsRouter(db: DB) {
   r.put('/company', requirePerm('settings:manage'), async (req, res) => {
     const body = zCompany.parse(req.body);
     // The state code is read from the GSTIN when there is one (PRD 7.9).
-    if (body.gstin && body.gstin.slice(0, 2) !== body.state_code) {
-      throw badRequest(`State code ${body.state_code} does not match the GSTIN (${body.gstin.slice(0, 2)})`);
+    const fromGstin = body.gstin ? stateCodeFromGstin(body.gstin) : null;
+    if (fromGstin && fromGstin !== body.state_code) {
+      throw badRequest(`State code ${body.state_code} does not match the GSTIN (${fromGstin})`);
     }
     await inTx(db, req, async (ctx) => {
       const before = await getSetting(ctx.tx, 'company');
@@ -250,6 +271,9 @@ export function settingsRouter(db: DB) {
   return r;
 }
 
+// ---------------------------------------------------------------------------
+// Masters: the small lists every module reads
+// ---------------------------------------------------------------------------
 /** Admin-managed lists (PRD 7.13): lead sources, lost reasons, categories, locations, price lists... */
 export function mastersRouter(db: DB) {
   const r = Router();

@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { formatDate, formatINR } from '@radcore/shared';
@@ -7,33 +6,16 @@ import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { getCompany } from '../core/settings';
 import { rows, type DB } from '../db/client';
-import { invoiceLinks, invoices, parties, paymentReminders } from '../db/schema';
+import { invoiceLinks, parties, paymentReminders } from '../db/schema';
 import { badRequest, must } from '../lib/errors';
-import { inTx, zId, type Ctx } from '../lib/http';
-import { invoiceDocument } from './sales';
+import { inTx, zId } from '../lib/http';
+import { invoiceDocument, shareTokenFor } from './sales';
 
 /**
  * Getting paid: the bill sent to the customer as a link they can open, and reminders for what is
  * still owed. Both go out by WhatsApp from the person's own phone or computer, with the message
  * already written; what was sent, and when, is kept so nobody is reminded twice in a day by mistake.
  */
-
-/** The link's key for an invoice, made the first time the invoice is shared. It says nothing about the invoice. */
-export async function shareTokenFor(ctx: Ctx, invoiceId: string): Promise<string> {
-  const [inv] = await ctx.tx.select({ id: invoices.id, status: invoices.status }).from(invoices).where(eq(invoices.id, invoiceId));
-  must(inv, 'Invoice');
-  if (inv!.status === 'draft') throw badRequest('This invoice has not been issued yet');
-  // Two people sharing the same bill at the same moment get the same link.
-  const [made] = await ctx.tx.insert(invoiceLinks)
-    .values({ invoiceId, token: crypto.randomBytes(16).toString('base64url'), createdBy: ctx.user?.id ?? null })
-    .onConflictDoNothing().returning({ token: invoiceLinks.token });
-  if (made) {
-    await audit(ctx, 'invoice', invoiceId, 'share', null, { shared: true });
-    return made.token;
-  }
-  const [kept] = await ctx.tx.select({ token: invoiceLinks.token }).from(invoiceLinks).where(eq(invoiceLinks.invoiceId, invoiceId));
-  return kept!.token;
-}
 
 type Due = { id: string; invoice_no: string; invoice_date: string; due_date: string | null; outstanding: string; days_overdue: number };
 
@@ -71,6 +53,9 @@ export function reminderText(v: { name: string; company: string; total: string; 
   ].filter(Boolean).join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 export function collectRouter(db: DB) {
   const r = Router();
 

@@ -2,6 +2,17 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+/**
+ * The one way a screen talks to the API.
+ *
+ *   useGet('/sales/orders')            load data for a page; gives { data, error, loading, reload }
+ *   post / put / patch('/path', body)  change something; throws ApiError with the server's own message
+ *   qs({ from, to })                   build a query string, leaving out what is blank
+ *
+ * Every call goes to /api on this same origin, so the session cookie travels with it. A 401 sends
+ * the browser to the sign-in page and back again afterwards. Names in requests and responses are
+ * snake_case, the same as the database columns.
+ */
 export class ApiError extends Error {
   constructor(
     public status: number,

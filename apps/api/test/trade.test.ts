@@ -39,7 +39,6 @@ beforeAll(async () => {
   }).expect(201);
   id.board = board.body.data.id; id.wheels = wheels.body.data.id; id.svc = setupSvc.body.data.id;
 
-  const accounts = await w.as('accounts');
   const supplier = await admin.post('/api/parties').send({
     party_type: 'supplier', name: 'Deck Makers', phone: '9700000001', gstin: gstin('27', 'SUPPL1234A'), payment_terms_days: 30,
   }).expect(201);

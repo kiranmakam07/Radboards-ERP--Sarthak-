@@ -6,9 +6,9 @@ import { config } from './config';
 import { authenticate, requireAuth } from './core/auth';
 import type { DB } from './db/client';
 import { AppError, errorHandler, forbidden } from './lib/errors';
+import { readMailbox } from './lib/mailbox';
 import { accountingRouter } from './modules/accounting';
 import { authRouter, mastersRouter, settingsRouter, usersRouter } from './modules/admin';
-import { readMailbox } from './lib/mailbox';
 import { bankRouter } from './modules/bank';
 import { bankMailHookRouter, bankMailRouter, type MailDeps } from './modules/bank-mail';
 import { collectRouter, publicInvoiceRouter } from './modules/collect';
@@ -16,12 +16,11 @@ import { crmRouter, defaultDeps, hooksRouter, type CrmDeps } from './modules/crm
 import { dashboardsRouter } from './modules/dashboards';
 import { filesRouter } from './modules/files';
 import { gstRouter } from './modules/gst';
-import { tdsRouter } from './modules/tds';
 import { hrRouter } from './modules/hr';
 import { hrSelfRouter } from './modules/hr-self';
 import { inventoryRouter } from './modules/inventory';
-import { jobWorkRouter } from './modules/jobwork';
 import { itemsRouter } from './modules/items';
+import { jobWorkRouter } from './modules/jobwork';
 import { leadToolsRouter } from './modules/lead-tools';
 import { leadsRouter, publicLeadsRouter } from './modules/leads';
 import { onlineRouter } from './modules/online-router';
@@ -33,6 +32,29 @@ import { projectsRouter } from './modules/projects';
 import { purchasingRouter } from './modules/purchasing';
 import { salesRouter } from './modules/sales';
 import { publicSharesRouter, sharesRouter } from './modules/shares';
+import { tdsRouter } from './modules/tds';
+
+/**
+ * The API's front door. createApp builds the Express app: every router in the system is mounted
+ * here, in the order a request meets them, so this file is the list of everything the API offers.
+ *
+ * A request passes, in order:
+ *   1. public routes     no sign-in; limited per address (the enquiry form, links sent to people)
+ *   2. webhooks          no sign-in; each proves itself with a signature or a key
+ *   3. sameOriginOnly    refuses a change sent from another website
+ *   4. authenticate      reads the session cookie into req.user
+ *   5. requireAuth       everything after this needs a signed-in user
+ *   6. the module routers, where each route names its own permission with requirePerm
+ *   7. errorHandler      turns anything thrown into { error: { code, message } }
+ *
+ * Nothing here knows which database driver is in use or reaches the outside world itself: the
+ * database comes in as `db`, and network calls (Meta, the statements mailbox) come in as `deps`,
+ * so the tests can stand in for both.
+ *
+ * Where routers share an address (/api/leads, /api/bank, /api/hr, /api/ops, /api/payments,
+ * /api/sales) their order matters: a fixed path such as /api/leads/shared-files has to be met
+ * before /api/leads/:id would take it for an id. Keep the order when adding to those.
+ */
 
 /**
  * CSRF defence in depth on top of the SameSite=Lax session cookie: a browser always sends
@@ -51,15 +73,15 @@ function sameOriginOnly(req: Request, _res: Response, next: NextFunction) {
 
 const toSnake = (key: string) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 
+// PostgreSQL prints timestamptz as "2026-10-08 03:32:08.575+00"; browsers need ISO-8601.
+const PG_TIMESTAMP = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}(?:\.\d+)?)([+-]\d{2})(?::?(\d{2}))?$/;
+
 /**
  * The API speaks snake_case everywhere (same names as the database columns in the PRD),
  * for requests and responses alike, and every timestamp goes out as ISO-8601 UTC. Rows
  * come back from the ORM in camelCase and from raw SQL in PostgreSQL's own formats; both
  * are normalised here, in one place.
  */
-// PostgreSQL prints timestamptz as "2026-10-08 03:32:08.575+00"; browsers need ISO-8601.
-const PG_TIMESTAMP = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}(?:\.\d+)?)([+-]\d{2})(?::?(\d{2}))?$/;
-
 function snakeKeys(value: unknown): unknown {
   if (typeof value === 'string') {
     const m = value.length <= 35 ? PG_TIMESTAMP.exec(value) : null;
@@ -85,7 +107,7 @@ const mailboxReader: MailDeps['readMailbox'] = config.bankMailHost && config.ban
   : undefined;
 export const defaultAppDeps: AppDeps = { ...defaultDeps, readMailbox: mailboxReader };
 
-export function createApp(db: DB, crmDeps: AppDeps = defaultAppDeps) {
+export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
@@ -110,7 +132,7 @@ export function createApp(db: DB, crmDeps: AppDeps = defaultAppDeps) {
     res.json({ ok: true });
   });
 
-  // Public enquiry forms: no login, so rate-limited per IP (PRD section 9).
+  // ---- 1. public: no sign-in, so limited per address (PRD section 9) ----
   const publicLimiter = rateLimit({ windowMs: 10 * 60_000, limit: 30, standardHeaders: true, legacyHeaders: false,
     skip: () => config.env === 'test' });
   app.use('/api/public/shares', publicLimiter, publicSharesRouter(db));
@@ -118,49 +140,62 @@ export function createApp(db: DB, crmDeps: AppDeps = defaultAppDeps) {
   app.use('/api/public/payslips', publicLimiter, publicPayslipRouter(db));
   app.use('/api/public', publicLimiter, publicLeadsRouter(db));
 
-  // Lead capture from Meta, Google, WhatsApp and website forms: no login, each request proves itself
-  // with a signature or a key. Their servers send in bursts, so the limit is far looser than for people.
+  // ---- 2. webhooks: no sign-in, each request proves itself with a signature or a key ----
+  // Lead capture from Meta, Google, WhatsApp and website forms, online orders from Shopify, and the
+  // scheduler that asks for the statements mailbox to be read. Their servers send in bursts, so the
+  // limit is far looser than for people.
   const hookLimiter = rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: true, legacyHeaders: false,
     skip: () => config.env === 'test' });
-  app.use('/api/hooks/bank-mail', hookLimiter, bankMailHookRouter(db, crmDeps));
+  app.use('/api/hooks/bank-mail', hookLimiter, bankMailHookRouter(db, deps));
   app.use('/api/hooks/form', express.urlencoded({ extended: false, limit: '100kb' }));
-  app.use('/api/hooks', hookLimiter, hooksRouter(db, crmDeps));
+  app.use('/api/hooks', hookLimiter, hooksRouter(db, deps));
 
+  // ---- 3 to 5. who is asking ----
   app.use('/api', sameOriginOnly, authenticate(db));
   app.use('/api/auth', authRouter(db));
-
   // Everything below needs a signed-in user; each route then names its own permission.
   app.use('/api', requireAuth);
+
+  // ---- 6. the modules ----
+  // Admin and masters
   app.use('/api/files', filesRouter(db));
   app.use('/api/users', usersRouter(db));
   app.use('/api/settings', settingsRouter(db));
   app.use('/api/masters', mastersRouter(db));
   app.use('/api/items', itemsRouter(db));
   app.use('/api/parties', partiesRouter(db));
+  // CRM
   app.use('/api/leads', sharesRouter(db));
   app.use('/api/leads', leadToolsRouter(db));
   app.use('/api/leads', leadsRouter(db));
-  app.use('/api/crm', crmRouter(db, crmDeps));
-  app.use('/api/sales/online', onlineRouter(db, crmDeps));
+  app.use('/api/crm', crmRouter(db, deps));
+  // Sales
+  app.use('/api/sales/online', onlineRouter(db, deps));
   app.use('/api/sales', salesRouter(db));
-  app.use('/api/payments', collectRouter(db));
-  app.use('/api/payments', paymentsRouter(db));
+  // Stores
   app.use('/api/purchasing', purchasingRouter(db));
   app.use('/api/stock', inventoryRouter(db));
   app.use('/api/jobwork', jobWorkRouter(db));
+  // Accounts
+  app.use('/api/payments', collectRouter(db));
+  app.use('/api/payments', paymentsRouter(db));
   app.use('/api/accounting', accountingRouter(db));
-  app.use('/api/bank', bankMailRouter(db, crmDeps));
+  app.use('/api/bank', bankMailRouter(db, deps));
   app.use('/api/bank', bankRouter(db));
   app.use('/api/gst', gstRouter(db));
   app.use('/api/tds', tdsRouter(db));
+  // HR
   app.use('/api/payroll/my-payslips', myPayslipRouter(db));
   app.use('/api/payroll', payrollRouter(db));
   app.use('/api/hr', hrSelfRouter(db));
   app.use('/api/hr', hrRouter(db));
+  // Operations
   app.use('/api/ops', opsRouter(db));
   app.use('/api/ops', projectsRouter(db));
+  // Read-only
   app.use('/api/dashboards', dashboardsRouter(db));
 
+  // ---- 7. nothing matched, or something was thrown ----
   app.use('/api', () => {
     throw new AppError(404, 'not_found', 'No such API route');
   });

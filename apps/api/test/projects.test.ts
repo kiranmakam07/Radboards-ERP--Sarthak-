@@ -11,7 +11,6 @@ const ids: Record<string, string> = {};
 beforeAll(async () => {
   w = await setup();
   for (const r of await rows<{ id: string; role: string }>(w.db, sql`select id, role::text as role from users`)) u[r.role] = r.id;
-  const hr = await w.as('hr');
   const person = async (name: string, phone: string, department: string, user_id?: string) =>
     (await (await w.as('admin')).post('/api/hr/employees').send({ name, phone, department, designation: 'Staff', join_date: '2026-01-01', monthly_salary: 30000, user_id }).expect(201)).body.data.id;
   ids.asha = await person('Asha Kale', '9844000001', 'Workshop', u.stores);

@@ -23,7 +23,6 @@ const next = (weekday: number, from: string) => {
 
 beforeAll(async () => {
   w = await setup();
-  const hr = await w.as('hr');
   const user = async (role: string) => (await rows<{ id: string }>(w.db, sql`select id from users where role::text = ${role}`))[0]!.id;
   const employee = async (name: string, phone: string, role: string | null) =>
     (await (await w.as('admin')).post('/api/hr/employees').send({

@@ -16,6 +16,17 @@ import { parseBankDate, parseCsv } from '../lib/bank-csv';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zClock, zDate, zLink, zId, zListQuery, zMoney, zPhone, zText, wantsFile, type Ctx } from '../lib/http';
 
+/**
+ * HR: hiring, employees and the attendance register.
+ *
+ *   opening -> applicant: applied -> shortlisted -> interview -> offered -> hired / rejected
+ *           -> employee -> attendance, one row per person per day
+ *
+ * Hiring creates the employee from the applicant, so nothing is typed twice. Attendance comes from
+ * the register, from a file exported by the HRMS app, from a person's own clock-in and from approved
+ * leave (the last two are in hr-self.ts). Payroll reads the register: see payroll.ts.
+ */
+
 export type Applicant = typeof applicants.$inferSelect;
 export type Employee = typeof employees.$inferSelect;
 type Interview = typeof interviews.$inferSelect;
@@ -55,6 +66,7 @@ async function checkNotOnRolls(tx: DB, phone: string, exceptEmployeeId: string |
   if (same && same.id !== exceptEmployeeId) throw conflict(`${same.name} (${same.employeeNo}) is already on the rolls with this phone number`);
 }
 
+/** Add someone to the rolls. A phone number already on the rolls, or a sign-in already linked to someone else, is refused. */
 export async function createEmployee(ctx: Ctx, input: EmployeeInput): Promise<Employee> {
   const { tx } = ctx;
   await checkNotOnRolls(tx, input.phone, null);
@@ -143,6 +155,7 @@ async function cancelPendingInterviews(ctx: Ctx, applicantId: string): Promise<v
     .where(and(eq(interviews.applicantId, applicantId), eq(interviews.status, 'scheduled')));
 }
 
+/** Move an applicant to another stage, by the rules in APPLICANT_TRANSITIONS. Rejecting needs a reason and cancels the interviews still to come. */
 export async function moveApplicant(
   ctx: Ctx,
   id: string,
@@ -176,6 +189,7 @@ export async function moveApplicant(
   return updated!;
 }
 
+/** Book the next interview round. The applicant moves to the Interview stage if not there already. */
 export async function scheduleInterview(
   ctx: Ctx,
   applicantId: string,

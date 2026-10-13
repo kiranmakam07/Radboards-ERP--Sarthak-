@@ -1,0 +1,20 @@
+CREATE INDEX "deliveries_order_idx" ON "deliveries" USING btree ("order_id");--> statement-breakpoint
+CREATE INDEX "delivery_lines_delivery_idx" ON "delivery_lines" USING btree ("delivery_id");--> statement-breakpoint
+CREATE INDEX "goods_receipt_lines_grn_idx" ON "goods_receipt_lines" USING btree ("grn_id");--> statement-breakpoint
+CREATE INDEX "goods_receipts_po_idx" ON "goods_receipts" USING btree ("purchase_order_id");--> statement-breakpoint
+CREATE INDEX "invoice_lines_against_idx" ON "invoice_lines" USING btree ("against_line_id");--> statement-breakpoint
+CREATE INDEX "invoices_order_idx" ON "invoices" USING btree ("order_id");--> statement-breakpoint
+CREATE INDEX "invoices_against_idx" ON "invoices" USING btree ("against_invoice_id");--> statement-breakpoint
+CREATE INDEX "job_work_receipt_lines_line_idx" ON "job_work_receipt_lines" USING btree ("job_work_line_id");--> statement-breakpoint
+CREATE INDEX "journal_entries_reverses_idx" ON "journal_entries" USING btree ("reverses_entry_id");--> statement-breakpoint
+CREATE INDEX "payment_allocations_payment_idx" ON "payment_allocations" USING btree ("payment_id");--> statement-breakpoint
+CREATE INDEX "purchase_bill_lines_bill_idx" ON "purchase_bill_lines" USING btree ("bill_id");--> statement-breakpoint
+CREATE INDEX "purchase_bills_po_idx" ON "purchase_bills" USING btree ("purchase_order_id");--> statement-breakpoint
+CREATE INDEX "purchase_bills_against_idx" ON "purchase_bills" USING btree ("against_bill_id");--> statement-breakpoint
+CREATE INDEX "purchase_bills_job_work_idx" ON "purchase_bills" USING btree ("job_work_id");--> statement-breakpoint
+CREATE INDEX "purchase_order_lines_po_idx" ON "purchase_order_lines" USING btree ("purchase_order_id");--> statement-breakpoint
+CREATE INDEX "purchase_orders_supplier_idx" ON "purchase_orders" USING btree ("supplier_id");--> statement-breakpoint
+CREATE INDEX "purchase_return_lines_return_idx" ON "purchase_return_lines" USING btree ("return_id");--> statement-breakpoint
+CREATE INDEX "purchase_returns_grn_idx" ON "purchase_returns" USING btree ("grn_id");--> statement-breakpoint
+CREATE INDEX "stock_adjustment_lines_adjustment_idx" ON "stock_adjustment_lines" USING btree ("adjustment_id");--> statement-breakpoint
+CREATE INDEX "stock_transfer_lines_transfer_idx" ON "stock_transfer_lines" USING btree ("transfer_id");

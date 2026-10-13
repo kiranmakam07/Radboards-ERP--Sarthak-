@@ -8,6 +8,14 @@ import { InstallButton } from '@/components/install';
 import { post, useGet } from '@/lib/api';
 import { SessionContext, type Session } from '@/lib/session';
 
+/**
+ * The signed-in area: everything under app/(app) is drawn inside this frame.
+ *
+ * NAV is the whole menu. Each entry names the permission that shows it (the same names the API
+ * uses, from packages/shared/src/constants.ts); an entry with no permission is shown to everyone.
+ * To add a screen: make app/(app)/<address>/page.tsx and add a line here. Hiding an entry is a
+ * convenience only: the API refuses the request anyway if the person may not make it.
+ */
 type NavItem = { href: string; label: string; perm?: string };
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Me', items: [
