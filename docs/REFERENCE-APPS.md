@@ -19,6 +19,13 @@ leave). Sarthak to confirm which Attendo is meant.
 Status: ✅ in RadCore · 🔨 being built now · 🔌 built, waits for an account to be connected ·
 ⏭ later · ➖ not needed here.
 
+**Checked by running it (13 Oct 2026).** The critical functions below were carried out as one story on an
+empty copy of the system and every section read back after each step (`apps/api/test/story.test.ts`;
+the page for non-developers is https://claude.ai/artifact/4WLN4SZaN1YPM6qtihADYa). Two things work
+differently from Vyapar and are worth a decision: a credit sale is order, delivery and invoice (three
+steps) where Vyapar has one screen, and a purchase is order, count in, quality check and bill (four
+steps) where Vyapar adds stock from the bill. The counter sale is one screen in both.
+
 ## Accounts (reference: Vyapar)
 
 | What Vyapar offers | RadCore | Note |
