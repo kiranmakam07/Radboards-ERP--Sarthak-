@@ -189,7 +189,7 @@ describe('HR: hiring creates the employee', () => {
 
   it('will not put the same person on the rolls twice', async () => {
     const hr = await w.as('hr');
-    const dup = await hr.post('/api/hr/employees').send({ name: 'Priya again', phone: '9820011111', department: 'Sales', designation: 'x', join_date: today }).expect(409);
+    const dup = await (await w.as('admin')).post('/api/hr/employees').send({ name: 'Priya again', phone: '9820011111', department: 'Sales', designation: 'x', join_date: today }).expect(409);
     expect(dup.body.error.message).toContain('EMP001');
   });
 
@@ -218,22 +218,22 @@ describe('HR: hiring creates the employee', () => {
 describe('HR: employees', () => {
   it('adds existing staff, edits one field without touching the rest, and links a sign-in once', async () => {
     const hr = await w.as('hr');
-    const arjun = await hr.post('/api/hr/employees').send({
+    const arjun = await (await w.as('admin')).post('/api/hr/employees').send({
       name: 'Arjun Mehta', phone: '9833000001', department: 'Stores', designation: 'Stores Assistant', join_date: '2026-01-01', monthly_salary: 22000,
     }).expect(201);
     ids.arjun = arjun.body.data.id;
     expect(arjun.body.data.employee_no).toBe('EMP002');
     expect(arjun.body.data.employment_type).toBe('full_time');
 
-    await hr.patch(`/api/hr/employees/${ids.arjun}`).send({ employment_type: 'contract' }).expect(200);
-    const patched = await hr.patch(`/api/hr/employees/${ids.arjun}`).send({ designation: 'Stores Supervisor' }).expect(200);
+    await (await w.as('admin')).patch(`/api/hr/employees/${ids.arjun}`).send({ employment_type: 'contract' }).expect(200);
+    const patched = await (await w.as('admin')).patch(`/api/hr/employees/${ids.arjun}`).send({ designation: 'Stores Supervisor' }).expect(200);
     expect(patched.body.data).toMatchObject({
       designation: 'Stores Supervisor', department: 'Stores', monthly_salary: '22000.00', employment_type: 'contract', phone: '+919833000001',
     });
 
     const storesUser = await userId('stores');
-    await hr.patch(`/api/hr/employees/${ids.arjun}`).send({ user_id: storesUser }).expect(200);
-    const clash = await hr.patch(`/api/hr/employees/${ids.priyaEmp}`).send({ user_id: storesUser }).expect(409);
+    await (await w.as('admin')).patch(`/api/hr/employees/${ids.arjun}`).send({ user_id: storesUser }).expect(200);
+    const clash = await (await w.as('admin')).patch(`/api/hr/employees/${ids.priyaEmp}`).send({ user_id: storesUser }).expect(409);
     expect(clash.body.error.message).toContain('Arjun Mehta');
   });
 });
@@ -342,7 +342,7 @@ describe('HR: attendance', () => {
     expect(february.body.data.map((e: { name: string }) => e.name)).toEqual(['Priya Nair']);
 
     // Someone who left can be taken on again as a new record.
-    const back = await hr.post('/api/hr/employees').send({ name: 'Arjun Mehta', phone: '9833000001', department: 'Stores', designation: 'Stores Assistant', join_date: today }).expect(201);
+    const back = await (await w.as('admin')).post('/api/hr/employees').send({ name: 'Arjun Mehta', phone: '9833000001', department: 'Stores', designation: 'Stores Assistant', join_date: today }).expect(201);
     expect(back.body.data.employee_no).toBe('EMP003');
   });
 });
@@ -381,7 +381,7 @@ describe('HR: leave balances', () => {
     expect(of(ids.arjun!)).toMatchObject({ entitled: 3, taken: 1, balance: 2 }); // one day of leave on the 10th
 
     // A person can have their own figure; the company's figure covers everyone else.
-    await hr.patch(`/api/hr/employees/${ids.priyaEmp}`).send({ annual_leave_days: 18 }).expect(200);
+    await (await w.as('admin')).patch(`/api/hr/employees/${ids.priyaEmp}`).send({ annual_leave_days: 18 }).expect(200);
     await hr.put('/api/hr/leave-policy').send({ annual_leave_days: 15 }).expect(200);
     res = (await hr.get('/api/hr/leave-balances?fy=2025-26').expect(200)).body;
     expect(of(ids.priyaEmp!)).toMatchObject({ entitled: 4.5, own_rule: true });
@@ -390,7 +390,7 @@ describe('HR: leave balances', () => {
     // This year: Priya has been here throughout, so she gets her full 18.
     res = (await hr.get('/api/hr/leave-balances').expect(200)).body;
     expect(of(ids.priyaEmp!)).toMatchObject({ entitled: 18, taken: 0, balance: 18 });
-    await hr.patch(`/api/hr/employees/${ids.priyaEmp}`).send({ annual_leave_days: '' }).expect(200); // back to the company's figure
+    await (await w.as('admin')).patch(`/api/hr/employees/${ids.priyaEmp}`).send({ annual_leave_days: '' }).expect(200); // back to the company's figure
     res = (await hr.get('/api/hr/leave-balances').expect(200)).body;
     expect(of(ids.priyaEmp!)).toMatchObject({ entitled: 15, own_rule: false });
   });

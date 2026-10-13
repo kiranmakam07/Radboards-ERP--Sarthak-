@@ -15,7 +15,16 @@ const ACTIONS: Record<string, string> = {
   read: 'see', write: 'add and change', manage: 'manage', approve: 'approve', adjust: 'cancel and credit', create: 'make',
   override_credit: 'go over a credit limit',
 };
+// The masters need saying in full: who may add one while working is not who may change one afterwards.
+const IN_FULL: Record<string, string> = {
+  'masters:manage': 'Masters: the Masters screen, the small lists, and the download of everything',
+  'items:write': 'Items master: add and change items',
+  'parties:write': 'Parties: add a new customer or supplier while working',
+  'parties:manage': 'Parties master: change one, its price list, credit limit and terms',
+  'employees:manage': 'Employees master: add and change, salary, bank account and sign-in',
+};
 const describe = (key: string) => {
+  if (IN_FULL[key]) return IN_FULL[key];
   const [area, action] = key.split(':') as [string, string];
   return area === 'dashboard' ? `${label(action)} dashboard` : `${AREAS[area] ?? label(area)}: ${ACTIONS[action] ?? label(action)}`;
 };

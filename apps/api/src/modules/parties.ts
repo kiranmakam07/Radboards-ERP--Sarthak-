@@ -1,13 +1,13 @@
 import { eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { PARTY_TYPES, STATE_CODES } from '@radcore/shared';
+import { PARTY_TYPES, STATE_CODES, can } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { getCompany } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { parties } from '../db/schema';
-import { badRequest, must } from '../lib/errors';
+import { badRequest, forbidden, must } from '../lib/errors';
 import {
   emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zMoney, zPhone, zStateCode, zText, wantsFile, type Ctx,
 } from '../lib/http';
@@ -83,6 +83,8 @@ export function partiesRouter(db: DB) {
   r.get('/', requirePerm('parties:read'), async (req, res) => {
     const q = zListQuery.extend({
       type: z.enum(PARTY_TYPES).optional(),
+      // Who we sell to (customers and dealers together) or who we buy from.
+      side: emptyToNull(z.enum(['customers', 'suppliers'])).optional(),
       active: z.enum(['true', 'false', 'all']).default('true'),
     }).parse(req.query);
     const like = q.q ? `%${q.q}%` : null;
@@ -94,6 +96,7 @@ export function partiesRouter(db: DB) {
         left join v_party_balances b on b.party_id = p.id
         left join price_lists pl on pl.id = p.price_list_id
        where (${q.type ?? null}::text is null or p.party_type::text = ${q.type ?? null})
+         and (${q.side ?? null}::text is null or (p.party_type = 'supplier') = (${q.side ?? null} = 'suppliers'))
          and (${q.active} = 'all' or p.active = (${q.active} = 'true'))
          and (${like}::text is null or p.name ilike ${like} or p.gstin ilike ${like}
               or (${phoneLike}::text is not null and p.phone like ${phoneLike}))
@@ -115,13 +118,21 @@ export function partiesRouter(db: DB) {
     res.json({ data: { ...party, balance: await partyBalance(db, id), open_invoices, open_bills } });
   });
 
-  r.post('/', requirePerm('parties:write'), async (req, res) => {
+  /**
+   * Anyone who sells or buys can add a new customer or supplier while working. The commercial
+   * terms (price list, credit limit, payment days) belong to the master and need its permission.
+   */
+  r.post('/', requirePerm('parties:write', 'parties:manage'), async (req, res) => {
     const body = zParty.parse(req.body);
+    const terms = body.price_list_id != null || body.credit_limit != null || body.payment_terms_days != null;
+    if (terms && !can(req.user!.role, 'parties:manage')) {
+      throw forbidden('A price list, credit limit or payment terms can only be set in Masters');
+    }
     const created = await inTx(db, req, (ctx) => createParty(ctx, body));
     res.status(201).json({ data: created });
   });
 
-  r.patch('/:id', requirePerm('parties:write'), async (req, res) => {
+  r.patch('/:id', requirePerm('parties:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const body = zParty.omit({ party_type: true }).partial().parse(req.body);
     const updated = await inTx(db, req, async (ctx) => {

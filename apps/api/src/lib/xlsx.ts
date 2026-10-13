@@ -1,7 +1,7 @@
 import zlib from 'node:zlib';
 
 /**
- * A small Excel (.xlsx) writer: one sheet, a bold header row, real numbers and dates.
+ * A small Excel (.xlsx) writer: one or more sheets, a bold header row on each, real numbers and dates.
  * An .xlsx file is a zip of a few XML files, so this needs no library.
  *
  * - Numbers from the database arrive as text ("1180.00"); anything with a decimal point is
@@ -118,9 +118,13 @@ function cell(v: unknown): Cell | null {
   return { kind: 's', value: s, width: s.length };
 }
 
-const heading = (key: string) => key.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+// Short forms that read wrongly in lower case: "Gstin" and "Hsn sac" are not how anyone writes them.
+const SHORT_FORMS = new Set(['sku', 'hsn', 'sac', 'gst', 'gstin', 'mrp', 'pf', 'esic', 'tds', 'ifsc', 'upi', 'cgst', 'sgst', 'igst', 'pan', 'qc', 'po', 'grn']);
+const heading = (key: string) => key.split('_').map((w) => (SHORT_FORMS.has(w) ? w.toUpperCase() : w)).join(' ').replace(/^\w/, (c) => c.toUpperCase());
 
-export function toXlsx(rows: Record<string, unknown>[], columns?: string[], sheetName = 'Sheet1'): Buffer {
+export type Sheet = { name: string; rows: Record<string, unknown>[]; columns?: string[] };
+
+function sheetXml(rows: Record<string, unknown>[], columns?: string[]): string {
   const cols = columns ?? Object.keys(rows[0] ?? {});
   const widths = cols.map((c) => heading(c).length);
   const out: string[] = [];
@@ -138,21 +142,43 @@ export function toXlsx(rows: Record<string, unknown>[], columns?: string[], shee
     out.push(`<row r="${r + 2}">${cells.join('')}</row>`);
   });
   const colsXml = widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${Math.min(Math.max(w + 2, 8), 60)}" customWidth="1"/>`).join('');
-  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>${cols.length ? `<cols>${colsXml}</cols>` : ''}<sheetData>${out.join('')}</sheetData></worksheet>`;
+}
 
+/** Excel allows 31 characters in a sheet name, none of \ / ? * [ ] : and no two sheets alike. */
+function sheetNames(names: string[]): string[] {
+  const used = new Set<string>();
+  return names.map((raw, i) => {
+    const base = raw.replace(/[\\/?*[\]:]/g, ' ').trim().slice(0, 31) || `Sheet${i + 1}`;
+    let name = base;
+    for (let n = 2; used.has(name.toLowerCase()); n++) name = `${base.slice(0, 31 - String(n).length - 1)} ${n}`;
+    used.add(name.toLowerCase());
+    return name;
+  });
+}
+
+/** One workbook with a sheet per list, each with its own bold header row. */
+export function toWorkbook(sheets: Sheet[]): Buffer {
+  if (sheets.length === 0) throw new Error('A workbook needs at least one sheet');
+  const names = sheetNames(sheets.map((s) => s.name));
+  const n = sheets.length;
   return zip([
     { name: '[Content_Types].xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>` },
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>` },
     { name: '_rels/.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
     { name: 'xl/workbook.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xml(sheetName.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Sheet1')}" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${names.map((name, i) => `<sheet name="${xml(name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>` },
     { name: 'xl/_rels/workbook.xml.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${n + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
     // Styles: 0 = normal, 1 = bold header, 2 = date, 3 = date and time.
     { name: 'xl/styles.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="dd\\-mm\\-yyyy"/><numFmt numFmtId="165" formatCode="dd\\-mm\\-yyyy\\ hh:mm"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>` },
-    { name: 'xl/worksheets/sheet1.xml', data: sheet },
+    ...sheets.map((s, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: sheetXml(s.rows, s.columns) })),
   ]);
+}
+
+export function toXlsx(rows: Record<string, unknown>[], columns?: string[], sheetName = 'Sheet1'): Buffer {
+  return toWorkbook([{ name: sheetName, rows, columns }]);
 }

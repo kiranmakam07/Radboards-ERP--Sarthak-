@@ -4,7 +4,7 @@ import { asc, desc, eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
-import { PERMISSIONS, ROLES, STATE_CODES, can, isIsoDate, rolesFor, type Permission } from '@radcore/shared';
+import { PERMISSIONS, ROLES, STATE_CODES, can, isIsoDate, istDate, rolesFor, type Permission } from '@radcore/shared';
 import { config } from '../config';
 import { audit } from '../core/audit';
 import {
@@ -18,6 +18,7 @@ import {
 } from '../db/schema';
 import { badRequest, forbidden, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zAddress, zGstin, zHttpUrl, zId, zMoney, zPhone, zStateCode, zText } from '../lib/http';
+import { toWorkbook, type Sheet } from '../lib/xlsx';
 
 const zPassword = z.string().min(8, 'must be at least 8 characters').max(200);
 
@@ -410,6 +411,65 @@ export function mastersRouter(db: DB) {
       await audit(ctx, 'price_list', id, 'update_items', null, body.items);
     });
     res.json({ ok: true });
+  });
+
+  // ---- the masters as a whole ----
+  /** How many of each master there are and when one was last changed, for the Masters screen. */
+  r.get('/summary', requirePerm('masters:manage'), async (_req, res) => {
+    const [data] = await rows(db, sql`
+      select (select count(*)::int from items where active) as items,
+             (select count(*)::int from items where not active) as items_inactive,
+             (select max(updated_at) from items) as items_changed_at,
+             (select count(*)::int from parties where active and party_type <> 'supplier') as customers,
+             (select max(updated_at) from parties where party_type <> 'supplier') as customers_changed_at,
+             (select count(*)::int from parties where active and party_type = 'supplier') as suppliers,
+             (select max(updated_at) from parties where party_type = 'supplier') as suppliers_changed_at,
+             (select count(*)::int from employees where status = 'active') as employees,
+             (select count(*)::int from employees where status = 'left') as employees_left,
+             (select max(updated_at) from employees) as employees_changed_at`);
+    res.json({ data });
+  });
+
+  /**
+   * Every master in one Excel workbook, a sheet each: enough to check the set-up at a glance or to
+   * carry it to another system. Salaries and bank accounts are on the employees sheet, so that
+   * sheet is only included for someone who may change employees.
+   */
+  r.get('/export', requirePerm('masters:manage'), async (req, res) => {
+    const role = req.user!.role;
+    const sheets: Sheet[] = [];
+    sheets.push({ name: 'Items', rows: await rows(db, sql`
+      select i.sku, i.name, replace(i.item_type::text, '_', ' ') as type, c.name as category, i.hsn_sac, i.gst_rate, i.unit, i.purchase_cost, i.mrp,
+             i.retail_price, i.dealer_price, i.reorder_level, i.barcode, i.is_stock_item as stock_item, i.active
+        from items i left join item_categories c on c.id = i.category_id order by i.name`),
+      columns: ['sku', 'name', 'type', 'category', 'hsn_sac', 'gst_rate', 'unit', 'purchase_cost', 'mrp', 'retail_price', 'dealer_price',
+        'reorder_level', 'barcode', 'stock_item', 'active'] });
+    const partyRows = (supplier: boolean) => rows(db, sql`
+      select p.party_type as type, p.name, p.phone, p.email, p.gstin, p.state_code,
+             p.billing_address->>'line1' as address, p.billing_address->>'city' as city, p.billing_address->>'pincode' as pincode,
+             pl.name as price_list, p.credit_limit, p.payment_terms_days, p.active
+        from parties p left join price_lists pl on pl.id = p.price_list_id
+       where (p.party_type = 'supplier') = ${supplier} order by p.name`);
+    sheets.push({ name: 'Customers', rows: (await partyRows(false)).map((p) => ({ ...p, state: STATE_CODES[String(p.state_code)] ?? null })),
+      columns: ['type', 'name', 'phone', 'email', 'gstin', 'state_code', 'state', 'address', 'city', 'pincode', 'price_list', 'credit_limit',
+        'payment_terms_days', 'active'] });
+    sheets.push({ name: 'Suppliers', rows: (await partyRows(true)).map((p) => ({ ...p, state: STATE_CODES[String(p.state_code)] ?? null })),
+      columns: ['name', 'phone', 'email', 'gstin', 'state_code', 'state', 'address', 'city', 'pincode', 'payment_terms_days', 'active'] });
+    if (can(role, 'employees:manage')) {
+      sheets.push({ name: 'Employees', rows: await rows(db, sql`
+        select e.employee_no, e.name, e.phone, e.email, e.department, e.designation, replace(e.employment_type::text, '_', ' ') as employment_type,
+               e.join_date, e.monthly_salary,
+               e.annual_leave_days, e.pf_applicable as pf, e.esic_applicable as esic, e.pt_monthly as professional_tax_monthly, e.tds_monthly,
+               e.bank_account_no, e.bank_ifsc, u.name as sign_in, u.role as sign_in_role, e.status, e.left_on
+          from employees e left join users u on u.id = e.user_id order by e.employee_no`),
+        columns: ['employee_no', 'name', 'phone', 'email', 'department', 'designation', 'employment_type', 'join_date', 'monthly_salary',
+          'annual_leave_days', 'pf', 'esic', 'professional_tax_monthly', 'tds_monthly', 'bank_account_no', 'bank_ifsc', 'sign_in', 'sign_in_role',
+          'status', 'left_on'] });
+    }
+    await inTx(db, req, (ctx) => audit(ctx, 'masters', 'all', 'export', null, { sheets: sheets.map((s) => `${s.name}: ${s.rows.length}`) }));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="radcore-masters-${istDate()}.xlsx"`);
+    res.send(toWorkbook(sheets));
   });
 
   r.get('/users-lite', requireAuth, async (_req, res) => {

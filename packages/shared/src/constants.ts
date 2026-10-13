@@ -157,16 +157,23 @@ export type IntervalUnit = (typeof INTERVAL_UNITS)[number];
 export const PERMISSIONS = {
   'users:manage': ['admin'],
   'settings:manage': ['admin'],
+  // Masters: the set-up records every other screen reads from (items, customers and suppliers, employees,
+  // and the small lists). They are changed in one place, by an admin, and the change shows everywhere.
   'masters:manage': ['admin'],
   'audit:read': ['admin', 'owner'],
 
   'items:read': ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin'],
-  'items:write': ['admin', 'accounts', 'stores'],
+  'items:write': ['admin'],
   'pricelists:write': ['admin'],
   'pricelists:approve': ['owner', 'admin'],
 
   'parties:read': ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin'],
+  // Adding a new customer or supplier in the middle of the work (a walk-in at the counter, a new supplier on a bill).
   'parties:write': ['store', 'sales', 'stores', 'accounts', 'admin'],
+  // Changing one afterwards, and its price list, credit limit and payment terms.
+  'parties:manage': ['admin'],
+  // Adding and changing employees: their details, salary, deductions, bank account and sign-in.
+  'employees:manage': ['admin'],
 
   'leads:read': ['owner', 'marketing', 'store', 'sales', 'admin'],
   'leads:write': ['marketing', 'store', 'sales', 'admin'],

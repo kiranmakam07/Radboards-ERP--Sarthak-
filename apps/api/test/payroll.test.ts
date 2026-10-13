@@ -25,7 +25,7 @@ beforeAll(async () => {
   const hr = await w.as('hr');
   const user = async (role: string) => (await rows<{ id: string }>(w.db, sql`select id from users where role::text = ${role}`))[0]!.id;
   const employee = async (name: string, phone: string, joined: string, role: string | null) =>
-    (await hr.post('/api/hr/employees').send({ name, phone, department: 'Sales', designation: 'Executive', join_date: joined, user_id: role ? await user(role) : '' }).expect(201)).body.data.id as string;
+    (await (await w.as('admin')).post('/api/hr/employees').send({ name, phone, department: 'Sales', designation: 'Executive', join_date: joined, user_id: role ? await user(role) : '' }).expect(201)).body.data.id as string;
   id.amit = await employee('Amit Verma', '9822200001', '2025-01-01', 'sales');
   id.sunita = await employee('Sunita Rao', '9822200002', '2025-01-01', 'store');
   id.kiran = await employee('Kiran Joshi', '9822200003', day(16), null); // joined part-way through the month
@@ -49,8 +49,9 @@ afterAll(async () => {
 describe('who is paid what', () => {
   it('keeps each person’s salary, deductions and bank details, and is not open to everyone', async () => {
     const accounts = await w.as('accounts');
+    const admin = await w.as('admin');
     const pay = (employeeId: string, body: Record<string, unknown>) =>
-      accounts.put(`/api/payroll/staff/${employeeId}`).send({ monthly_salary: null, pf_applicable: false, esic_applicable: false, pt_monthly: 0, tds_monthly: 0, bank_account_no: '', bank_ifsc: '', ...body });
+      admin.put(`/api/payroll/staff/${employeeId}`).send({ monthly_salary: null, pf_applicable: false, esic_applicable: false, pt_monthly: 0, tds_monthly: 0, bank_account_no: '', bank_ifsc: '', ...body });
     await pay(id.amit!, { monthly_salary: 30000, pf_applicable: true, pt_monthly: 200, bank_account_no: '50100123456789', bank_ifsc: 'hdfc0001234' }).expect(200);
     await pay(id.sunita!, { monthly_salary: 18000, esic_applicable: true }).expect(200);
     await pay(id.kiran!, { monthly_salary: 20000 }).expect(200);
@@ -61,7 +62,8 @@ describe('who is paid what', () => {
     expect(staff.find((e: any) => e.name === 'Amit Verma')).toMatchObject({ monthly_salary: '30000.00', pf_applicable: true, pt_monthly: '200.00', bank_ifsc: 'HDFC0001234', advance_outstanding: '0.00' });
     await (await w.as('sales')).get('/api/payroll/staff').expect(403);
     await (await w.as('owner')).get('/api/payroll/staff').expect(200);
-    await (await w.as('owner')).put(`/api/payroll/staff/${id.amit}`).send({}).expect(403); // the owner looks; accounts and HR change
+    // A person's pay details are part of the employee master: the owner, accounts and HR look, an admin changes.
+    for (const role of ['owner', 'accounts', 'hr'] as const) await (await w.as(role)).put(`/api/payroll/staff/${id.amit}`).send({}).expect(403);
   });
 
   it('gives an advance out of cash and remembers what is still to come back', async () => {

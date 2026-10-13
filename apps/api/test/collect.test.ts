@@ -28,7 +28,7 @@ beforeAll(async () => {
   id.board = (await admin.post('/api/items').send({ sku: 'BRD-1', name: 'Board', item_type: 'finished_good', hsn_sac: '950699', gst_rate: 18, retail_price: 1180, dealer_price: 1000, purchase_cost: 500 }).expect(201)).body.data.id;
   await openingStock(w, m.stores, [{ item_id: id.board!, qty_change: '100', unit_cost: '500.00' }]);
   const party = async (name: string, phone: string | null, terms: number) =>
-    (await accounts.post('/api/parties').send({ party_type: 'dealer', name, phone: phone ?? '', payment_terms_days: terms }).expect(201)).body.data.id as string;
+    (await admin.post('/api/parties').send({ party_type: 'dealer', name, phone: phone ?? '', payment_terms_days: terms }).expect(201)).body.data.id as string;
   id.late = await party('Mumbai Skate Co', '9820077777', 7);
   id.notDue = await party('Pune Boards', '9820088888', 30);
   id.noPhone = await party('Nashik Wheels', null, 0);

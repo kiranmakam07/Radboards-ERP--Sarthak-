@@ -1,6 +1,8 @@
 'use client';
 
-import { date, inr, num } from '@/components/ui';
+import { useState } from 'react';
+import { ErrorBox, date, inr, num } from '@/components/ui';
+import { put } from '@/lib/api';
 
 const addr = (a: any) => (a ? [a.line1, a.line2, a.city, a.state, a.pincode].filter(Boolean).join(', ') : '');
 
@@ -68,6 +70,45 @@ export function PayslipDocument({ slip }: { slip: any }) {
         </p>
       ) : null}
       <p className="small muted">This payslip is produced by the system and needs no signature.</p>
+    </div>
+  );
+}
+
+/** One person's salary, deductions and bank account, edited in place. Part of the employee master. */
+export function PayDetails({ person, onDone }: { person: any; onDone: () => void }) {
+  const [v, setV] = useState({
+    monthly_salary: person.monthly_salary ?? '', pf_applicable: person.pf_applicable, esic_applicable: person.esic_applicable,
+    pt_monthly: Number(person.pt_monthly) ? person.pt_monthly : '', tds_monthly: Number(person.tds_monthly) ? person.tds_monthly : '',
+    bank_account_no: person.bank_account_no ?? '', bank_ifsc: person.bank_ifsc ?? '',
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await put(`/payroll/staff/${person.id}`, { ...v, monthly_salary: v.monthly_salary === '' ? null : v.monthly_salary, pt_monthly: v.pt_monthly || 0, tds_monthly: v.tds_monthly || 0 });
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="toggle-body" style={{ marginBottom: 12 }}>
+      <div className="card-head"><h2>Pay details: {person.name}</h2><button type="button" onClick={onDone}>× Close</button></div>
+      <div className="form">
+        <label>Monthly salary ₹<input type="number" inputMode="decimal" min="0" value={v.monthly_salary} onChange={(e) => setV({ ...v, monthly_salary: e.target.value })} /></label>
+        <label className="check"><input type="checkbox" checked={v.pf_applicable} onChange={(e) => setV({ ...v, pf_applicable: e.target.checked })} /> Provident fund is deducted</label>
+        <label className="check"><input type="checkbox" checked={v.esic_applicable} onChange={(e) => setV({ ...v, esic_applicable: e.target.checked })} /> ESIC is deducted</label>
+        <label>Professional tax a month ₹<input type="number" inputMode="decimal" min="0" value={v.pt_monthly} placeholder="0" onChange={(e) => setV({ ...v, pt_monthly: e.target.value })} /></label>
+        <label>Income tax (TDS) a month ₹<input type="number" inputMode="decimal" min="0" value={v.tds_monthly} placeholder="0" onChange={(e) => setV({ ...v, tds_monthly: e.target.value })} /></label>
+        <label>Bank account number<input inputMode="numeric" value={v.bank_account_no} onChange={(e) => setV({ ...v, bank_account_no: e.target.value })} /></label>
+        <label>IFSC<input value={v.bank_ifsc} placeholder="e.g. HDFC0001234" onChange={(e) => setV({ ...v, bank_ifsc: e.target.value })} /></label>
+        <div className="form-foot"><button type="button" className="primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button></div>
+      </div>
+      <ErrorBox error={error} />
     </div>
   );
 }

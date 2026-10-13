@@ -26,7 +26,7 @@ beforeAll(async () => {
   const hr = await w.as('hr');
   const user = async (role: string) => (await rows<{ id: string }>(w.db, sql`select id from users where role::text = ${role}`))[0]!.id;
   const employee = async (name: string, phone: string, role: string | null) =>
-    (await hr.post('/api/hr/employees').send({
+    (await (await w.as('admin')).post('/api/hr/employees').send({
       name, phone, department: 'Sales', designation: 'Executive', join_date: addDays(today, -400), user_id: role ? await user(role) : '',
     }).expect(201)).body.data.id as string;
   id.sales = await employee('Amit Verma', '9822200001', 'sales');
@@ -117,7 +117,7 @@ describe('clocking in and out from the phone', () => {
     const hr = await w.as('hr');
     // HR's own sign-in has an employee record too in this test.
     const [hrUser] = await rows<{ id: string }>(w.db, sql`select id from users where role = 'hr'`);
-    const priya = (await hr.post('/api/hr/employees').send({ name: 'Priya HR', phone: '9822200009', department: 'HR', designation: 'HR', join_date: addDays(today, -30), user_id: hrUser!.id }).expect(201)).body.data.id;
+    const priya = (await (await w.as('admin')).post('/api/hr/employees').send({ name: 'Priya HR', phone: '9822200009', department: 'HR', designation: 'HR', join_date: addDays(today, -30), user_id: hrUser!.id }).expect(201)).body.data.id;
     await hr.put('/api/hr/attendance').send({ date: today, entries: [{ employee_id: priya, status: 'absent' }] }).expect(200);
     await hr.post('/api/hr/me/clock-in').send({ at: OFFICE }).expect(201);
     expect(await dayRow(priya)).toMatchObject({ status: 'present', self_marked: true, in_distance_m: 0 });
