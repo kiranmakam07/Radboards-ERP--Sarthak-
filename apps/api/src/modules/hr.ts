@@ -775,8 +775,11 @@ export function hrRouter(db: DB) {
     res.json({ data: { ...e, recent_attendance: recent } });
   });
 
-  /** Add someone already working here; new joiners normally arrive through Hire on their application. */
-  r.post('/employees', requirePerm('hr:write'), async (req, res) => {
+  /**
+   * Add someone already working here; new joiners normally arrive through Hire on their application.
+   * The employee record is a master: payroll, attendance and tasks all read it, so changing it is kept to Masters.
+   */
+  r.post('/employees', requirePerm('employees:manage'), async (req, res) => {
     const b = zEmployee.parse(req.body);
     const row = await inTx(db, req, (ctx) =>
       createEmployee(ctx, {
@@ -787,7 +790,7 @@ export function hrRouter(db: DB) {
     res.status(201).json({ data: row });
   });
 
-  r.patch('/employees/:id', requirePerm('hr:write'), async (req, res) => {
+  r.patch('/employees/:id', requirePerm('employees:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = zEmployee.partial().parse(req.body);
     const row = await inTx(db, req, async (ctx) => {
@@ -826,7 +829,7 @@ export function hrRouter(db: DB) {
   });
 
   /** The employee has left. Their record and attendance stay; they drop off the daily register after this date. */
-  r.post('/employees/:id/exit', requirePerm('hr:write'), async (req, res) => {
+  r.post('/employees/:id/exit', requirePerm('hr:write', 'employees:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = z.object({ left_on: zDate, reason: emptyToNull(z.string().trim().max(500)).optional() }).parse(req.body);
     const result = await inTx(db, req, async (ctx) => {

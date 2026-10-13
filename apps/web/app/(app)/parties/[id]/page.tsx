@@ -29,7 +29,7 @@ export default function PartyPage() {
     }>
       <Card>
         <KV rows={[
-          ['Type', <Badge value={p.party_type} />], ['Phone', p.phone], ['Email', p.email], ['GSTIN', p.gstin],
+          ['Type', <><Badge value={p.party_type} />{p.active ? null : <> <Badge value="closed" /></>}</>], ['Phone', p.phone], ['Email', p.email], ['GSTIN', p.gstin],
           ['State', `${STATE_CODES[p.state_code] ?? ''} (${p.state_code})`],
           ['Address', [a.line1, a.city, a.pincode].filter(Boolean).join(', ')],
           ['Credit limit', p.credit_limit ? `₹${inr(p.credit_limit)}` : null],
@@ -39,17 +39,18 @@ export default function PartyPage() {
         ]} />
       </Card>
 
-      {can('parties:write') && (
+      {can('parties:manage') && (
         <Toggle label="Edit party">
-          <Form fields={partyFields(priceLists.data?.data ?? [], false)}
+          <Form key={p.updated_at} fields={[...partyFields(priceLists.data?.data ?? [], false), { name: 'active', label: 'Active (untick to switch this party off)', type: 'checkbox' }]}
             initial={{
               name: p.name, phone: p.phone ?? '', email: p.email ?? '', gstin: p.gstin ?? '', state_code: p.gstin ? '' : p.state_code,
               line1: a.line1 ?? '', city: a.city ?? '', pincode: a.pincode ?? '', price_list_id: p.price_list_id ?? '',
-              credit_limit: p.credit_limit ?? '', payment_terms_days: p.payment_terms_days ?? '',
+              credit_limit: p.credit_limit ?? '', payment_terms_days: p.payment_terms_days ?? '', active: p.active,
             }}
             onSubmit={(v) => patch(`/parties/${id}`, partyBody(v))} onDone={reload} />
         </Toggle>
       )}
+      {!can('parties:manage') && can('parties:write') ? <p className="muted small no-print">This record is part of the masters. Ask an admin to change it.</p> : null}
 
       {p.open_invoices.length > 0 && (
         <Card title="Unpaid invoices">

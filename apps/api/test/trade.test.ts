@@ -40,10 +40,10 @@ beforeAll(async () => {
   id.board = board.body.data.id; id.wheels = wheels.body.data.id; id.svc = setupSvc.body.data.id;
 
   const accounts = await w.as('accounts');
-  const supplier = await accounts.post('/api/parties').send({
+  const supplier = await admin.post('/api/parties').send({
     party_type: 'supplier', name: 'Deck Makers', phone: '9700000001', gstin: gstin('27', 'SUPPL1234A'), payment_terms_days: 30,
   }).expect(201);
-  const dealer = await accounts.post('/api/parties').send({
+  const dealer = await admin.post('/api/parties').send({
     party_type: 'dealer', name: 'Bangalore Boards', phone: '9700000002', gstin: gstin('29', 'DEALR1234B'), credit_limit: 60000, payment_terms_days: 15,
   }).expect(201);
   id.supplier = supplier.body.data.id; id.dealer = dealer.body.data.id;

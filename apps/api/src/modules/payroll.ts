@@ -214,7 +214,7 @@ export function payrollRouter(db: DB) {
         from employees e where e.status = 'active' order by e.department, e.name`) });
   });
 
-  r.put('/staff/:id', requirePerm('payroll:manage'), async (req, res) => {
+  r.put('/staff/:id', requirePerm('employees:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = z.object({
       monthly_salary: emptyToNull(zMoney).nullable(), pf_applicable: z.boolean(), esic_applicable: z.boolean(), pt_monthly: zMoney, tds_monthly: zMoney,

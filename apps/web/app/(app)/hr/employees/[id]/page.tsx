@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
-import { EMPLOYMENT_TYPES } from '@radcore/shared';
-import { Badge, Card, Form, KV, Loading, Notice, Page, Table, date, inr, label } from '@/components/ui';
+import { employeeFields } from '@/components/masters';
+import { PayDetails } from '@/components/payroll';
+import { Badge, Card, Form, KV, Loading, Notice, Page, Table, date, inr, label, num } from '@/components/ui';
 import { patch, post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -14,9 +15,12 @@ export default function EmployeePage() {
   const { data, loading, error, reload } = useGet<{ data: any }>(`/hr/employees/${id}`);
   const users = useGet<{ data: any[] }>('/masters/users-lite');
   const [notice, setNotice] = useState<string | null>(null);
+  const [pay, setPay] = useState(false);
   const e = data?.data;
   if (!e) return <Page title="Employee"><Loading loading={loading} error={error} /></Page>;
-  const write = can('hr:write');
+  // The record itself is a master; recording that someone has left is HR's own work.
+  const manage = can('employees:manage');
+  const canExit = manage || can('hr:write');
 
   return (
     <Page title={`${e.employee_no} · ${e.name}`} actions={<a className="button" href={`tel:${e.phone}`}>Call</a>}>
@@ -28,6 +32,8 @@ export default function EmployeePage() {
           ['Phone', e.phone], ['Email', e.email],
           ['Joined', date(e.join_date)],
           ['Salary', e.monthly_salary ? `₹${inr(e.monthly_salary)} per month` : null],
+          ['Taken off the salary', [e.pf_applicable ? 'PF' : null, e.esic_applicable ? 'ESIC' : null, Number(e.pt_monthly) ? `PT ₹${num(e.pt_monthly)}` : null, Number(e.tds_monthly) ? `TDS ₹${num(e.tds_monthly)}` : null].filter(Boolean).join(', ') || null],
+          ['Bank account', e.bank_account_no ? `${e.bank_account_no} · ${e.bank_ifsc ?? ''}` : null],
           ['Leave days a year', e.annual_leave_days !== null ? `${Number(e.annual_leave_days)} (own figure)` : null],
           ['Sign-in', e.user_name ? `${e.user_name} (${e.user_role})${e.user_active ? '' : ', switched off'}` : null],
           ['Application', e.applicant_id ? <Link href={`/hr/applicants/${e.applicant_id}`}>{e.applicant_no}</Link> : null],
@@ -35,9 +41,11 @@ export default function EmployeePage() {
         ]} />
       </Card>
 
-      {write && (
+      {manage && pay ? <PayDetails key={e.updated_at} person={e} onDone={() => { setPay(false); reload(); }} /> : null}
+      {(manage || canExit) && (
         <div className="grid">
-          <Card title="Edit">
+          {manage && (
+          <Card title="Edit" actions={<button type="button" onClick={() => setPay(true)}>Salary, deductions and bank</button>}>
             {/* Remounted after each save so the form shows what is now on record. */}
             <Form key={e.updated_at} submit="Save"
               initial={{
@@ -46,23 +54,16 @@ export default function EmployeePage() {
                 annual_leave_days: e.annual_leave_days ?? '',
               }}
               fields={[
-                { name: 'name', label: 'Name', required: true },
-                { name: 'phone', label: 'Phone', type: 'tel', required: true },
-                { name: 'email', label: 'Email', type: 'email' },
-                { name: 'department', label: 'Department', required: true },
-                { name: 'designation', label: 'Designation', required: true },
-                { name: 'employment_type', label: 'Type', type: 'select', required: true, options: EMPLOYMENT_TYPES.map((t) => ({ value: t, label: label(t) })) },
-                { name: 'join_date', label: 'Joining date', type: 'date', required: true },
-                { name: 'monthly_salary', label: 'Salary (per month)', type: 'number' },
+                ...employeeFields(users.data?.data ?? []).map((x) => (x.name === 'user_id' ? { ...x, help: undefined } : x)),
                 { name: 'annual_leave_days', label: 'Leave days a year', type: 'number', step: '0.5', help: 'Blank = the company figure' },
-                { name: 'user_id', label: 'Their sign-in', type: 'select', options: (users.data?.data ?? []).map((u) => ({ value: u.id, label: `${u.name} (${u.role})` })) },
                 { name: 'notes', label: 'Notes', type: 'textarea' },
               ]}
               onSubmit={(v) => patch(`/hr/employees/${id}`, v)}
               onDone={reload} />
           </Card>
+          )}
 
-          {e.status === 'active' && (
+          {canExit && e.status === 'active' && (
             <Card title="Record that they have left">
               <Form submit="Record exit"
                 fields={[
@@ -78,6 +79,7 @@ export default function EmployeePage() {
           )}
         </div>
       )}
+      {!manage ? <p className="muted small no-print">This record is part of the masters. Ask an admin to change it.</p> : null}
 
       <Card title="Attendance, last 31 marked days" actions={<Link href="/hr/attendance">Open the register</Link>}>
         <Table rows={e.recent_attendance} empty="Nothing marked yet." columns={[
