@@ -1,7 +1,7 @@
 import { createApp } from './app';
 import { config } from './config';
 import { loadPermissionOverrides } from './core/settings';
-import { createDb } from './db/client';
+import { createDb, isPostgresUrl } from './db/client';
 import { seedReviewCopy } from './db/demo';
 import { ensureAdmin, seedDefaults } from './db/seed';
 
@@ -12,6 +12,13 @@ import { ensureAdmin, seedDefaults } from './db/seed';
  * Where there is no long-running server (Vercel) the same steps are split in two: prepare.ts does
  * the database part once, when the app is built, and serverless.ts answers the requests.
  */
+
+// On a real server the books must be in PostgreSQL. Without DATABASE_URL the API would otherwise
+// start on a file database inside the container, and the first restart from a new image loses it.
+if (config.isProd && !isPostgresUrl(config.databaseUrl)) {
+  console.error('DATABASE_URL is not set to a PostgreSQL address (postgres://...). Refusing to start in production without one.');
+  process.exit(1);
+}
 
 const handle = await createDb(config.databaseUrl, config.migrationsFolder);
 await seedDefaults(handle.db);
@@ -30,6 +37,12 @@ const server = app.listen(config.port, () => {
     console.log(`  password: ${admin.password}\n`);
   }
 });
+
+// The web app passes requests on to this server over connections it keeps open between requests.
+// Node closes an idle one after 5 seconds; if the web app picks it up again at that very moment the
+// request fails ("ECONNRESET"). Keeping them longer than the web app does leaves the closing to it.
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 66_000;
 
 async function shutdown() {
   server.close();

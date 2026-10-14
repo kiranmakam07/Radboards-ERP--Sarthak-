@@ -20,11 +20,27 @@ window.addEventListener('beforeinstallprompt', function (e) {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () {}); });
 }`;
+
+// Runs before anything is drawn, so a dark screen never flashes white first: the theme the person
+// chose in their menu (components/theme.tsx), or else their phone or computer's own setting, which
+// is then followed if it changes. globals.css holds the colours for each.
+const THEME_SCRIPT = `
+(function () {
+  var root = document.documentElement, dark = window.matchMedia('(prefers-color-scheme: dark)');
+  var chosen = function () { try { return localStorage.getItem('radcore-theme'); } catch (e) { return null; } };
+  var apply = function () { var t = chosen(); root.dataset.theme = t === 'light' || t === 'dark' ? t : (dark.matches ? 'dark' : 'light'); };
+  apply();
+  dark.addEventListener('change', apply);
+})();`;
 export const viewport: Viewport = { width: 'device-width', initialScale: 1, themeColor: '#141b26' };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    // The theme script sets data-theme on <html> before React takes over; React is told not to mind.
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body>
         <script dangerouslySetInnerHTML={{ __html: INSTALL_SCRIPT }} />
         {children}

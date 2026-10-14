@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, Table, Toggle, date, dateTime, inr, label, num, sub } from '@/components/ui';
 import { Steps } from '@/components/charts';
-import { EditLines } from '@/components/edit-lines';
+import { EditLines, linesKey } from '@/components/edit-lines';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -80,7 +80,7 @@ export default function OrderPage() {
       </Card>
 
       {write && o.status === 'draft' && (
-        <EditLines key={o.lines.map((l: any) => l.id).join()} path={`/sales/orders/${id}/lines`} lines={o.lines} onDone={reload}
+        <EditLines key={linesKey(o.lines)} path={`/sales/orders/${id}/lines`} lines={o.lines} onDone={reload}
           priceKey={o.party?.party_type === 'dealer' ? 'dealer_price' : 'retail_price'} filter={(i) => i.item_type !== 'raw_material'} />
       )}
       {write && o.status === 'confirmed' && pendingDelivery && (

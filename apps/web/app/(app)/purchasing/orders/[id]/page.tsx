@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, Table, Toggle, date, dateTime, inr, num, sub } from '@/components/ui';
 import { Steps } from '@/components/charts';
-import { EditLines } from '@/components/edit-lines';
+import { EditLines, linesKey } from '@/components/edit-lines';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -55,7 +55,7 @@ export default function PurchaseOrderPage() {
 
       <div className="no-print">
         {can('po:write') && po.status === 'draft' && (
-          <EditLines key={po.lines.map((l: any) => l.id).join()} path={`/purchasing/orders/${id}/lines`} lines={po.lines}
+          <EditLines key={linesKey(po.lines)} path={`/purchasing/orders/${id}/lines`} lines={po.lines}
             priceKey="purchase_cost" withDiscount={false} onDone={reload} />
         )}
         {can('grn:write') && open && (

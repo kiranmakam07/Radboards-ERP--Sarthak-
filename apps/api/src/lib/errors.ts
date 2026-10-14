@@ -35,7 +35,7 @@ export function must<T>(value: T | undefined | null, what = 'Record'): T {
   return value;
 }
 
-type PgishError = { code?: string; message?: string; detail?: string; constraint?: string; cause?: unknown };
+type PgishError = { code?: string; message?: string; detail?: string; constraint?: string; column?: string; cause?: unknown };
 
 function pgError(err: unknown): PgishError | null {
   let e = err as PgishError | undefined;
@@ -45,6 +45,39 @@ function pgError(err: unknown): PgishError | null {
   }
   return null;
 }
+
+/**
+ * A unique rule broken, in plain words. Postgres says `Key (code)=(BRD-01) already exists.`;
+ * people see "There is already one with code BRD-01." (column names read as words).
+ */
+function duplicateMessage(pg: PgishError): string {
+  const m = /^Key \((.+)\)=\((.*)\) already exists\.?$/.exec(pg.detail ?? '');
+  if (!m) return 'That is already there; it cannot be added twice.';
+  return `There is already one with ${m[1]!.replace(/lower\((\w+)\)/g, '$1').replace(/_id\b/g, '').replace(/_/g, ' ')} ${m[2]}.`;
+}
+
+/**
+ * Database errors that are the request's fault (or a moment's bad luck), each as status, code and
+ * what to tell the person. The RC codes are RadCore's own rules (raised by the triggers in the
+ * migrations), whose messages are already written for people, so those go out as they are.
+ */
+const PG_ANSWERS: Record<string, [number, string, ((pg: PgishError) => string)?]> = {
+  '23505': [409, 'duplicate', duplicateMessage],
+  '23503': [409, 'reference_error', (pg) => (/still referenced/.test(pg.detail ?? '')
+    ? 'This is in use elsewhere, so it cannot be removed.'
+    : 'Something this points to does not exist (it may have been removed).')],
+  '23514': [400, 'constraint_violation', (pg) => `Rule violated: ${pg.constraint ?? pg.message}`],
+  '23502': [400, 'constraint_violation', (pg) => `${pg.column ? pg.column.replace(/_id$/, '').replace(/_/g, ' ') : 'Something'} is needed.`],
+  '22P02': [400, 'bad_request', () => 'Something sent is not in the form expected (an id, a number or a date).'],
+  '22003': [400, 'out_of_range', () => 'A figure is too large to keep: amounts go up to 99,99,99,999.99 and quantities up to 99,99,99,999.999.'],
+  // Two people saving at the same moment, and the database chose this one to go again.
+  '40001': [409, 'try_again', () => 'Someone else was saving the same thing at that moment. Please try again.'],
+  '40P01': [409, 'try_again', () => 'Someone else was saving the same thing at that moment. Please try again.'],
+  RC001: [409, 'append_only'],
+  RC002: [500, 'unbalanced_journal'],
+  RC003: [409, 'period_locked'],
+  RC004: [409, 'immutable_document'],
+};
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
@@ -65,29 +98,11 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return;
   }
   const pg = pgError(err);
-  if (pg) {
-    const map: Record<string, [number, string]> = {
-      '23505': [409, 'duplicate'],
-      '23503': [409, 'reference_error'],
-      '23514': [400, 'constraint_violation'],
-      '23502': [400, 'constraint_violation'],
-      '22P02': [400, 'bad_request'],
-      RC001: [409, 'append_only'],
-      RC002: [500, 'unbalanced_journal'],
-      RC003: [409, 'period_locked'],
-      RC004: [409, 'immutable_document'],
-    };
-    const hit = map[pg.code ?? ''];
-    if (hit) {
-      const message =
-        pg.code === '23505'
-          ? `Duplicate value: ${pg.detail ?? pg.constraint ?? pg.message}`
-          : pg.code === '23514'
-            ? `Rule violated: ${pg.constraint ?? pg.message}`
-            : (pg.message ?? 'Database rule violated');
-      res.status(hit[0]).json({ error: { code: hit[1], message } });
-      return;
-    }
+  const hit = pg && PG_ANSWERS[pg.code ?? ''];
+  if (pg && hit) {
+    const [status, code, say] = hit;
+    res.status(status).json({ error: { code, message: say ? say(pg) : (pg.message ?? 'Database rule violated') } });
+    return;
   }
   if (err && typeof err === 'object' && 'type' in err && (err as { type: string }).type === 'entity.parse.failed') {
     res.status(400).json({ error: { code: 'bad_request', message: 'Request body is not valid JSON' } });

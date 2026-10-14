@@ -6,6 +6,12 @@ import { ErrorBox, Toggle } from '@/components/ui';
 import { put, useGet } from '@/lib/api';
 
 /**
+ * Give EditLines this as its `key`: it starts from a copy of the lines, so it must start again when
+ * any of them changes, including when fresh figures replace remembered ones (lib/api.ts).
+ */
+export const linesKey = (lines: any[]) => lines.map((l) => `${l.id}:${l.qty}:${l.rate}:${l.discount ?? ''}`).join('|');
+
+/**
  * Change the items on a quote or a purchase order that has not gone anywhere yet (still a draft).
  * Once a quote is confirmed, or a purchase order sent to the supplier, it is cancelled and made
  * again instead: the API refuses a change to anything but a draft.

@@ -55,18 +55,60 @@ export const post = <T = any>(path: string, body: unknown = {}) => api<T>(path, 
 export const put = <T = any>(path: string, body: unknown = {}) => api<T>(path, { method: 'PUT', body });
 export const patch = <T = any>(path: string, body: unknown = {}) => api<T>(path, { method: 'PATCH', body });
 
-/** Load data for a page. Pass null to skip. `reload()` refetches after a change. */
+// ---- remembered answers ------------------------------------------------------------------------
+// What each GET last returned, kept in memory for this visit only (signing out reloads the page, which
+// forgets it all). A screen opened again shows its last answer at once and asks afresh behind it, and
+// the same GET wanted by two pieces of a screen at the same moment goes to the server once.
+const remembered = new Map<string, unknown>();
+const inFlight = new Map<string, Promise<unknown>>();
+const REMEMBER_AT_MOST = 200;
+
+function remember(path: string, data: unknown) {
+  remembered.delete(path);
+  remembered.set(path, data);
+  // The oldest answers go first; a Map keeps the order things were put in.
+  if (remembered.size > REMEMBER_AT_MOST) remembered.delete(remembered.keys().next().value as string);
+}
+
+/** GET a path, sharing a request already on its way unless `fresh` (after a change, the old one may be out of date). */
+function load<T>(path: string, fresh: boolean): Promise<T> {
+  const running = inFlight.get(path);
+  if (running && !fresh) return running as Promise<T>;
+  const p: Promise<T> = api<T>(path)
+    .then((d) => {
+      remember(path, d);
+      return d;
+    })
+    .finally(() => {
+      if (inFlight.get(path) === p) inFlight.delete(path);
+    });
+  inFlight.set(path, p);
+  return p;
+}
+
+const seen = <T>(path: string | null) => (path && typeof window !== 'undefined' ? (remembered.get(path) as T | undefined) : undefined);
+
+/**
+ * Load data for a page. Pass null to skip. `reload()` refetches after a change. `loading` is true
+ * only while there is nothing to show yet: a remembered answer is shown while the new one comes.
+ */
 export function useGet<T = any>(path: string | null) {
-  const [data, setData] = useState<T | null>(null);
+  const [data, setData] = useState<T | null>(() => seen<T>(path) ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(Boolean(path));
+  const [loading, setLoading] = useState(Boolean(path) && seen<T>(path) === undefined);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     if (!path) return;
     let cancelled = false;
-    setLoading(true);
-    api<T>(path)
+    const last = seen<T>(path);
+    if (last !== undefined) {
+      setData(last);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    load<T>(path, tick > 0)
       .then((d) => {
         if (!cancelled) {
           setData(d);
