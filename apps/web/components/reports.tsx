@@ -6,6 +6,7 @@ import { istDate, monthName, tdsQuarter } from '@radcore/shared';
 import { ActionButton, Badge, Card, CsvLink, Form, Loading, Stat, Table, Toggle, date, inr, label, num } from '@/components/ui';
 import { patch, post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
+import { rupees } from '@/components/charts';
 
 
 // Where a line in the day book leads: the document behind the entry.
@@ -100,7 +101,8 @@ export function PartyProfit() {
             <Stat label="What it cost us" value={`₹${inr(data.totals.cost)}`} />
             <Stat label="Profit on goods" value={`₹${inr(data.totals.profit)}`} hint={`${date(data.from)} to ${date(data.to)} · before expenses`} />
           </div>
-          <Table rows={data.data} empty="No bills in these dates." rowHref={(r) => (r.party_id ? `/parties/${r.party_id}` : null)} columns={[
+          <Table rows={data.data} empty="No bills in these dates." rowHref={(r) => (r.party_id ? `/parties/${r.party_id}` : null)}
+            chart={{ kind: 'bar', name: 'Profit', label: (r) => r.party_name, value: (r) => Number(r.profit), format: rupees }} columns={[
             { key: 'party_name', title: 'Customer', render: (r) => <>{r.party_name}{r.party_type === 'dealer' ? <span className="muted small"> · dealer</span> : null}</> },
             { key: 'bills', title: 'Bills', align: 'right', render: (r) => <>{r.bills}{r.returns ? <span className="muted small"> · {r.returns} returned</span> : null}</> },
             { key: 'sale', title: 'Sold for', align: 'right', render: (r) => inr(r.sale) },
@@ -130,7 +132,8 @@ export function HsnSummary() {
         <CsvLink href={path} />
       </div>
       <Loading loading={loading && !data} error={error} />
-      <Table rows={data?.data} empty="Nothing was billed in these dates." columns={[
+      <Table rows={data?.data} empty="Nothing was billed in these dates."
+        chart={{ kind: 'donut', name: 'Sales before GST', label: (r) => `HSN ${r.hsn}`, value: (r) => Number(r.taxable_value), format: rupees }} columns={[
         { key: 'hsn', title: 'HSN / SAC' }, { key: 'uqc', title: 'Unit' },
         { key: 'rate', title: 'GST %', align: 'right', render: (r) => num(r.rate) },
         { key: 'total_qty', title: 'Quantity', align: 'right', render: (r) => num(r.total_qty) },
@@ -197,7 +200,8 @@ export function Tds() {
               <Stat label="Owed to the government now" value={`₹${inr(p.owed_now.vendor)}`} hint="from vendors, all dates" />
               {Number(p.owed_now.salary) ? <Stat label="Owed from salaries" value={`₹${inr(p.owed_now.salary)}`} hint="held back in payroll" /> : null}
             </div>
-            <Table rows={p.by_month} empty="No TDS was held back in these dates." columns={[
+            <Table rows={p.by_month} empty="No TDS was held back in these dates."
+              chart={{ kind: 'bar', name: 'TDS held back', label: (m) => monthName(m.month), value: (m) => Number(m.deducted), format: rupees }} columns={[
               { key: 'month', title: 'Month', render: (m) => monthName(m.month) },
               { key: 'deducted', title: 'Held back', align: 'right', render: (m) => inr(m.deducted) },
               { key: 'deposited', title: 'Paid over', align: 'right', render: (m) => inr(m.deposited) },

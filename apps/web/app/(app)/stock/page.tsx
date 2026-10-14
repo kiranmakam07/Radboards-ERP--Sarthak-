@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ActionButton, Badge, CsvLink, ErrorBox, Loading, Page, Table, Toggle, dateTime, inr, label, num } from '@/components/ui';
 import { post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
+import { rupees } from '@/components/charts';
 
 const TABS = ['On hand', 'Low stock', 'Movements', 'Adjustments & counts'] as const;
 
@@ -44,7 +45,8 @@ export default function StockPage() {
             {valuation.data && <span className="muted">Total stock value: <strong>₹{inr(valuation.data.total_value)}</strong></span>}
           </div>
           <Loading loading={onHand.loading} error={onHand.error} />
-          <Table rows={onHand.data?.data} columns={[
+          <Table rows={onHand.data?.data}
+            chart={{ kind: 'bar', name: 'Stock value', label: (r) => r.name, value: (r) => Number(r.value), format: rupees }} columns={[
             { key: 'sku', title: 'SKU' }, { key: 'name', title: 'Item' }, { key: 'item_type', title: 'Type', render: (r) => label(r.item_type) },
             { key: 'stores_qty', title: 'Stores', align: 'right', render: (r) => num(r.stores_qty) },
             { key: 'showroom_qty', title: 'Showroom', align: 'right', render: (r) => num(r.showroom_qty) },

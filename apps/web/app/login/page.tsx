@@ -6,9 +6,9 @@ import { post } from '@/lib/api';
 
 export default function LoginPage() {
   return (
-    <div className="center">
+    <div className="center login">
       <div className="card">
-        <h1 style={{ marginBottom: 12 }}>RadCore</h1>
+        <div className="login-brand"><span className="brand-mark">R</span>RadCore</div>
         <p className="muted">Sign in with your phone number or email.</p>
         <Form
           submit="Sign in"

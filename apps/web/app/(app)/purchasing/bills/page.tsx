@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Badge, Card, CsvLink, Loading, Page, Table, date, inr } from '@/components/ui';
 import { qs, useGet } from '@/lib/api';
+import { rupees } from '@/components/charts';
 
 export default function BillsPage() {
   const [f, setF] = useState({ q: '', doc_type: '', payment_status: '' });
@@ -14,7 +15,8 @@ export default function BillsPage() {
       <p className="muted">To record a supplier invoice, open its purchase order and choose “Record supplier invoice”.</p>
       {payables.data && payables.data.data.length > 0 && (
         <Card title="Payables per supplier">
-          <Table rows={payables.data.data} rowHref={(r) => `/parties/${r.supplier_id}`} columns={[
+          <Table rows={payables.data.data} rowHref={(r) => `/parties/${r.supplier_id}`}
+            chart={{ kind: 'bar', name: 'We owe', label: (r) => r.supplier_name, value: (r) => Number(r.outstanding), format: rupees }} columns={[
             { key: 'supplier_name', title: 'Supplier' }, { key: 'open_bills', title: 'Open bills', align: 'right' },
             { key: 'outstanding', title: 'Outstanding', align: 'right', render: (r) => inr(r.outstanding) },
             { key: 'overdue', title: 'Overdue', align: 'right', render: (r) => inr(r.overdue) },

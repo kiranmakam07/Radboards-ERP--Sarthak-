@@ -2,7 +2,7 @@
 
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import { LEAD_STAGES, LEAD_STAGE_LABELS } from '@radcore/shared';
+import { LEAD_STAGES, LEAD_STAGE_LABELS, type LeadStage } from '@radcore/shared';
 import { Score } from '@/components/crm';
 import { BulkLeads, ImportLeads } from '@/components/leadtools';
 import { Badge, CsvLink, Form, Loading, Page, Table, Toggle, dateTime } from '@/components/ui';
@@ -80,7 +80,8 @@ function Leads() {
       {pickedLeads.length > 0 && can('leads:write') ? (
         <BulkLeads picked={pickedLeads} users={users.data?.data ?? []} canAssign={can('crm:manage')} onClear={() => setPicked([])} onDone={reload} />
       ) : null}
-      <Table rows={data?.data} rowHref={(r) => `/leads/${r.id}`} columns={[
+      <Table rows={data?.data} rowHref={(r) => `/leads/${r.id}`}
+        chart={{ kind: 'donut', name: 'Leads', label: (r) => LEAD_STAGE_LABELS[r.stage as LeadStage] ?? r.stage, value: () => 1 }} columns={[
         { key: 'lead_no', title: 'Lead' },
         { key: 'pick', title: 'Tick', render: (r) => (
           <input type="checkbox" checked={picked.includes(r.id)} aria-label={`Tick ${r.name}`} style={{ width: 'auto' }} onChange={(e) => tick(r.id, e.target.checked)} />

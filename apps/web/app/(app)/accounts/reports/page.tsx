@@ -6,6 +6,7 @@ import { DayBook, HsnSummary, PartyProfit, Tds } from '@/components/reports';
 import { ActionButton, Badge, Card, CsvLink, Form, Loading, Page, Table, date, inr, label , num } from '@/components/ui';
 import { post, put, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
+import { rupees } from '@/components/charts';
 
 const TABS = [
   'Day book', 'Trial balance', 'Profit & loss', 'Profit by bill', 'Profit by customer', 'Sales by HSN', 'TDS', 'Balance sheet', 'Receivables', 'Payables',
@@ -39,13 +40,15 @@ export default function ReportsPage() {
   };
   const { data, loading, error, reload } = useGet<any>(paths[tab]);
   const can = useCan();
-  const amountList = (rows: any[]) => (
-    <Table rows={rows} empty="Nothing to show." columns={[
+  // Each side of profit and loss and of the balance sheet can be seen as shares of its total.
+  const amountList = (rows: any[], name: string) => (
+    <Table rows={rows} empty="Nothing to show." chart={{ kind: 'donut', name, first: 'chart', label: (r) => r.name, value: (r) => Number(r.amount), format: rupees }} columns={[
       { key: 'code', title: 'Code' }, { key: 'name', title: 'Account' }, { key: 'amount', title: 'Amount', align: 'right', render: (r) => inr(r.amount) },
     ]} />
   );
   const ageing = (
-    <Table rows={data?.data} empty="Nothing outstanding." rowHref={(r) => (r.party_id && r.party_id !== 'cash' ? `/parties/${r.party_id}` : null)} columns={[
+    <Table rows={data?.data} empty="Nothing outstanding." rowHref={(r) => (r.party_id && r.party_id !== 'cash' ? `/parties/${r.party_id}` : null)}
+      chart={{ kind: 'bar', name: 'Outstanding', label: (r) => r.party_name, value: (r) => Number(r.total), format: rupees }} columns={[
       { key: 'party_name', title: 'Party' }, { key: 'phone', title: 'Phone' },
       { key: 'not_due', title: 'Not due', align: 'right', render: (r) => inr(r.not_due) },
       { key: 'd0_30', title: '1–30 days', align: 'right', render: (r) => inr(r.d0_30) },
@@ -91,8 +94,8 @@ export default function ReportsPage() {
 
       {tab === 'Profit & loss' && data?.income && (
         <div className="grid">
-          <Card title={`Income — ₹${inr(data.total_income)}`}>{amountList(data.income)}</Card>
-          <Card title={`Expenses — ₹${inr(data.total_expense)}`}>{amountList(data.expense)}</Card>
+          <Card title={`Income — ₹${inr(data.total_income)}`}>{amountList(data.income, 'Income')}</Card>
+          <Card title={`Expenses — ₹${inr(data.total_expense)}`}>{amountList(data.expense, 'Expenses')}</Card>
           <Card title="Result"><div className="stat-value">{Number(data.net_profit) >= 0 ? 'Net profit' : 'Net loss'} ₹{inr(Math.abs(Number(data.net_profit)))}</div><p className="muted">{date(data.from)} to {date(data.to)}</p></Card>
         </div>
       )}
@@ -105,7 +108,8 @@ export default function ReportsPage() {
             <div className="stat"><div className="stat-label">Profit on goods</div><div className="stat-value">₹{inr(data.totals.profit)}</div>
               <div className="muted small">{date(data.from)} to {date(data.to)} · before expenses</div></div>
           </div>
-          <Table rows={data.data} empty="No bills in these dates." rowHref={(r) => `/invoices/${r.id}`} columns={[
+          <Table rows={data.data} empty="No bills in these dates." rowHref={(r) => `/invoices/${r.id}`}
+            chart={{ kind: 'line', name: 'Profit', label: (r) => String(r.invoice_date).slice(0, 10), value: (r) => Number(r.profit), format: rupees }} columns={[
             { key: 'invoice_no', title: 'Bill' }, { key: 'invoice_date', title: 'Date', render: (r) => date(r.invoice_date) },
             { key: 'party_name', title: 'Customer', render: (r) => <>{r.party_name}{r.doc_type === 'credit_note' ? <span className="muted small"> · return</span> : null}</> },
             { key: 'sale', title: 'Sold for', align: 'right', render: (r) => inr(r.sale) },
@@ -118,9 +122,9 @@ export default function ReportsPage() {
 
       {tab === 'Balance sheet' && data?.assets && (
         <div className="grid">
-          <Card title={`Assets — ₹${inr(data.total_assets)}`}>{amountList(data.assets)}</Card>
-          <Card title={`Liabilities — ₹${inr(data.total_liabilities)}`}>{amountList(data.liabilities)}</Card>
-          <Card title={`Equity — ₹${inr(data.total_equity)}`}>{amountList(data.equity)}<p className={data.balanced ? 'muted' : 'error'}>{data.balanced ? 'Assets = Liabilities + Equity' : 'Balance sheet does not balance'}</p></Card>
+          <Card title={`Assets — ₹${inr(data.total_assets)}`}>{amountList(data.assets, 'Assets')}</Card>
+          <Card title={`Liabilities — ₹${inr(data.total_liabilities)}`}>{amountList(data.liabilities, 'Liabilities')}</Card>
+          <Card title={`Equity — ₹${inr(data.total_equity)}`}>{amountList(data.equity, 'Equity')}<p className={data.balanced ? 'muted' : 'error'}>{data.balanced ? 'Assets = Liabilities + Equity' : 'Balance sheet does not balance'}</p></Card>
         </div>
       )}
 

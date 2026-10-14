@@ -1,8 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useContext, useState, type FormEvent, type ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
+import { useContext, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { formatDate, formatINR } from '@radcore/shared';
+import { BarList, Donut, LineChart, count } from '@/components/charts';
+import { Icon } from '@/components/icons';
 import { SessionContext } from '@/lib/session';
 
 /**
@@ -81,17 +84,91 @@ export type Column<T> = {
   align?: 'right';
 };
 
+/**
+ * How a list can also be drawn: what names each bar, slice or point, and what is measured. Rows that
+ * share a name are added together, so a list of expenses can be drawn as spending by category.
+ */
+export type ChartSpec<T> = {
+  /** bar: amounts side by side; donut: parts of a whole; line: a measure over dates (label is YYYY-MM-DD). */
+  kind: 'bar' | 'donut' | 'line';
+  label: (row: T) => string;
+  value: (row: T) => number;
+  format?: (v: number) => string;
+  /** What is measured: the line's name and the words in the middle of the donut. */
+  name?: string;
+  /** Which view opens first, until the person picks one (remembered per screen). */
+  first?: 'table' | 'chart';
+  /** Bars beyond this many are added up as "Others". */
+  top?: number;
+};
+
+function ChartOf<T>({ spec, rows }: { spec: ChartSpec<T>; rows: T[] }) {
+  const format = spec.format ?? count;
+  const sums = new Map<string, number>();
+  for (const r of rows) {
+    const key = spec.label(r) || '—';
+    sums.set(key, (sums.get(key) ?? 0) + (Number(spec.value(r)) || 0));
+  }
+  const entries = [...sums.entries()];
+  if (spec.kind === 'line') {
+    const points = entries.map(([d, value]) => ({ date: d, value })).sort((a, b) => a.date.localeCompare(b.date));
+    return <LineChart points={points} name={spec.name ?? 'Value'} format={format} />;
+  }
+  if (spec.kind === 'donut') return <Donut data={entries.map(([l, value]) => ({ label: l, value }))} format={format} caption={spec.name ?? 'Total'} />;
+  const sorted = entries.sort((a, b) => b[1] - a[1]);
+  const top = spec.top ?? 10;
+  const shown: [string, number][] = sorted.length > top
+    ? [...sorted.slice(0, top - 1), [`Others (${sorted.length - top + 1})`, sorted.slice(top - 1).reduce((t, [, v]) => t + v, 0)]]
+    : sorted;
+  return <BarList data={shown.map(([l, value]) => ({ label: l, value }))} format={format} />;
+}
+
+/** Table or chart: the choice is kept for this screen in this browser. */
+function useView(key: string, first: 'table' | 'chart') {
+  const [view, setView] = useState<'table' | 'chart'>(first);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved === 'table' || saved === 'chart') setView(saved);
+    } catch { /* no storage: start from the default */ }
+  }, [key]);
+  const choose = (v: 'table' | 'chart') => {
+    setView(v);
+    try { localStorage.setItem(key, v); } catch { /* not kept, which is fine */ }
+  };
+  return [view, choose] as const;
+}
+
 export function Table<T extends Record<string, any>>({
-  columns, rows, empty = 'Nothing here yet.', rowHref, footer,
+  columns, rows, empty = 'Nothing here yet.', rowHref, footer, chart,
 }: {
   columns: Column<T>[];
   rows: T[] | null | undefined;
   empty?: string;
   rowHref?: (row: T) => string | null;
   footer?: ReactNode;
+  /** When given, a Table / Chart switch sits above the list. */
+  chart?: ChartSpec<T>;
 }) {
+  const path = usePathname();
+  const [view, setView] = useView(`radcore-view:${path}:${chart?.name ?? ''}`, chart?.first ?? 'table');
   if (!rows) return null;
   if (rows.length === 0) return <p className="muted">{empty}</p>;
+  if (chart) {
+    return (
+      <>
+        <div className="view-bar no-print">
+          <div className="view-switch" role="group" aria-label="Show as">
+            <button type="button" aria-pressed={view === 'table'} onClick={() => setView('table')}><Icon name="table" size={15} />Table</button>
+            <button type="button" aria-pressed={view === 'chart'} onClick={() => setView('chart')}><Icon name="chart" size={15} />Chart</button>
+          </div>
+        </div>
+        {view === 'chart'
+          ? <div className="view-chart"><ChartOf spec={chart} rows={rows} /></div>
+          : <Table columns={columns} rows={rows} empty={empty} rowHref={rowHref} footer={footer} />}
+      </>
+    );
+  }
   return (
     <div className="table-wrap stack">
       <table>
@@ -102,7 +179,8 @@ export function Table<T extends Record<string, any>>({
           {rows.map((row, i) => {
             const href = rowHref?.(row);
             return (
-              <tr key={row.id ?? i}>
+              // Rows can share an id (the lines of one journal entry), so the position is part of the key.
+              <tr key={`${row.id ?? 'row'}-${i}`}>
                 {columns.map((c, ci) => {
                   const content = c.render ? c.render(row) : (row[c.key] as ReactNode);
                   return (
@@ -304,14 +382,19 @@ export function Card({ title, children, actions }: { title?: string; children: R
   );
 }
 
-export function Stat({ label: l, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
-  return (
-    <div className="stat">
-      <div className="stat-label">{l}</div>
+/** A headline figure: an icon, the number, what it is, and a line under it. With href the whole tile opens that screen. */
+export function Stat({ label: l, value, hint, icon, tone, href }: {
+  label: string; value: ReactNode; hint?: ReactNode; icon?: string; tone?: 'green' | 'amber' | 'red'; href?: string;
+}) {
+  const body = (
+    <>
+      {icon ? <Icon name={icon} size={26} className={tone ? `stat-icon ${tone}` : 'stat-icon'} /> : null}
       <div className="stat-value">{value}</div>
+      <div className="stat-label">{l}</div>
       {hint ? <div className="muted small">{hint}</div> : null}
-    </div>
+    </>
   );
+  return href ? <Link href={href} className="stat">{body}</Link> : <div className="stat">{body}</div>;
 }
 
 /** Collapsible "add new" panel used on list pages. */

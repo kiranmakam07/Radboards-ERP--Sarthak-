@@ -377,3 +377,58 @@ export function Timeline({ rows, from, to, today, empty = 'Nothing planned yet.'
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Shares of a whole: a ring with the total in the middle and a key beside it
+// ---------------------------------------------------------------------------
+export type Slice = { label: string; value: number; href?: string | null };
+const SLICE_COLOURS = ['var(--viz-1)', 'var(--viz-2)', 'var(--viz-3)', 'var(--viz-4)', 'var(--viz-5)'];
+
+/**
+ * At most five slices, in a fixed colour order: the four largest and, when there are more, the rest
+ * added up as "Others" in grey. Only for parts of a whole: nothing below zero is drawn.
+ */
+export function Donut({ data, format = count, caption = 'Total', empty = 'Nothing to show.' }: {
+  data: Slice[]; format?: (v: number) => string; caption?: string; empty?: string;
+}) {
+  const positive = data.filter((d) => d.value > 0).sort((a, b) => b.value - a.value);
+  const total = positive.reduce((s, d) => s + d.value, 0);
+  if (total <= 0) return <p className="muted">{empty}</p>;
+  const slices = positive.length > 5
+    ? [...positive.slice(0, 4), { label: `Others (${positive.length - 4})`, value: positive.slice(4).reduce((s, d) => s + d.value, 0) }]
+    : positive;
+  const r = 38;
+  const round = 2 * Math.PI * r;
+  const gap = slices.length > 1 ? 1.2 : 0;
+  let start = 0;
+  return (
+    <div className="viz donut">
+      <svg viewBox="0 0 100 100" role="img" aria-label={`${caption}: ${format(total)}. ${slices.map((s) => `${s.label} ${format(s.value)}`).join(', ')}`}>
+        <circle cx="50" cy="50" r={r} fill="none" stroke="var(--viz-grid)" strokeWidth="12" />
+        {slices.map((s, i) => {
+          const len = (s.value / total) * round;
+          const dash = Math.max(len - gap, 0.5);
+          const el = (
+            <circle key={s.label} cx="50" cy="50" r={r} fill="none" stroke={SLICE_COLOURS[i]} strokeWidth="12"
+              strokeDasharray={`${dash} ${round - dash}`} strokeDashoffset={-start} transform="rotate(-90 50 50)">
+              <title>{`${s.label}: ${format(s.value)} (${Math.round((s.value / total) * 100)}%)`}</title>
+            </circle>
+          );
+          start += len;
+          return el;
+        })}
+        <text x="50" y="50" textAnchor="middle" className="donut-total">{format(total)}</text>
+        <text x="50" y="60" textAnchor="middle" className="donut-caption">{caption}</text>
+      </svg>
+      <ul className="donut-key">
+        {slices.map((s, i) => (
+          <li key={s.label}>
+            <i style={{ background: SLICE_COLOURS[i] }} />
+            <span>{'href' in s && s.href ? <Link href={s.href}>{s.label}</Link> : s.label}</span>
+            <span>{format(s.value)} <span className="muted">· {Math.round((s.value / total) * 100)}%</span></span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
