@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { LeadAlerts } from '@/components/crm';
 import { Icon } from '@/components/icons';
 import { InstallButton } from '@/components/install';
+import { ThemeButton } from '@/components/theme';
 import { api, post, qs, useGet } from '@/lib/api';
 import { SessionContext, type Session } from '@/lib/session';
 
@@ -299,6 +300,7 @@ function MeMenu({ data }: { data: Session }) {
         <div className="me-menu" role="menu">
           <div className="who"><div>{data.user.name}</div><div className="role">{data.user.role}</div></div>
           <Link href="/account" role="menuitem" onClick={() => setOpen(false)}><Icon name="key" />My password</Link>
+          <ThemeButton />
           <InstallButton className="install" />
           <button type="button" role="menuitem" onClick={async () => { await post('/auth/logout'); window.location.href = '/login'; }}><Icon name="logout" />Sign out</button>
         </div>

@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { D, isIsoDate, isValidGstin, normaliseGstin, normalisePhone, type Permission, type Role } from '@radcore/shared';
+import { D, type Decimal, isIsoDate, isValidGstin, normaliseGstin, normalisePhone, type Permission, type Role } from '@radcore/shared';
 import type { DB } from '../db/client';
 import { toXlsx } from './xlsx';
 
@@ -47,14 +47,24 @@ const decimalString = (maxDp: number) =>
     return D(s).toFixed(maxDp);
   });
 
+/**
+ * A rule about the size of a number, judged only on a value the number check above let through: zod
+ * still runs later rules after that check has failed (handing them its "no value" marker), and taking
+ * that marker as a number would crash the request instead of answering "must be a number".
+ */
+export const sized = (rule: (d: Decimal) => boolean) => (v: unknown) => typeof v !== 'string' || !/^-?\d+(\.\d+)?$/.test(v) || rule(D(v));
+
+// The largest figure each column can keep (money numeric(12,2), quantities numeric(12,3)).
+const moneyFits = sized((d) => d.abs().lt('10000000000'));
+const qtyFits = sized((d) => d.abs().lt('1000000000'));
+
 export const zId = z.string().uuid();
-export const zMoney = decimalString(2).refine((v) => D(v).gte(0), 'cannot be negative')
-  .refine((v) => D(v).lt('10000000000'), 'too large');
-export const zMoneyPos = zMoney.refine((v) => D(v).gt(0), 'must be more than 0');
-export const zSignedMoney = decimalString(2);
-export const zQty = decimalString(3).refine((v) => D(v).gt(0), 'must be more than 0');
-export const zQtyNonNeg = decimalString(3).refine((v) => D(v).gte(0), 'cannot be negative');
-export const zSignedQty = decimalString(3);
+export const zMoney = decimalString(2).refine(sized((d) => d.gte(0)), 'cannot be negative').refine(moneyFits, 'too large');
+export const zMoneyPos = zMoney.refine(sized((d) => d.gt(0)), 'must be more than 0');
+export const zSignedMoney = decimalString(2).refine(moneyFits, 'too large');
+export const zQty = decimalString(3).refine(sized((d) => d.gt(0)), 'must be more than 0').refine(qtyFits, 'too large');
+export const zQtyNonNeg = decimalString(3).refine(sized((d) => d.gte(0)), 'cannot be negative').refine(qtyFits, 'too large');
+export const zSignedQty = decimalString(3).refine(qtyFits, 'too large');
 export const zGstRate = z.union([z.string(), z.number()]).transform((v, c) => {
   const n = Number(v);
   if (![0, 5, 12, 18, 28].includes(n)) {

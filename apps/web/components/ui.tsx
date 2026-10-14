@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useContext, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { formatDate, formatINR } from '@radcore/shared';
 import { BarList, Donut, LineChart, count } from '@/components/charts';
 import { Icon } from '@/components/icons';
@@ -231,7 +231,22 @@ export function Form({
   const [values, setValues] = useState<Record<string, any>>(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const set = (name: string, value: unknown) => setValues((v) => ({ ...v, [name]: value }));
+  // A screen opened again first shows what it showed last time (lib/api.ts), then the fresh figures.
+  // An edit form takes the fresh ones when they arrive, unless someone has already typed in it: it
+  // must never save back what was there before.
+  const touched = useRef(false);
+  const initialKey = JSON.stringify(initial);
+  const lastInitial = useRef(initialKey);
+  useEffect(() => {
+    if (initialKey === lastInitial.current) return;
+    lastInitial.current = initialKey;
+    if (!touched.current) setValues(initial);
+    // Keyed on initialKey, not initial: the same values arrive as a new object on every render.
+  }, [initialKey]);
+  const set = (name: string, value: unknown) => {
+    touched.current = true;
+    setValues((v) => ({ ...v, [name]: value }));
+  };
 
   async function handle(e: FormEvent) {
     e.preventDefault();
@@ -240,6 +255,7 @@ export function Form({
     try {
       const result = await onSubmit(values);
       setValues(initial);
+      touched.current = false;
       onDone?.(result);
     } catch (err) {
       setError((err as Error).message);

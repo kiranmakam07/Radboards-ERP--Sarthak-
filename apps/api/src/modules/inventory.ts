@@ -12,9 +12,7 @@ import {
   locations, stockAdjustmentLines, stockAdjustments, stockMovements, stockTransferLines, stockTransfers,
 } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
-import {
-  emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSignedQty, zText, wantsFile, type Ctx,
-} from '../lib/http';
+import { type Ctx, emptyToNull, inTx, sendList, sized, wantsFile, zDate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSignedQty, zText } from '../lib/http';
 
 /**
  * Stock as the stores see it: what is on hand and where, what is running low, what it is worth,
@@ -287,7 +285,7 @@ export function inventoryRouter(db: DB) {
       reason: zText(300),
       lines: z.array(z.object({
         item_id: zId,
-        qty_change: zSignedQty.refine((v) => !D(v).isZero(), 'cannot be 0'),
+        qty_change: zSignedQty.refine(sized((d) => !d.isZero()), 'cannot be 0'),
         unit_cost: emptyToNull(zMoney).optional(),
       })).min(1).max(500),
     }).parse(req.body);

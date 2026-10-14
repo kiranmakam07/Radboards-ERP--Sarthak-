@@ -301,7 +301,11 @@ flowchart LR
   that shows it.
 - `app/(app)/<address>/page.tsx` is one screen. A screen loads with `useGet`, changes things with
   `post`/`put`/`patch` (`lib/api.ts`) and calls `reload()` afterwards. There is no client-side
-  store and no cache to keep in step.
+  store. `useGet` remembers each answer for the visit: a screen opened again shows its last answer
+  at once and asks afresh behind it, and two pieces asking for the same address at the same moment
+  share one request. Nothing needs keeping in step: every screen still asks the server each time
+  it opens, `reload()` always goes to the server, and signing in or out reloads the page, which
+  forgets everything.
 - `components/ui.tsx` is the kit: `Page`, `Table`, `Form` (driven by a list of fields),
   `ActionButton`, `Card`, `Badge`, and how money, quantities and dates are shown. A screen
   should be these plus its own data.
@@ -312,6 +316,12 @@ flowchart LR
   customers and staff (invoice, payslip, shared file).
 - Print layouts are ordinary pages with a print stylesheet (`.no-print`, `@media print` in
   `globals.css`).
+- **Colours are tokens.** The top of `globals.css` holds every colour twice: light (`:root`) and
+  dark (`:root[data-theme='dark']`). The rest of the file only uses the tokens, so a new style
+  should too, and then works in both. A script in `app/layout.tsx` sets `data-theme` before the
+  page is drawn, from the person's choice in their menu (`components/theme.tsx`, kept in the
+  browser) or else the phone or computer's own setting. Printable documents (`.doc`) stay
+  paper-white in both.
 
 ## 10. Adding a feature
 
@@ -342,12 +352,17 @@ npm install
 npm run demo        # API on an in-memory database with sample data + the web app, http://localhost:3000
 npm run dev         # the same two programs on a database that is kept (apps/api/.data)
 npm run typecheck   # all three workspaces; unused variables and imports are errors
-npm test            # shared (31 tests) then API (352 tests on an in-memory database)
+npm test            # shared (31 tests) then API (358 tests on an in-memory database)
 ```
 
 To run the API tests on real PostgreSQL as CI does, set `TEST_DATABASE_URL` to any database on
 a server you may create databases on; each test file then gets its own database, and eight more
-tests (simultaneous requests) run. The README covers running on a server and on Vercel.
+tests (simultaneous requests) run.
+
+`test/robustness.test.ts` reads every route from the code (the mounts in `app.ts` and each
+router) and checks them all: nobody signed out gets in, no role gets past a permission it does not
+hold, and nothing sent to any route (bad ids, wrong types, impossible dates, huge numbers, broken
+JSON) makes it fail with a 500. A new route is covered without being added there. The README covers running on a server and on Vercel.
 
 ## 12. Known debts
 
