@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { WEEKDAY_LABELS, istDate } from '@radcore/shared';
 import { ActionButton, Badge, ErrorBox, Form, date, dateTime } from '@/components/ui';
 import { post } from '@/lib/api';
+import { useCan } from '@/lib/session';
 
 const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`;
 
@@ -39,6 +40,7 @@ export function deadlineText(task: Record<string, any>): string {
 
 /** One task, workable in place: tick the checklist, then finish it or say why it could not be done. */
 export function TaskCard({ task, onChange, showAssignee }: { task: any; onChange: () => void; showAssignee?: boolean }) {
+  const canSeeProjects = useCan()('ops:read');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const open = task.status === 'open';
@@ -67,7 +69,10 @@ export function TaskCard({ task, onChange, showAssignee }: { task: any; onChange
           <span className="muted small">Deadline: {deadlineText(task)}{showAssignee ? ` · ${task.assignee_name}` : ''}</span>
         </div>
       </div>
-      {task.project_id ? <p className="small">Project: <Link href={`/ops/projects/${task.project_id}`}>{task.project_no} · {task.project_name}</Link></p> : null}
+      {/* Someone given a task on a project need not be able to open the project itself: then it is named, not linked. */}
+      {task.project_id ? <p className="small">Project: {canSeeProjects
+        ? <Link href={`/ops/projects/${task.project_id}`}>{task.project_no} · {task.project_name}</Link>
+        : <>{task.project_no} · {task.project_name}</>}</p> : null}
       {task.description ? <p className="muted small">{task.description}</p> : null}
       {task.checklist.length > 0 && (
         <ul className="checklist">

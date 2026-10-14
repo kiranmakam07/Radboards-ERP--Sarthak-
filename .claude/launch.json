@@ -4,13 +4,34 @@
     {
       "name": "api-demo",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "demo", "-w", "@radcore/api"],
+      "runtimeArgs": [
+        "run",
+        "demo",
+        "-w",
+        "@radcore/api"
+      ],
       "port": 4000
     },
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "-w", "@radcore/web"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@radcore/web"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "web-prod",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "start",
+        "-w",
+        "@radcore/web"
+      ],
       "port": 3000
     }
   ]

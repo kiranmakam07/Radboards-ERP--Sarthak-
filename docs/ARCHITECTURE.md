@@ -330,8 +330,8 @@ The order that has worked for every module so far:
 5. **Tests**, `apps/api/test/thing.test.ts`: work the figures by hand first, then assert them
    through the API as a user of the right role (`setup()` and `w.as('accounts')` in
    `test/helpers.ts`), and finish with `expectBooksHealthy`. If the feature hands data to
-   another section, add a step to `test/story.test.ts`, which follows one month of business
-   through every section and is the check that the sections stay connected.
+   another section, add a step to `test/story.test.ts` or a story to `test/story-more.test.ts`:
+   they follow the business through every section and are the check that the sections stay connected.
 6. **The screen**, `apps/web/app/(app)/thing/page.tsx`, and a line in `NAV`.
 7. **The record**: a row in `docs/PROGRESS.md`, and this file if a new module or journey was added.
 
@@ -342,7 +342,7 @@ npm install
 npm run demo        # API on an in-memory database with sample data + the web app, http://localhost:3000
 npm run dev         # the same two programs on a database that is kept (apps/api/.data)
 npm run typecheck   # all three workspaces; unused variables and imports are errors
-npm test            # shared (31 tests) then API (321 tests on an in-memory database)
+npm test            # shared (31 tests) then API (352 tests on an in-memory database)
 ```
 
 To run the API tests on real PostgreSQL as CI does, set `TEST_DATABASE_URL` to any database on

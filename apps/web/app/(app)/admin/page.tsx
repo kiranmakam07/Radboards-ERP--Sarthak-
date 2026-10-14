@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { STATE_CODES } from '@radcore/shared';
-import { ActionButton, Badge, Card, Form, Loading, Page, Table, date, dateTime } from '@/components/ui';
+import { ActionButton, Badge, Card, ErrorBox, Form, Loading, Page, Table, Toggle, date, dateTime, inr } from '@/components/ui';
 import { patch, post, put, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -91,7 +92,10 @@ export default function AdminPage() {
             { key: 'approved_at', title: 'Approved', render: (r) => (r.approved_at ? dateTime(r.approved_at) : <Badge value="pending" />) },
             { key: 'x', title: '', render: (r) => (!r.approved_at && can('pricelists:approve') ? <ActionButton onClick={() => post(`/masters/price-lists/${r.id}/approve`)} onDone={priceLists.reload}>Approve</ActionButton> : null) },
           ]} />
-          <p className="muted small">Item prices are set on each item (retail and dealer price).</p>
+          <p className="muted small">Each item has its own retail and dealer price. A list can give some items a different rate; a party on that list then gets that rate.</p>
+          {can('pricelists:write') && priceLists.data && (
+            <Toggle label="Set rates on a list"><PriceListRates lists={priceLists.data.data} onDone={priceLists.reload} /></Toggle>
+          )}
         </Card>
         <NameList title="Lead sources" path="lead-sources" />
         <NameList title="Lost reasons" path="lost-reasons" />
@@ -104,5 +108,69 @@ export default function AdminPage() {
         </Card>
       </div>
     </Page>
+  );
+}
+
+/**
+ * The rate a price list gives each item, where it differs from the item's own price. Leaving a box
+ * empty means the item's own price. Saving sends the list back for the founder's approval.
+ */
+function PriceListRates({ lists, onDone }: { lists: any[]; onDone: () => void }) {
+  const [listId, setListId] = useState('');
+  const list = lists.find((l) => l.id === listId);
+  const items = useGet<{ data: any[] }>(listId ? '/items?limit=2000' : null);
+  const rates = useGet<{ data: any[] }>(listId ? `/masters/price-lists/${listId}/items` : null);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const current = new Map((rates.data?.data ?? []).map((r) => [r.item_id as string, String(Number(r.rate))]));
+  const own = (i: any) => (list?.base_price === 'dealer' ? i.dealer_price : i.retail_price);
+  const changed = Object.entries(edits).filter(([itemId, v]) => v !== (current.get(itemId) ?? ''));
+
+  async function save() {
+    setBusy(true);
+    setProblem(null);
+    try {
+      await put(`/masters/price-lists/${listId}/items`, { items: changed.map(([item_id, v]) => ({ item_id, rate: v === '' ? null : v })) });
+      setEdits({});
+      rates.reload();
+      onDone();
+    } catch (e) {
+      setProblem((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <div className="form inline">
+        <label><span>Price list</span>
+          <select value={listId} onChange={(e) => { setListId(e.target.value); setEdits({}); }}>
+            <option value="">—</option>
+            {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        </label>
+      </div>
+      {list && (
+        <>
+          <p className="muted small">Rates {list.tax_inclusive ? 'include' : 'are before'} GST, like the item's own {list.base_price} price. Leave a box empty for the item's own price.</p>
+          <Loading loading={(items.loading || rates.loading) && !items.data} error={items.error ?? rates.error} />
+          <Table rows={(items.data?.data ?? []).filter((i) => i.item_type !== 'raw_material' && i.active !== false)} columns={[
+            { key: 'name', title: 'Item', render: (i) => `${i.sku} — ${i.name}` },
+            { key: 'own', title: `Its own ${list.base_price} price`, align: 'right', render: (i) => inr(own(i)) },
+            { key: 'rate', title: 'Rate on this list', align: 'right', render: (i) => (
+              <input type="number" step="0.01" min="0" style={{ width: 110 }} aria-label={`Rate for ${i.name} on ${list.name}`}
+                value={edits[i.id] ?? current.get(i.id) ?? ''} placeholder={String(Number(own(i)))}
+                onChange={(e) => setEdits((x) => ({ ...x, [i.id]: e.target.value }))} />
+            ) },
+          ]} />
+          <ErrorBox error={problem} />
+          <p><button type="button" className="primary" disabled={busy || changed.length === 0} onClick={save}>
+            Save {changed.length || ''} {changed.length === 1 ? 'rate' : 'rates'}
+          </button></p>
+        </>
+      )}
+    </div>
   );
 }
