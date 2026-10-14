@@ -6,6 +6,7 @@ import { PayDetails } from '@/components/payroll';
 import { ActionButton, Badge, Card, Form, Loading, Page, Table, Toggle, date, inr, num } from '@/components/ui';
 import { post, put, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
+import { rupees } from '@/components/charts';
 
 /** The month before this one: the one whose salary is usually due. */
 const lastMonth = () => {
@@ -68,7 +69,8 @@ export default function PayrollPage() {
           </Toggle>
         )}
         <Loading loading={runs.loading} error={runs.error} />
-        <Table rows={runs.data?.data} empty="No month has been started yet." rowHref={(r) => `/hr/payroll/${r.id}`} columns={[
+        <Table rows={runs.data?.data} empty="No month has been started yet." rowHref={(r) => `/hr/payroll/${r.id}`}
+          chart={{ kind: 'bar', name: 'Net pay', label: (r) => monthName(r.month), value: (r) => Number(r.net_pay), format: rupees }} columns={[
           { key: 'month', title: 'Month', render: (r) => monthName(r.month) },
           { key: 'status', title: 'Status', render: (r) => <Badge value={r.status} /> },
           { key: 'people', title: 'People', align: 'right' },

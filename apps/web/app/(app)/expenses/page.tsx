@@ -4,6 +4,7 @@ import { istDate } from '@radcore/shared';
 import { ActionButton, Badge, CsvLink, Form, Loading, Page, Table, Toggle, date, inr } from '@/components/ui';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
+import { rupees } from '@/components/charts';
 
 export default function ExpensesPage() {
   const can = useCan();
@@ -39,7 +40,8 @@ export default function ExpensesPage() {
         </Toggle>
       )}
       <Loading loading={loading} error={error} />
-      <Table rows={data?.data} empty="No expenses yet." columns={[
+      <Table rows={data?.data} empty="No expenses yet."
+        chart={{ kind: 'donut', name: 'Spent', label: (r) => r.category_name, value: (r) => Number(r.amount), format: rupees }} columns={[
         { key: 'expense_no', title: 'Number' }, { key: 'expense_date', title: 'Date', render: (r) => date(r.expense_date) },
         { key: 'category_name', title: 'Category' }, { key: 'vendor_name', title: 'Vendor' }, { key: 'paid_from', title: 'Paid from' },
         { key: 'amount', title: 'Amount', align: 'right', render: (r) => inr(r.amount) },

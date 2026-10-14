@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Badge, CsvLink, Loading, Page, Table, date, inr, label } from '@/components/ui';
 import { qs, useGet } from '@/lib/api';
+import { rupees } from '@/components/charts';
 
 export default function InvoicesPage() {
   const [f, setF] = useState({ q: '', doc_type: '', payment_status: '', channel: '', from: '', to: '' });
@@ -26,7 +27,9 @@ export default function InvoicesPage() {
         <input type="date" value={f.to} onChange={(e) => set('to', e.target.value)} />
       </div>
       <Loading loading={loading} error={error} />
-      <Table rows={data?.data} rowHref={(r) => `/invoices/${r.id}`} columns={[
+      <Table rows={data?.data} rowHref={(r) => `/invoices/${r.id}`}
+        chart={{ kind: 'line', name: 'Billed', label: (r) => String(r.invoice_date ?? '').slice(0, 10),
+          value: (r) => (r.status !== 'issued' ? 0 : (r.doc_type === 'credit_note' ? -1 : 1) * Number(r.grand_total)), format: rupees }} columns={[
         { key: 'invoice_no', title: 'Number' },
         { key: 'invoice_date', title: 'Date', render: (r) => date(r.invoice_date) },
         { key: 'doc_type', title: 'Type', render: (r) => (r.doc_type === 'credit_note' ? 'Credit note' : 'Invoice') },

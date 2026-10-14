@@ -6,6 +6,7 @@ import { istDate, PAYMENT_MODES, tdsOn } from '@radcore/shared';
 import { ActionButton, Badge, Card, CsvLink, ErrorBox, Loading, Page, Table, Toggle, date, inr, label } from '@/components/ui';
 import { api, post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
+import { rupees } from '@/components/charts';
 
 function Payments() {
   const params = useSearchParams();
@@ -24,7 +25,9 @@ function Payments() {
         {f.party_id && <button type="button" onClick={() => setF({ ...f, party_id: '' })}>Showing one party × clear</button>}
       </div>
       <Loading loading={loading} error={error} />
-      <Table rows={data?.data} empty="No payments yet." rowHref={(r) => `/payments/${r.id}`} columns={[
+      <Table rows={data?.data} empty="No payments yet." rowHref={(r) => `/payments/${r.id}`}
+        chart={{ kind: 'bar', name: 'Amount', label: (r) => `${r.direction === 'in' ? 'Received from' : 'Paid to'} ${r.party_name ?? 'cash sales'}`,
+          value: (r) => (r.status === 'cancelled' ? 0 : Number(r.amount)), format: rupees }} columns={[
         { key: 'payment_no', title: 'Number' }, { key: 'paid_on', title: 'Date', render: (r) => date(r.paid_on) },
         { key: 'direction', title: '', render: (r) => (r.direction === 'in' ? 'Received' : 'Paid') },
         { key: 'party_name', title: 'Party', render: (r) => r.party_name ?? 'Cash sale' },
