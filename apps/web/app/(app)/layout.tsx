@@ -59,6 +59,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/expenses', label: 'Expenses', perm: 'expenses:read' },
     { href: '/accounts/reports', label: 'Books & reports', perm: 'accounts:read' },
     { href: '/accounts/journal', label: 'Journal', perm: 'accounts:read' },
+    { href: '/accounts/chart', label: 'Chart of accounts', perm: 'accounts:read' },
     { href: '/accounts/transfers', label: 'Cash & bank transfers', perm: 'accounts:read' },
     { href: '/accounts/bank', label: 'Bank reconciliation', perm: 'accounts:read' },
     { href: '/gst', label: 'GST', perm: 'gst:read' },
@@ -85,6 +86,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { href: '/admin', label: 'Setup', perm: 'settings:manage' },
     { href: '/admin/users', label: 'Users', perm: 'users:manage' },
     { href: '/admin/permissions', label: 'Permissions', perm: 'settings:manage' },
+    { href: '/admin/audit', label: 'Audit trail', perm: 'audit:read' },
   ] },
 ];
 

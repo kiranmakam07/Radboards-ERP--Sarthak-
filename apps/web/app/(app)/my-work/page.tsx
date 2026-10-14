@@ -64,7 +64,7 @@ export default function MyWorkPage() {
           {d.maintenance.length > 0 && (
             <Card title="Maintenance I look after">
               <Table rows={d.maintenance} columns={[
-                { key: 'asset_name', title: 'Asset', render: (r) => <Link href={`/ops/assets/${r.asset_id}`}>{r.asset_name}</Link> },
+                { key: 'asset_name', title: 'Asset', render: (r) => (can('ops:read') ? <Link href={`/ops/assets/${r.asset_id}`}>{r.asset_name}</Link> : r.asset_name) },
                 { key: 'title', title: 'Work' },
                 { key: 'interval', title: 'How often', render: (r) => everyText(r) },
                 { key: 'state', title: 'Due', render: (r) => <Due schedule={r} /> },

@@ -3,13 +3,15 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { STATE_CODES, amountInWords } from '@radcore/shared';
-import { Badge, Loading, Page, addr, date, inr, label } from '@/components/ui';
-import { useGet } from '@/lib/api';
+import { ActionButton, Badge, Card, Loading, Page, Table, addr, date, inr, label } from '@/components/ui';
+import { post, useGet } from '@/lib/api';
+import { useCan } from '@/lib/session';
 
 /** Payment receipt (money in) or payment voucher (money out), laid out for printing (PRD 7.11). */
 export default function PaymentReceiptPage() {
   const { id } = useParams<{ id: string }>();
-  const { data, loading, error } = useGet<{ data: any }>(`/payments/${id}`);
+  const can = useCan();
+  const { data, loading, error, reload } = useGet<{ data: any }>(`/payments/${id}`);
   const settings = useGet<{ data: any }>('/settings');
   const p = data?.data;
   const c = settings.data?.data.company;
@@ -75,6 +77,40 @@ export default function PaymentReceiptPage() {
         {p.notes && <p className="small">Notes: {p.notes}</p>}
         <div className="sign">For {c.name}<br /><br /><br />Authorised signatory</div>
       </div>
+      {p.status === 'posted' && advance > 0 && p.party_id && can('payments:write') && <SetAdvance payment={p} left={advance} onDone={reload} />}
     </Page>
+  );
+}
+
+/**
+ * Part of this payment is an advance: money that came in (or went out) before the bill it is for.
+ * When that bill exists, the advance is set against it here, so the bill shows as paid.
+ */
+function SetAdvance({ payment, left, onDone }: { payment: any; left: number; onDone: () => void }) {
+  const party = useGet<{ data: any }>(`/parties/${payment.party_id}`);
+  const p = party.data?.data;
+  const received = payment.direction === 'in';
+  const docs: { key: string; id: string; no: string; date: string; outstanding: number; href: string }[] = !p ? [] : received
+    ? p.open_invoices.map((d: any) => ({ key: 'invoice_id', id: d.invoice_id, no: d.invoice_no, date: d.invoice_date, outstanding: Number(d.outstanding), href: `/invoices/${d.invoice_id}` }))
+    : p.open_bills.map((d: any) => ({ key: 'purchase_bill_id', id: d.bill_id, no: d.supplier_invoice_no ? `${d.bill_no} (${d.supplier_invoice_no})` : d.bill_no,
+        date: d.bill_date, outstanding: Number(d.outstanding), href: `/purchasing/bills/${d.bill_id}` }));
+  return (
+    <div className="no-print" style={{ marginTop: 16 }}>
+      <Card title="Set the advance against a bill">
+        <p className="muted small">₹{inr(left)} of this payment is not set against anything yet. Pick the {received ? 'invoice' : 'bill'} it was for.</p>
+        <Loading loading={party.loading && !p} error={party.error} />
+        {p && (
+          <Table rows={docs} empty={`${payment.party_name} has no unpaid ${received ? 'invoices' : 'bills'}.`} rowHref={(d) => d.href} columns={[
+            { key: 'no', title: received ? 'Invoice' : 'Bill' },
+            { key: 'date', title: 'Date', render: (d) => date(d.date) },
+            { key: 'outstanding', title: 'Still unpaid', align: 'right', render: (d) => inr(d.outstanding) },
+            { key: 'x', title: '', render: (d) => {
+              const amount = Math.round(Math.min(left, d.outstanding) * 100) / 100;
+              return <ActionButton onClick={() => post(`/payments/${payment.id}/allocate`, { allocations: [{ [d.key]: d.id, amount }] })} onDone={onDone}>Set ₹{inr(amount)} against it</ActionButton>;
+            } },
+          ]} />
+        )}
+      </Card>
+    </div>
   );
 }

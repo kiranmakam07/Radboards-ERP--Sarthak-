@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, Table, Toggle, date, dateTime, inr, num, sub } from '@/components/ui';
 import { Steps } from '@/components/charts';
+import { EditLines } from '@/components/edit-lines';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -53,6 +54,10 @@ export default function PurchaseOrderPage() {
       </Card>
 
       <div className="no-print">
+        {can('po:write') && po.status === 'draft' && (
+          <EditLines key={po.lines.map((l: any) => l.id).join()} path={`/purchasing/orders/${id}/lines`} lines={po.lines}
+            priceKey="purchase_cost" withDiscount={false} onDone={reload} />
+        )}
         {can('grn:write') && open && (
           <Toggle label="Receive goods (inward)">
             <LinesForm lines={po.lines.filter((l: any) => Number(l.received_qty) < Number(l.qty))} qtyTitle="Received now" withRate={false}
