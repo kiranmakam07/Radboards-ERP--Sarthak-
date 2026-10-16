@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useContext, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { formatDate, formatINR } from '@radcore/shared';
 import { BarList, Donut, LineChart, count } from '@/components/charts';
 import { Icon } from '@/components/icons';
@@ -64,7 +64,7 @@ const TONES: Record<string, string> = {
   matched: 'green', unmatched: 'amber', ignored: 'grey', switched_off: 'grey', imported: 'green', failed: 'red', left_alone: 'grey', out: 'amber', all_back: 'green',
   taken_in: 'green', needs_a_look: 'red', waiting: 'amber',
   applied: 'blue', shortlisted: 'blue', interview: 'amber', offered: 'amber', hired: 'green',
-  open: 'blue', on_hold: 'amber', done: 'green', skipped: 'red', scheduled: 'blue', completed: 'green', no_show: 'red',
+  open: 'blue', in_progress: 'amber', on_hold: 'amber', done: 'green', skipped: 'red', scheduled: 'blue', completed: 'green', no_show: 'red',
   pass: 'green', hold: 'amber', fail: 'red', active: 'green', left: 'grey', planned: 'grey',
   present: 'green', half_day: 'amber', absent: 'red', leave: 'blue', weekly_off: 'grey', holiday: 'grey',
   in_use: 'green', under_repair: 'amber', retired: 'grey', overdue: 'red', due_soon: 'amber', on_track: 'green', off: 'grey',
@@ -124,19 +124,38 @@ function ChartOf<T>({ spec, rows }: { spec: ChartSpec<T>; rows: T[] }) {
 }
 
 /** Table or chart: the choice is kept for this screen in this browser. */
-function useView(key: string, first: 'table' | 'chart') {
-  const [view, setView] = useState<'table' | 'chart'>(first);
+/** A choice the screen keeps in this browser, such as how a list is shown; `first` until one is made. */
+export function useRemembered<T extends string>(key: string, allowed: readonly T[], first: T) {
+  const [value, setValue] = useState<T>(first);
   useEffect(() => {
     try {
       const saved = localStorage.getItem(key);
-      if (saved === 'table' || saved === 'chart') setView(saved);
+      if (saved && (allowed as readonly string[]).includes(saved)) setValue(saved as T);
     } catch { /* no storage: start from the default */ }
+    // Read once per key; `allowed` is a fixed list at every call site.
   }, [key]);
-  const choose = (v: 'table' | 'chart') => {
-    setView(v);
+  const choose = (v: T) => {
+    setValue(v);
     try { localStorage.setItem(key, v); } catch { /* not kept, which is fine */ }
   };
-  return [view, choose] as const;
+  return [value, choose] as const;
+}
+
+const useView = (key: string, first: 'table' | 'chart') => useRemembered(key, ['table', 'chart'] as const, first);
+
+/** Two or three ways to show the same thing (Board / List, Table / Chart), as one segmented control. */
+export function ViewSwitch<T extends string>({ value, onChange, options }: {
+  value: T; onChange: (v: T) => void; options: { value: T; label: string; icon: string }[];
+}) {
+  return (
+    <div className="view-switch no-print" role="group" aria-label="Show as">
+      {options.map((o) => (
+        <button key={o.value} type="button" aria-pressed={value === o.value} onClick={() => onChange(o.value)}>
+          <Icon name={o.icon} size={15} />{o.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export function Table<T extends Record<string, any>>({
@@ -386,6 +405,39 @@ export function ActionButton({
       </button>
       {error ? <span className="error small">{error}</span> : null}
     </span>
+  );
+}
+
+/**
+ * A pop-up over the screen, for what must be filled in or decided before going on. It is the
+ * browser's own <dialog>: the keyboard stays inside it and Esc closes it. A click beside it does
+ * not close it, so a half-filled form is never lost by accident. Show it with {open && <Modal …/>}.
+ */
+export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  const titleId = useId();
+  return (
+    <dialog className={wide ? 'modal wide' : 'modal'} aria-labelledby={titleId}
+      ref={(d) => { if (d && !d.open) d.showModal(); }}
+      onCancel={(e) => { e.preventDefault(); onClose(); }}>
+      <div className="modal-head">
+        <h2 id={titleId}>{title}</h2>
+        <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button>
+      </div>
+      <div className="modal-body">{children}</div>
+    </dialog>
+  );
+}
+
+/** A form in a pop-up: it says which boxes must be filled, and closes once saved. */
+export function FormModal({ title, onClose, intro, wide, ...form }: {
+  title: string; onClose: () => void; intro?: ReactNode; wide?: boolean;
+} & Parameters<typeof Form>[0]) {
+  return (
+    <Modal title={title} onClose={onClose} wide={wide}>
+      {intro}
+      {form.fields.some((f) => f.required) ? <p className="muted small">Boxes marked * must be filled in.</p> : null}
+      <Form {...form} onDone={(result) => { form.onDone?.(result); onClose(); }} />
+    </Modal>
   );
 }
 

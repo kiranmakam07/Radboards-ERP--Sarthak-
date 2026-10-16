@@ -1444,6 +1444,12 @@ export const tasks = pgTable('tasks', {
   dueDate: date('due_date').notNull(),
   dueTime: time('due_time'),
   status: taskStatusEnum('status').notNull().default('open'),
+  /**
+   * When work on it began (moved to "In progress" on the board). An open task with this set is in
+   * progress, without it still to do; a closed task keeps it as a record. Kept apart from `status`
+   * so that everything counting open and late tasks counts in-progress ones too.
+   */
+  startedAt: ts('started_at'),
   checklist: jsonb('checklist').$type<{ text: string; done: boolean }[]>().notNull().default(sql`'[]'::jsonb`),
   completedAt: ts('completed_at'),
   completedBy: uuid('completed_by').references(() => users.id),

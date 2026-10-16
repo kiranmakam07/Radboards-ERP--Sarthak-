@@ -149,6 +149,18 @@ export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 export const TASK_FREQUENCIES = ['daily', 'weekly', 'monthly', 'need_based'] as const;
 export type TaskFrequency = (typeof TASK_FREQUENCIES)[number];
 export const TASK_STATUSES = ['open', 'done', 'skipped'] as const;
+/**
+ * The columns of the task board. An open task is "todo" until someone starts it ("in_progress");
+ * the other two are the closed statuses. Worked out from status and started_at, never stored.
+ */
+export const TASK_STAGES = ['todo', 'in_progress', 'done', 'skipped'] as const;
+export type TaskStage = (typeof TASK_STAGES)[number];
+export const TASK_STAGE_LABELS: Record<TaskStage, string> = {
+  todo: 'To do', in_progress: 'In progress', done: 'Done', skipped: 'Could not do',
+};
+export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  planned: 'Planned', active: 'Active', on_hold: 'On hold', done: 'Done', cancelled: 'Cancelled',
+};
 export const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
 
 export const PROJECT_STATUSES = ['planned', 'active', 'on_hold', 'done', 'cancelled'] as const;
