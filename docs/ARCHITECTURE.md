@@ -307,8 +307,12 @@ flowchart LR
   it opens, `reload()` always goes to the server, and signing in or out reloads the page, which
   forgets everything.
 - `components/ui.tsx` is the kit: `Page`, `Table`, `Form` (driven by a list of fields),
-  `ActionButton`, `Card`, `Badge`, and how money, quantities and dates are shown. A screen
-  should be these plus its own data.
+  `ActionButton`, `Card`, `Badge`, `Modal` and `FormModal` (pop-ups), `ViewSwitch` with
+  `useRemembered` (Board / List, Table / Chart, kept in the browser), and how money, quantities
+  and dates are shown. A screen should be these plus its own data.
+- `components/board.tsx` is a board of cards dragged between columns (mouse, and touch by holding
+  a card). It only reports a drop or a click; the screen decides what a move means and may ask
+  for something in a pop-up first. Tasks and projects use it (`TaskBoard` in `components/ops.tsx`).
 - Other files in `components/` are pieces more than one screen uses (the invoice as a document,
   the payslip, charts, the masters, lead tools, reports).
 - `app/login`, `app/enquiry/[token]`, `app/i/[token]`, `app/p/[token]`, `app/s/[token]` are the
@@ -352,7 +356,7 @@ npm install
 npm run demo        # API on an in-memory database with sample data + the web app, http://localhost:3000
 npm run dev         # the same two programs on a database that is kept (apps/api/.data)
 npm run typecheck   # all three workspaces; unused variables and imports are errors
-npm test            # shared (31 tests) then API (358 tests on an in-memory database)
+npm test            # shared (31 tests) then API (366 tests on an in-memory database)
 ```
 
 To run the API tests on real PostgreSQL as CI does, set `TEST_DATABASE_URL` to any database on

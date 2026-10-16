@@ -2,8 +2,8 @@ import { eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  ASSET_STATUSES, INTERVAL_UNITS, TASK_FREQUENCIES, TASK_STATUSES, addDays, addMonths, can, formatDate, isTaskDueOn, istDate,
-  type IntervalUnit,
+  ASSET_STATUSES, INTERVAL_UNITS, TASK_FREQUENCIES, TASK_STAGES, TASK_STATUSES, addDays, addMonths, can, formatDate, isTaskDueOn, istDate,
+  type IntervalUnit, type TaskStage,
 } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requireAuth, requirePerm } from '../core/auth';
@@ -141,6 +141,10 @@ function mustBeMine(ctx: Ctx, task: Task): void {
   }
 }
 
+/** Which column of the board a task is in: open ones by whether work has started, closed ones by how they closed. */
+export const stageOf = (task: Pick<Task, 'status' | 'startedAt'>): TaskStage =>
+  (task.status === 'open' ? (task.startedAt ? 'in_progress' : 'todo') : task.status);
+
 /** Mark a task done. Every checklist item must be ticked first. */
 export async function completeTask(ctx: Ctx, id: string, noteText: string | null): Promise<Task> {
   const task = await lockTask(ctx.tx, id);
@@ -152,6 +156,56 @@ export async function completeTask(ctx: Ctx, id: string, noteText: string | null
     .set({ status: 'done', completedAt: new Date(), completedBy: ctx.user?.id ?? null, note: noteText, updatedAt: new Date() })
     .where(eq(tasks.id, id)).returning();
   await audit(ctx, 'task', id, 'complete', { status: 'open' }, { status: 'done' });
+  return updated!;
+}
+
+/** It could not be done. The reason is kept, so a skipped task is never mistaken for a finished one. */
+export async function skipTask(ctx: Ctx, id: string, reason: string): Promise<Task> {
+  const task = await lockTask(ctx.tx, id);
+  mustBeMine(ctx, task);
+  if (task.status !== 'open') throw conflict(`This task is already ${task.status}`);
+  const [updated] = await ctx.tx.update(tasks)
+    .set({ status: 'skipped', completedAt: new Date(), completedBy: ctx.user?.id ?? null, note: reason, updatedAt: new Date() })
+    .where(eq(tasks.id, id)).returning();
+  await audit(ctx, 'task', id, 'skip', { status: 'open' }, { status: 'skipped', reason });
+  return updated!;
+}
+
+/**
+ * Move a task to another column of the board. Between the open columns (to do, in progress) the
+ * person it is given to moves it freely. Done follows completeTask (every checklist line ticked) and
+ * Could not do needs the reason, as from the task itself. Taking a closed task back reopens it, which
+ * only operations may do, and not while its project is finished or cancelled. All in one transaction:
+ * if the last step is refused, the reopening is undone with it.
+ */
+export async function moveTask(ctx: Ctx, id: string, to: TaskStage, reason: string | null): Promise<Task> {
+  let task = await lockTask(ctx.tx, id);
+  mustBeMine(ctx, task);
+  const from = stageOf(task);
+  if (from === to) return task;
+  if (task.status !== 'open') {
+    if (!ctx.user || !can(ctx.user.role, 'ops:manage')) throw forbidden('Only operations can reopen a task that is closed');
+    if (task.projectId) {
+      const [project] = await ctx.tx.select({ status: projects.status }).from(projects).where(eq(projects.id, task.projectId));
+      if (project && (project.status === 'done' || project.status === 'cancelled')) {
+        throw conflict(`Its project is ${project.status === 'done' ? 'done' : 'cancelled'}; reopen the project first`);
+      }
+    }
+    const [reopened] = await ctx.tx.update(tasks)
+      .set({ status: 'open', completedAt: null, completedBy: null, startedAt: null, updatedAt: new Date() })
+      .where(eq(tasks.id, id)).returning();
+    task = reopened!;
+    await audit(ctx, 'task', id, 'reopen', { status: from }, { status: 'open' });
+  }
+  if (to === 'done') return completeTask(ctx, id, null);
+  if (to === 'skipped') {
+    if (!reason) throw badRequest('Say why it could not be done');
+    return skipTask(ctx, id, reason);
+  }
+  const [updated] = await ctx.tx.update(tasks)
+    .set({ startedAt: to === 'in_progress' ? (task.startedAt ?? new Date()) : null, updatedAt: new Date() })
+    .where(eq(tasks.id, id)).returning();
+  await audit(ctx, 'task', id, 'move', { stage: from }, { stage: to });
   return updated!;
 }
 
@@ -220,6 +274,7 @@ export const LATE = sql`(t.status = 'open' and (t.due_date + coalesce(t.due_time
 export const TASK_SELECT = sql`
   select t.id, t.template_id, t.scheduled_for, t.project_id, p.project_no, p.name as project_name, t.title, t.description,
          t.assignee_id, u.name as assignee_name, t.start_date, t.due_date, to_char(t.due_time, 'HH24:MI') as due_time, t.status,
+         t.started_at, case when t.status <> 'open' then t.status::text when t.started_at is null then 'todo' else 'in_progress' end as stage,
          t.checklist, t.completed_at, c.name as completed_by_name, t.note, tt.frequency,
          ${LATE} as overdue,
          jsonb_array_length(t.checklist)::int as checklist_total,
@@ -339,7 +394,7 @@ export function opsRouter(db: DB) {
   r.get('/tasks', requirePerm('ops:read'), async (req, res) => {
     const q = zListQuery.extend({
       status: z.enum(TASK_STATUSES).optional(), assignee_id: zId.optional(), from: zDate.optional(), to: zDate.optional(),
-      view: z.enum(['today', 'overdue']).optional(), project_id: zId.optional(),
+      view: z.enum(['today', 'overdue', 'board']).optional(), project_id: zId.optional(),
     }).parse(req.query);
     const today = istDate();
     await ensureTasks(db, today);
@@ -352,6 +407,8 @@ export function opsRouter(db: DB) {
          and (${like}::text is null or t.title ilike ${like})
          and (${q.view ?? null}::text is distinct from 'today' or t.due_date = ${today}::date)
          and (${q.view ?? null}::text is distinct from 'overdue' or ${LATE})
+         -- The board: everything still open, and what closed in the last fortnight.
+         and (${q.view ?? null}::text is distinct from 'board' or t.status = 'open' or t.completed_at >= now() - interval '14 days')
          and (${q.project_id ?? null}::uuid is null or t.project_id = ${q.project_id ?? null}::uuid)
        order by t.due_date desc, t.due_time nulls last, t.title
        limit ${q.limit} offset ${q.offset}`);
@@ -410,21 +467,17 @@ export function opsRouter(db: DB) {
     res.json({ data: await inTx(db, req, (ctx) => completeTask(ctx, id, b.note ?? null)) });
   });
 
-  /** It could not be done. The reason is kept, so a skipped task is never mistaken for a finished one. */
   r.post('/tasks/:id/skip', requireAuth, async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = z.object({ reason: zText(1000) }).parse(req.body);
-    const row = await inTx(db, req, async (ctx) => {
-      const task = await lockTask(ctx.tx, id);
-      mustBeMine(ctx, task);
-      if (task.status !== 'open') throw conflict(`This task is already ${task.status}`);
-      const [updated] = await ctx.tx.update(tasks)
-        .set({ status: 'skipped', completedAt: new Date(), completedBy: ctx.user?.id ?? null, note: b.reason, updatedAt: new Date() })
-        .where(eq(tasks.id, id)).returning();
-      await audit(ctx, 'task', id, 'skip', { status: 'open' }, { status: 'skipped', reason: b.reason });
-      return updated!;
-    });
-    res.json({ data: row });
+    res.json({ data: await inTx(db, req, (ctx) => skipTask(ctx, id, b.reason)) });
+  });
+
+  /** Drag on the board: to do, in progress, done or could not do (with the reason). See moveTask. */
+  r.post('/tasks/:id/move', requireAuth, async (req, res) => {
+    const id = zId.parse(req.params.id);
+    const b = z.object({ to: z.enum(TASK_STAGES), reason: emptyToNull(z.string().trim().max(1000)).optional() }).parse(req.body);
+    res.json({ data: await inTx(db, req, (ctx) => moveTask(ctx, id, b.to, b.reason ?? null)) });
   });
 
   r.post('/tasks/:id/reopen', requirePerm('ops:manage'), async (req, res) => {
@@ -433,7 +486,7 @@ export function opsRouter(db: DB) {
       const task = await lockTask(ctx.tx, id);
       if (task.status === 'open') throw conflict('This task is already open');
       const [updated] = await ctx.tx.update(tasks)
-        .set({ status: 'open', completedAt: null, completedBy: null, updatedAt: new Date() })
+        .set({ status: 'open', completedAt: null, completedBy: null, startedAt: null, updatedAt: new Date() })
         .where(eq(tasks.id, id)).returning();
       await audit(ctx, 'task', id, 'reopen', { status: task.status }, { status: 'open' });
       return updated!;

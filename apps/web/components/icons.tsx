@@ -20,6 +20,7 @@ const PATHS: Record<string, ReactNode> = {
   down: <path d="M6 9l6 6 6-6" />,
   right: <path d="M9 6l6 6-6 6" />,
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
+  board: <><rect x="3" y="4" width="5" height="16" rx="1.5" /><rect x="10" y="4" width="5" height="10" rx="1.5" /><rect x="17" y="4" width="4" height="13" rx="1.5" /></>,
   table: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18M3 15h18M9 4v16" /></>,
   chart: <path d="M5 20v-8M12 20V5M19 20v-5M3 20h18" />,
   rupee: <path d="M7 4h10M7 8h10M7 4c5 0 7 2 7 4s-2 4-7 4l7 8" />,

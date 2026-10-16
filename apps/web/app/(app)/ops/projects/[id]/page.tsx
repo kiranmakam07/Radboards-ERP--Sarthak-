@@ -5,12 +5,12 @@ import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { addDays, istDate } from '@radcore/shared';
 import { ChartCard, Steps, Timeline, type TimelineRow } from '@/components/charts';
-import { TaskCard, deadlineText } from '@/components/ops';
-import { ActionButton, Badge, Card, Form, KV, Loading, Page, Stat, Table, date, label } from '@/components/ui';
+import { TaskBoard, TaskModal, checklistLines, deadlineText, taskFields } from '@/components/ops';
+import { ActionButton, Badge, Card, Form, FormModal, KV, Loading, Page, Stat, Table, ViewSwitch, date, label, useRemembered } from '@/components/ui';
 import { ApiError, api, patch, post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
-const lines = (v: unknown) => String(v ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
+const MODES = ['board', 'list'] as const;
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +22,8 @@ export default function ProjectPage() {
   const people = useGet<{ data: any[] }>(allocate ? '/ops/people' : null);
   const machines = useGet<{ data: any[] }>(allocate ? '/ops/assets' : null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [mode, setMode] = useRemembered('radcore-view:/ops/projects/[id]', MODES, 'board');
   const p = data?.data;
   if (!p) return <Page title="Project"><Loading loading={loading} error={error} /></Page>;
 
@@ -96,35 +98,35 @@ export default function ProjectPage() {
         <p className="muted small" style={{ marginTop: 8 }}>A bar runs from a task's start to its deadline; a dot marks a deadline with no start date. Grey is finished, red is late.</p>
       </ChartCard>
 
-      <Card title="Tasks">
-        <Table rows={tasks} empty="No tasks yet." columns={[
-          { key: 'title', title: 'Task', render: (r) => <button type="button" className="link" onClick={() => setOpenId(openId === r.id ? null : r.id)}>{r.title}</button> },
+      <Card title="Tasks" actions={
+        <>
+          {manage && live ? <button type="button" className="primary" onClick={() => setAdding(true)}>+ Add a task</button> : null}
+          <ViewSwitch value={mode} onChange={setMode}
+            options={[{ value: 'board', label: 'Board', icon: 'board' }, { value: 'list', label: 'List', icon: 'table' }]} />
+        </>
+      }>
+        {mode === 'board' ? (
+          tasks.length ? <TaskBoard tasks={tasks} onChange={reload} people={userOptions} showProject={false} recentOnly={false} />
+            : <p className="muted">No tasks yet.{manage && live ? ' Add the first one with + Add a task.' : ''}</p>
+        ) : <Table rows={tasks} empty="No tasks yet." columns={[
+          { key: 'title', title: 'Task', render: (r) => <button type="button" className="link" onClick={() => setOpenId(r.id)}>{r.title}</button> },
           { key: 'assignee_name', title: 'Who' },
           { key: 'start_date', title: 'Starts', render: (r) => date(r.start_date) },
           { key: 'due_date', title: 'Deadline', render: (r) => <span className={r.overdue ? 'error small' : undefined}>{deadlineText(r)}</span> },
           { key: 'status', title: 'Status', render: (r) => (r.overdue ? <Badge value="overdue" /> : <Badge value={r.status} />) },
           { key: 'checklist', title: 'Checklist', render: (r) => (r.checklist_total ? `${r.checklist_done} of ${r.checklist_total}` : '') },
           { key: 'note', title: 'Note', render: (r) => <span style={{ whiteSpace: 'normal' }}>{r.note}</span> },
-        ]} />
-        {selected ? <div style={{ marginTop: 12 }}><TaskCard task={selected} onChange={reload} showAssignee /></div> : null}
+        ]} />}
       </Card>
+      {selected ? <TaskModal task={selected} people={userOptions} onChange={reload} onClose={() => setOpenId(null)} /> : null}
 
-      {manage && live && (
-        <Card title="Add a task">
-          <Form submit="Add task"
-            fields={[
-              { name: 'title', label: 'What needs doing', required: true },
-              { name: 'assignee_id', label: 'Who', type: 'select', required: true, options: userOptions },
-              { name: 'start_date', label: 'Starts', type: 'date', help: 'Optional' },
-              { name: 'due_date', label: 'Deadline', type: 'date', required: true },
-              { name: 'due_time', label: 'By what time', type: 'time', help: 'Blank = any time that day' },
-              { name: 'checklist', label: 'Checklist (one step per line)', type: 'textarea' },
-              { name: 'description', label: 'Details', type: 'textarea' },
-            ]}
-            onSubmit={({ checklist, ...v }) => post(`/ops/projects/${id}/tasks`, { ...v, checklist: lines(checklist) })}
-            onDone={reload} />
-        </Card>
-      )}
+      {adding ? (
+        <FormModal title={`New task in ${p.name}`} submit="Add task" onClose={() => setAdding(false)}
+          intro={p.deadline ? <p className="muted small">The project's deadline is {date(p.deadline)}; a task's deadline cannot be later.</p> : null}
+          fields={taskFields(userOptions, true)}
+          onSubmit={({ checklist, ...v }) => post(`/ops/projects/${id}/tasks`, { ...v, checklist: checklistLines(checklist) })}
+          onDone={reload} />
+      ) : null}
 
       <Card title="People and machines on this project" actions={<Link href="/ops/resources">Resource allocation</Link>}>
         <Table rows={p.allocations} empty="Nobody allocated yet." columns={[
