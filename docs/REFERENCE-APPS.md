@@ -16,7 +16,7 @@ three**: several products carry that name and its own site was not found, so the
 common core of that kind of app (clock in and out from a phone with location, breaks, absences,
 leave). Sarthak to confirm which Attendo is meant.
 
-Status: ✅ in RadCore · 🔨 being built now · 🔌 built, waits for an account to be connected ·
+Status: ✅ in RadCore · 🟡 partly · 🔨 being built now · 🔌 built, waits for an account to be connected ·
 ⏭ later · ➖ not needed here.
 
 **Checked by running it (13 Oct 2026).** The critical functions below were carried out as one story on an
@@ -109,3 +109,50 @@ about the rename.
 | Staff ask for a missed punch to be corrected | ⏭ | HR corrects the register |
 | Sign-in by WhatsApp code; 11 languages | ⏭ | |
 | Hiring, interviews, employee records | ✅ | Beyond what Attendo does |
+
+## Whole ERP (reference: Odoo, demo of 19 Oct 2026)
+
+Sarthak took a 50-minute demo of Odoo 19 Online from Pawan Gupta (business advisor, Odoo India) on
+19 Oct 2026, one of the ERP demos the founder asked for on 13 Oct. What Sarthak told him about the
+business: everything (accounts, operations, HR) wanted in one place; a trading business that sells,
+also **rents** boards out and gives **after-sale servicing**; one company; manufacturing is a
+separate department; the website is on Shopify (Odoo said linking Shopify is a separate, costly job);
+leads from Google Ads. Recording and frames are on Sarthak's computer only.
+
+Price quoted on screen (odoo.com, yearly billing, first year): Standard ₹580 a user a month (all apps,
+Odoo's own cloud only); Custom ₹1,080 a user a month (own server or Odoo.sh, Studio, several
+companies, external API, which a Shopify link would need). Implementation is extra unless done by
+ourselves.
+
+| What Odoo showed | RadCore | Note |
+| --- | --- | --- |
+| Pipeline board, total value per stage | 🟡 | RadCore's column total is the price of the items each lead is interested in; **no deal value of its own on a lead** (the founder also asked for "opportunity size" on 13 Oct) |
+| Leads dragged between stages | ⏭ | Tasks and projects drag since 16 Oct; the same board fits leads |
+| Stages edited by the user: add a stage, what is needed to enter it, "rotting" after N days in a stage | ⏭ | RadCore's lead stages are fixed |
+| Planned activities on a lead (call, meeting, email, to-do) with a due date and Mark done | ✅ | Follow-ups and follow-up plans |
+| Quote from the lead; the lead's value follows the order; Won when ordered | 🟡 | Orders can carry the lead; value and won are not automatic |
+| Email from the record with templates, AI drafting | ⏭ | RadCore sends nothing by email yet (needs a mail account) |
+| WhatsApp template with numbered quick replies | 🔌 | Quick replies exist; templates go out once the number is connected |
+| Lead's answers from the booking form, website page views | 🟡 | Form answers yes; page views no |
+| Product picker with photos and stock inside the quote | ⏭ | RadCore has item pictures; the order screen picks from a list |
+| Quote sent as a link: the customer accepts, signs and pays online | ⏭ | RadCore has a link to an issued invoice (view, print, amount still to pay) and UPI details in payment reminders; no accept-and-sign, no online payment |
+| Choose the look of printed documents (layout, colours, logo) | 🟡 | Logo and details yes; one fixed layout |
+| Order → delivery → invoice → payment, partial deliveries, credit notes | ✅ | |
+| Invoice for an advance (percentage or fixed) | 🟡 | Advances are recorded as payments and set against invoices |
+| SMS to the customer when goods go out | ⏭ | WhatsApp would suit India better |
+| Serial and lot numbers on goods received and sold | ⏭ | Useful for warranty and servicing of boards |
+| Product variants (size, colour) | ⏭ | Each variant is its own item in RadCore |
+| Free-to-use stock, incoming and outgoing, forecast, stock on a past date | 🟡 | On hand, low stock, movements, valuation |
+| Reordering rules that raise purchase orders | ⏭ | Reorder level shows low stock only |
+| Purchase: request for quotation, vendor on-time %, bill uploaded and read by AI | 🟡 | PO, count-in, QC (Odoo showed none), bill |
+| Accounts dashboard, bank reconciliation, tax returns, journal entries, audit trail | ✅ | |
+| Rentals (pickup, return, late fees) | ⏭ | Not in RadCore; Sarthak said boards are rented |
+| After-sale service / repairs | ⏭ | Not in RadCore; Sarthak said servicing is given after a sale |
+| Projects and task boards | ✅ | Since 16 Oct |
+| Timesheets, project costs and margins (orders, bills, expenses per project) | ⏭ | |
+| Email marketing with open and click rates | ⏭ | |
+| Employee profile: org chart, resume and skills, ID documents, badge with barcode | 🟡 | Employees, documents and attendance; no org chart, skills or badge |
+| Time off by type with balances, half days, calendar | 🟡 | One kind of leave, whole days |
+| Payroll with a to-do list (employees without salary or bank details) | 🟡 | Payroll and payslips; no such list |
+| Employee expense claims with a receipt photo, approval and reimbursement | ⏭ | RadCore's expenses are the company's own |
+| Internal chat and video calls, appointment booking, e-signature, helpdesk, POS, eCommerce, manufacturing | ➖ | Outside what was asked for; RadCore's counter sale covers the showroom |
