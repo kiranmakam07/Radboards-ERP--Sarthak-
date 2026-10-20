@@ -324,13 +324,102 @@ td input, td select { padding: 5px 8px; }
 .kanban .lead:hover { text-decoration: none; box-shadow: var(--shadow-hover); }
 .kanban .lead.overdue { border-left: 3px solid var(--danger); }
 
+/* ---- a record: title and its related records, then what can be done and where it stands ---- */
+.page.record .page-head { align-items: flex-start; }
+.page.record .page-head h1 { font-size: 21px; padding-top: 4px; }
+.record-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 12px; margin-bottom: 18px;
+}
+.record-bar .actions:empty { display: none; }
+/* The stages, as arrows: passed, now, still to come; a record that stopped ends in red. */
+.statusbar { display: flex; list-style: none; margin: 0 0 0 auto; padding: 0; overflow-x: auto; max-width: 100%; }
+.statusbar li {
+  display: flex; align-items: center; white-space: nowrap; padding: 6px 16px 6px 20px; margin-left: -6px; font-size: 13px; font-weight: 500;
+  background: var(--chip); color: var(--muted);
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%, 10px 50%);
+}
+.statusbar li:first-child { margin-left: 0; padding-left: 14px; clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%); border-radius: 6px 0 0 6px; }
+.statusbar li.done { background: var(--brand-soft); color: var(--brand-ink); }
+.statusbar li.now { background: var(--brand); color: var(--accent-text); font-weight: 600; }
+.statusbar li.stopped { background: var(--danger-soft); color: var(--danger); font-weight: 600; }
+.statusbar button { background: none; border: 0; box-shadow: none; padding: 0; min-height: 0; color: inherit; font: inherit; cursor: pointer; }
+.statusbar button:hover { background: none; text-decoration: underline; }
+/* Its related records, each with a count, opening them. */
+.smart-buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.smart {
+  display: inline-flex; align-items: center; gap: 10px; min-width: 120px; padding: 7px 14px; border-radius: var(--radius);
+  background: var(--panel); box-shadow: var(--shadow-sm); border: 1px solid var(--line); color: var(--text);
+}
+.smart .icon { color: var(--brand-ink); }
+a.smart:hover, button.smart:hover { text-decoration: none; border-color: var(--brand); box-shadow: var(--shadow-hover); background: var(--panel); }
+button.smart { justify-content: flex-start; text-align: left; font: inherit; }
+.smart > span { display: flex; flex-direction: column; line-height: 1.2; }
+.smart-value { font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
+.smart-value.red { color: var(--danger); } .smart-value.amber { color: var(--amber); } .smart-value.green { color: var(--ok); }
+.smart-label { font-size: 12px; color: var(--muted); }
+
+/* ---- count cards above a list, which are also its filters ---- */
+.counters { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.counter {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 16px; text-align: left;
+  background: var(--panel); border: 2px solid transparent; border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.counter:hover { background: var(--panel); border-color: var(--line); }
+.counter[aria-pressed='true'] { border-color: var(--brand); background: var(--brand-soft); }
+.counter-value { font-size: 22px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; color: var(--text); }
+.counter.red .counter-value { color: var(--danger); } .counter.amber .counter-value { color: var(--amber); } .counter.green .counter-value { color: var(--ok); }
+.counter-label { font-size: 13px; color: var(--muted); font-weight: 500; }
+
+/* ---- tabs across a record's details ---- */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 0 16px; overflow-x: auto; }
+.tabs button {
+  background: none; border: 0; box-shadow: none; border-radius: 0; padding: 10px 16px; color: var(--muted); font-weight: 500;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
+}
+.tabs button:hover { background: none; color: var(--text); }
+.tabs button.on { color: var(--brand-ink); border-bottom-color: var(--brand); font-weight: 600; }
+
+/* ---- home: one tile for each section of the app ---- */
+.app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.app-tile {
+  display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: var(--radius); background: var(--panel);
+  box-shadow: var(--shadow); color: var(--text); transition: transform .12s ease, box-shadow .12s ease;
+}
+.app-tile:hover { text-decoration: none; transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+.app-icon {
+  width: 46px; height: 46px; flex: none; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--brand-soft); color: var(--brand-ink);
+}
+.app-tile strong { display: block; font-size: 15px; }
+.app-tile span.small { display: block; color: var(--muted); line-height: 1.35; }
+
+/* ---- products as cards, with their picture ---- */
+.product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+.product-card {
+  display: grid; grid-template-columns: 1fr 76px; gap: 10px; padding: 14px; border-radius: var(--radius); background: var(--panel);
+  box-shadow: var(--shadow); color: var(--text); min-width: 0;
+}
+.product-card:hover { text-decoration: none; box-shadow: var(--shadow-hover); }
+.product-card .title { font-weight: 600; overflow-wrap: anywhere; }
+.product-card .meta { font-size: 12px; color: var(--muted); }
+.product-card .price { font-weight: 600; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.product-card .stock { font-size: 12.5px; margin-top: 2px; }
+.product-card .stock.low { color: var(--danger); font-weight: 600; }
+.product-pic {
+  width: 76px; height: 76px; border-radius: 8px; object-fit: cover; background: var(--chip); color: var(--muted);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px;
+}
+.product-card.off { opacity: .6; }
+
 /* ---- boards: cards dragged between columns (components/board.tsx) ---- */
 .board {
-  display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(200px, 1fr)); gap: 14px; overflow-x: auto;
+  display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(168px, 1fr)); gap: 12px; overflow-x: auto;
   align-items: start; padding-bottom: 6px; margin-bottom: 20px;
 }
 .board-col { background: var(--chip); border-radius: var(--radius); padding: 10px; min-height: 240px; transition: background .12s ease; }
 .board-col h2 { padding: 4px 6px 10px; display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; }
+.board-total { margin: -6px 6px 10px; font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .board-col.over { background: var(--brand-soft); outline: 2px dashed var(--brand); outline-offset: -2px; }
 .board-hint { margin: -6px 6px 10px; }
 .board-empty { text-align: center; padding: 18px 6px; }
@@ -509,7 +598,7 @@ h2.section { margin: 20px 0 10px; color: var(--muted); font-size: 12px; text-tra
 .checklist label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
 .checklist input { width: auto; margin-top: 3px; }
 .checklist label.done { color: var(--muted); text-decoration: line-through; }
-@media print { .steps, .flow, .viz-table, .view-bar, .modal, .board-ghost { display: none; } }
+@media print { .steps, .flow, .viz-table, .view-bar, .modal, .board-ghost, .counters, .tabs, .app-grid { display: none; } }
 
 /* ---- project plan against the calendar ---- */
 .timeline { display: grid; gap: 6px; }
@@ -707,6 +796,16 @@ h2.section { margin: 20px 0 10px; color: var(--muted); font-size: 12px; text-tra
   .board-col { scroll-snap-align: start; }
   .modal, .modal.wide { width: 100vw; max-width: 100vw; max-height: 92vh; margin: auto 0 0; border-radius: 16px 16px 0 0; }
   .modal-body { padding: 14px 16px calc(18px + env(safe-area-inset-bottom)); }
+
+  .page.record .page-head { flex-direction: column; align-items: stretch; }
+  .smart-buttons { justify-content: flex-start; }
+  .smart { flex: 1 1 calc(50% - 4px); min-width: 0; }
+  .record-bar { flex-direction: column; align-items: stretch; }
+  .statusbar { margin: 0; }
+  .counters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .app-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .app-tile { flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px; }
+  .product-grid { grid-template-columns: 1fr; }
 
   /* Boards and wide grids are swiped sideways, one column at a time. */
   .kanban { grid-template-columns: none !important; grid-auto-flow: column; grid-auto-columns: 82vw; scroll-snap-type: x mandatory; padding-bottom: 6px; }

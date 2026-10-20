@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
-import { ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, Table, Toggle, date, dateTime, inr, label, num, sub } from '@/components/ui';
-import { Steps } from '@/components/charts';
+import {
+  ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, SmartButton, StatusBar, Table, Toggle, date, dateTime, inr, label, num, sub,
+} from '@/components/ui';
 import { EditLines, linesKey } from '@/components/edit-lines';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -20,11 +21,26 @@ export default function OrderPage() {
   const pendingDelivery = o.lines.some((l: any) => Number(l.delivered_qty) < Number(l.qty));
   const pendingInvoice = o.lines.some((l: any) => Number(l.invoiced_qty) < Number(l.delivered_qty));
   const delivered = o.lines.some((l: any) => Number(l.delivered_qty) > 0);
+  const invoices = o.invoices.filter((i: any) => i.status !== 'draft');
+  const billed = invoices.filter((i: any) => i.status === 'issued').reduce((t: number, i: any) => t + (i.doc_type === 'credit_note' ? -1 : 1) * Number(i.grand_total), 0);
 
   return (
-    <Page title={`${o.status === 'draft' ? 'Quote' : 'Order'} ${o.order_no}`} actions={
+    <Page title={`${o.status === 'draft' ? 'Quote' : 'Order'} ${o.order_no}`}
+      smart={
+        <>
+          <SmartButton icon="me" value={o.party?.name ?? 'Cash sale'} label={o.party ? label(o.party.party_type) : 'No party'} href={o.party ? `/parties/${o.party.id}` : null} />
+          <SmartButton icon="stores" value={o.deliveries.length} label="Deliveries" href={o.deliveries.length ? '#deliveries' : null} />
+          <SmartButton icon="accounts" value={invoices.length} label={invoices.length ? `Invoices · ₹${inr(billed).replace(/\.00$/, '')}` : 'Invoices'} href={invoices.length ? '#invoices' : null} />
+          {o.lead_id ? <SmartButton icon="crm" value="Lead" label="Where it came from" href={`/leads/${o.lead_id}`} /> : null}
+        </>
+      }
+      status={
+        <StatusBar steps={['Quote', 'Confirmed', 'Delivered', 'Invoiced']}
+          current={{ draft: 0, confirmed: 1, delivered: 2, invoiced: 3 }[o.status as string] ?? 0}
+          stopped={o.status === 'cancelled' ? 'Cancelled' : null} />
+      }
+      actions={
       <>
-        <Link className="button" href={`/sales/orders/${id}/print`}>Print {o.status === 'draft' ? 'quotation' : 'order'}</Link>
         {write && o.status === 'draft' && (
           <>
             <ActionButton kind="primary" onClick={() => post(`/sales/orders/${id}/confirm`, {})} onDone={reload}>Confirm order</ActionButton>
@@ -39,14 +55,12 @@ export default function OrderPage() {
         {write && pendingInvoice && ['confirmed', 'delivered'].includes(o.status) && (
           <ActionButton kind="primary" onClick={() => post(`/sales/orders/${id}/invoice`, {})} onDone={reload}>Invoice delivered goods</ActionButton>
         )}
+        <Link className="button" href={`/sales/orders/${id}/print`}>Print {o.status === 'draft' ? 'quotation' : 'order'}</Link>
         {write && ['draft', 'confirmed'].includes(o.status) && !delivered && (
           <ActionButton kind="danger" confirm="Cancel this order?" onClick={() => post(`/sales/orders/${id}/cancel`, { reason: 'Cancelled by user' })} onDone={reload}>Cancel</ActionButton>
         )}
       </>
     }>
-      <Steps steps={['Quote', 'Confirmed', 'Delivered', 'Invoiced']}
-        current={{ draft: 0, confirmed: 1, delivered: 2, invoiced: 4 }[o.status as string] ?? 0}
-        stopped={o.status === 'cancelled' ? 'Cancelled' : null} />
       <Card>
         <KV rows={[
           ['Status', <Badge value={o.status} />],
@@ -88,13 +102,13 @@ export default function OrderPage() {
       )}
 
       <div className="grid no-print">
-        <Card title="Deliveries">
+        <Card title="Deliveries" id="deliveries">
           <Table rows={o.deliveries} empty="Nothing delivered yet." rowHref={(r) => `/sales/deliveries/${r.id}`} columns={[
             { key: 'delivery_no', title: 'Challan' }, { key: 'delivered_at', title: 'When', render: (r) => dateTime(r.delivered_at) }, { key: 'location', title: 'From' },
           ]} />
         </Card>
-        <Card title="Invoices">
-          <Table rows={o.invoices.filter((i: any) => i.status !== 'draft')} empty="Not invoiced yet." rowHref={(r) => `/invoices/${r.id}`} columns={[
+        <Card title="Invoices" id="invoices">
+          <Table rows={invoices} empty="Not invoiced yet." rowHref={(r) => `/invoices/${r.id}`} columns={[
             { key: 'invoice_no', title: 'Number' }, { key: 'doc_type', title: 'Type', render: (r) => (r.doc_type === 'credit_note' ? 'Credit note' : 'Invoice') },
             { key: 'invoice_date', title: 'Date', render: (r) => date(r.invoice_date) },
             { key: 'grand_total', title: 'Total', align: 'right', render: (r) => inr(r.grand_total) }, { key: 'status', title: 'Status', render: (r) => <Badge value={r.status} /> },

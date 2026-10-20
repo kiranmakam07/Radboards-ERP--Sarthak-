@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { CHANNELS, ITEM_TYPES } from '@radcore/shared';
+import { CHANNELS, ITEM_TYPES, addDays, istDate } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { rows, type DB } from '../db/client';
@@ -131,10 +131,36 @@ export function itemsRouter(db: DB) {
         from locations l left join v_stock_on_hand s on s.location_id = l.id and s.item_id = ${id}
        order by l.created_at`);
     const [val] = await rows(db, sql`select qty, value, avg_cost from v_item_valuation where item_id = ${id}`);
+    // What is happening with it: sold and bought in the last 90 days, and what is promised either way.
+    const since = addDays(istDate(), -90);
+    const [activity] = await rows(db, sql`
+      select
+        (select coalesce(sum(case when v.doc_type = 'credit_note' then -l.qty else l.qty end), 0)
+           from invoice_lines l join invoices v on v.id = l.invoice_id
+          where l.item_id = ${id} and v.status = 'issued' and v.invoice_date >= ${since}::date) as sold_qty,
+        (select coalesce(sum(case when v.doc_type = 'credit_note' then -l.taxable_value else l.taxable_value end), 0)
+           from invoice_lines l join invoices v on v.id = l.invoice_id
+          where l.item_id = ${id} and v.status = 'issued' and v.invoice_date >= ${since}::date) as sold_value,
+        (select coalesce(sum(m.qty), 0) from stock_movements m
+          where m.item_id = ${id} and m.movement_type = 'purchase_in' and m.posted_at >= ${since}::date) as bought_qty,
+        (select coalesce(sum(l.qty - l.delivered_qty), 0) from sales_order_lines l join sales_orders o on o.id = l.order_id
+          where l.item_id = ${id} and o.status = 'confirmed') as to_deliver,
+        (select coalesce(sum(l.qty - l.received_qty), 0) from purchase_order_lines l join purchase_orders po on po.id = l.purchase_order_id
+          where l.item_id = ${id} and po.status in ('sent', 'partly_received')) as to_receive`);
+    const rates = await rows(db, sql`
+      select pl.id, pl.name, r.rate from price_list_items r join price_lists pl on pl.id = r.price_list_id
+       where r.item_id = ${id} order by pl.name`);
+    const movements = await rows(db, sql`
+      select m.id, m.posted_at, m.movement_type, m.qty, m.unit_cost, m.reason, l.name as location
+        from stock_movements m join locations l on l.id = m.location_id
+       where m.item_id = ${id} order by m.posted_at desc, m.id desc limit 15`);
     res.json({
       data: {
         ...item,
         stock,
+        activity,
+        price_list_rates: rates,
+        movements,
         valuation: val ?? { qty: '0', value: '0', avg_cost: null },
         images: await db.select().from(itemImages).where(eq(itemImages.itemId, id)).orderBy(asc(itemImages.sort)),
         channel_map: await db.select().from(channelItemMap).where(eq(channelItemMap.itemId, id)),

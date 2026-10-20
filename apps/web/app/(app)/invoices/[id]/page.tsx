@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { InvoiceDocument } from '@/components/invoice';
-import { ActionButton, Badge, Card, ErrorBox, Loading, Page, Table, Toggle, date, inr, num } from '@/components/ui';
+import { ActionButton, Card, ErrorBox, Loading, Page, SmartButton, StatusBar, Table, Toggle, date, inr, num } from '@/components/ui';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -59,26 +59,42 @@ export default function InvoicePage() {
   const waText = `${c.name}\n${isCn ? 'Credit note' : 'Invoice'} ${inv.invoice_no} dated ${date(inv.invoice_date)}\nAmount: Rs ${inr(inv.grand_total)}\nThank you!`;
   const waPhone = (inv.party_phone ?? '').replace(/\D/g, '');
 
+  const paid = inv.status === 'issued' && inv.payment?.payment_status === 'paid';
+  const outstanding = inv.payment ? Number(inv.payment.outstanding) : 0;
+  const received = inv.payments.reduce((t: number, r: any) => t + Number(r.amount), 0);
+  const rupees = (n: number) => `₹${inr(n).replace(/\.00$/, '')}`;
+
   return (
-    <Page title={`${isCn ? 'Credit note' : 'Invoice'} ${inv.invoice_no}`} actions={
+    <Page title={`${isCn ? 'Credit note' : 'Invoice'} ${inv.invoice_no}`}
+      smart={
+        <>
+          {inv.party_id ? <SmartButton icon="me" value={inv.party_name} label="Customer" href={`/parties/${inv.party_id}`} /> : <SmartButton icon="me" value={inv.party_name ?? 'Cash sale'} label="Customer" />}
+          {inv.order ? <SmartButton icon="sales" value={inv.order.order_no} label="Order" href={`/sales/orders/${inv.order.id}`} /> : null}
+          {inv.against_invoice ? <SmartButton icon="accounts" value={inv.against_invoice.invoice_no} label="Against invoice" href={`/invoices/${inv.against_invoice.id}`} /> : null}
+          {!isCn && inv.status === 'issued' ? (
+            <SmartButton icon="rupee" value={outstanding > 0 ? rupees(outstanding) : 'Nil'} label={outstanding > 0 ? 'Still to pay' : 'Fully paid'} tone={outstanding > 0 ? 'amber' : 'green'} />
+          ) : null}
+          {inv.payments.length > 0 ? <SmartButton icon="accounts" value={inv.payments.length} label={`Payments · ${rupees(received)}`} href="#payments" /> : null}
+          {inv.credit_notes.length > 0 ? <SmartButton icon="accounts" value={inv.credit_notes.length} label="Credit notes" href="#credit-notes" /> : null}
+        </>
+      }
+      status={
+        <StatusBar steps={isCn ? ['Draft', 'Issued'] : ['Draft', 'Issued', 'Paid']} current={inv.status === 'draft' ? 0 : paid ? 2 : 1}
+          stopped={inv.status === 'cancelled' ? 'Cancelled' : null} />
+      }
+      actions={
       <>
-        <button type="button" onClick={() => setThermal(!thermal)}>{thermal ? 'A4 layout' : 'Thermal layout'}</button>
         <button type="button" className="primary" onClick={() => window.print()}>Print / Save PDF</button>
         {inv.status !== 'draft' && <ShareBill id={id} phone={waPhone} text={waText} />}
+        <button type="button" onClick={() => setThermal(!thermal)}>{thermal ? 'A4 layout' : 'Thermal layout'}</button>
       </>
     }>
-      <div className="no-print" style={{ marginBottom: 12 }}>
-        <Badge value={inv.status} /> {inv.payment && inv.status === 'issued' && <Badge value={inv.payment.payment_status} />}
-        {inv.payment && Number(inv.payment.outstanding) > 0 && <span> Outstanding ₹{inr(inv.payment.outstanding)}</span>}
-        {inv.order && <span> · Order <Link href={`/sales/orders/${inv.order.id}`}>{inv.order.order_no}</Link></span>}
-        {inv.against_invoice && <span> · Against <Link href={`/invoices/${inv.against_invoice.id}`}>{inv.against_invoice.invoice_no}</Link></span>}
-      </div>
 
       <InvoiceDocument inv={inv} thermal={thermal} />
 
       <div className="no-print" style={{ marginTop: 16 }}>
         {inv.payments.length > 0 && (
-          <Card title="Payments received">
+          <Card title="Payments received" id="payments">
             <Table rows={inv.payments} columns={[
               { key: 'payment_no', title: 'Receipt' }, { key: 'paid_on', title: 'Date', render: (r) => date(r.paid_on) },
               { key: 'mode', title: 'Mode' }, { key: 'reference', title: 'Reference' },
@@ -87,7 +103,7 @@ export default function InvoicePage() {
           </Card>
         )}
         {inv.credit_notes.length > 0 && (
-          <Card title="Credit notes">
+          <Card title="Credit notes" id="credit-notes">
             <Table rows={inv.credit_notes} rowHref={(r) => `/invoices/${r.id}`} columns={[
               { key: 'invoice_no', title: 'Number' }, { key: 'invoice_date', title: 'Date', render: (r) => date(r.invoice_date) },
               { key: 'reason', title: 'Reason' }, { key: 'grand_total', title: 'Amount', align: 'right', render: (r) => inr(r.grand_total) },

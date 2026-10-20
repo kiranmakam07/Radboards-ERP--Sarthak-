@@ -201,6 +201,11 @@ export const leads = pgTable('leads', {
   externalRef: text('external_ref').unique(),
   interestedItemIds: uuid('interested_item_ids').array().notNull().default(sql`'{}'::uuid[]`),
   stage: leadStageEnum('stage').notNull().default('new'),
+  /**
+   * What the deal is expected to be worth, as the salesperson judges it. Blank = not judged yet, and
+   * the pipeline then counts the prices of the items the lead asked about instead.
+   */
+  dealValue: money('deal_value'),
   lostReasonId: uuid('lost_reason_id').references(() => lostReasons.id),
   ownerId: uuid('owner_id').references(() => users.id),
   nextFollowUpAt: ts('next_follow_up_at'),

@@ -2,23 +2,32 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { ORDER_STATUSES } from '@radcore/shared';
-import { Badge, CsvLink, Loading, Page, Table, date, inr, label } from '@/components/ui';
+import { ORDER_STATUSES, type OrderStatus } from '@radcore/shared';
+import { Badge, CountCards, CsvLink, Loading, Page, Table, date, inr, label } from '@/components/ui';
 import { qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
+/** Quotes and orders, with a card for each stage they wait at: each card is also the filter for it. */
 export default function OrdersPage() {
   const can = useCan();
   const [f, setF] = useState({ q: '', status: '', channel: '' });
   const path = `/sales/orders${qs(f)}`;
   const { data, loading, error } = useGet<{ data: any[] }>(path);
+  const counts = useGet<{ data: Partial<Record<OrderStatus, number>> }>('/sales/orders/summary').data?.data;
   return (
     <Page title="Quotes & orders" actions={
       <>
-        <CsvLink href={path} />
         {can('sales:write') && <Link className="button primary" href="/sales/orders/new">+ New quote</Link>}
+        <CsvLink href={path} />
       </>
     }>
+      <CountCards value={f.status as OrderStatus | ''} onChange={(v) => setF({ ...f, status: v })} cards={[
+        { key: 'draft', label: 'Quotes to confirm', count: counts ? counts.draft ?? 0 : null },
+        { key: 'confirmed', label: 'Orders to deliver', count: counts ? counts.confirmed ?? 0 : null, tone: counts?.confirmed ? 'amber' : undefined },
+        { key: 'delivered', label: 'Delivered, to invoice', count: counts ? counts.delivered ?? 0 : null, tone: counts?.delivered ? 'amber' : undefined },
+        { key: 'invoiced', label: 'Invoiced', count: counts ? counts.invoiced ?? 0 : null, tone: 'green' },
+        { key: 'cancelled', label: 'Cancelled', count: counts ? counts.cancelled ?? 0 : null },
+      ]} />
       <div className="filters">
         <input placeholder="Search order no or party" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
         <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}>

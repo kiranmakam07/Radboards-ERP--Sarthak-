@@ -169,6 +169,13 @@
       "when": 1792130024577,
       "tag": "0023_task_started",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792504340475,
+      "tag": "0024_lead_deal_value",
+      "breakpoints": true
     }
   ]
 }

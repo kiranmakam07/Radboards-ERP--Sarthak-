@@ -297,7 +297,7 @@ flowchart LR
 
 ## 9. The web app
 
-- `app/(app)/layout.tsx` is the frame and the menu (`NAV`). Each menu entry names the permission
+- `app/(app)/layout.tsx` is the frame; the menu (`NAV`) is in `lib/nav.ts`. Each menu entry names the permission
   that shows it.
 - `app/(app)/<address>/page.tsx` is one screen. A screen loads with `useGet`, changes things with
   `post`/`put`/`patch` (`lib/api.ts`) and calls `reload()` afterwards. There is no client-side
@@ -310,6 +310,11 @@ flowchart LR
   `ActionButton`, `Card`, `Badge`, `Modal` and `FormModal` (pop-ups), `ViewSwitch` with
   `useRemembered` (Board / List, Table / Chart, kept in the browser), and how money, quantities
   and dates are shown. A screen should be these plus its own data.
+- **A record page** (an order, a lead, a product) passes `status` and `smart` to `Page`: the title
+  with `SmartButton`s for its related records (with counts), then a bar with what can be done now
+  and a `StatusBar` of its stages. Keep new record pages to this layout. A list whose records wait
+  at stages starts with `CountCards`, which also filter it; `Tabs` split a long record.
+- The menu is `lib/nav.ts`: the side menu and the home screen's section tiles both read it.
 - `components/board.tsx` is a board of cards dragged between columns (mouse, and touch by holding
   a card). It only reports a drop or a click; the screen decides what a move means and may ask
   for something in a pop-up first. Tasks and projects use it (`TaskBoard` in `components/ops.tsx`).
