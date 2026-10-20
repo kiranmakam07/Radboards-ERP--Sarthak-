@@ -777,6 +777,12 @@ export function salesRouter(db: DB) {
     sendList(req, res, data, 'sales-orders');
   });
 
+  /** How many quotes and orders are at each status: the counters above the list. */
+  r.get('/orders/summary', requirePerm('sales:read'), async (_req, res) => {
+    const counts = await rows<{ status: string; n: number }>(db, sql`select status::text as status, count(*)::int as n from sales_orders group by status`);
+    res.json({ data: Object.fromEntries(counts.map((c) => [c.status, c.n])) });
+  });
+
   r.get('/orders/:id', requirePerm('sales:read'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const [order] = await db.select().from(salesOrders).where(eq(salesOrders.id, id));

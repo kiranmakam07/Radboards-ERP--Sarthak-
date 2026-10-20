@@ -14,7 +14,7 @@ import { rows, type DB } from '../db/client';
 import { campaigns, items, leadActivities, leadSources, leads, lostReasons, parties, users } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
 import {
-  emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zPhone, zStateCode, zText, type Ctx,
+  emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zMoney, zPhone, zStateCode, zText, type Ctx,
 } from '../lib/http';
 import { createParty, type Party } from './parties';
 
@@ -416,20 +416,28 @@ export function leadsRouter(db: DB) {
     res.json({ data, opened, now: clock!.now });
   });
 
+  /**
+   * The pipeline board: every open lead, and those won (converted) or lost in the last 30 days, so a
+   * card can be dropped on those columns too. A lead's value is its deal value when someone has set
+   * one, else the prices of the items it asked about (value_from says which).
+   */
   r.get('/pipeline', requirePerm('leads:read'), async (req, res) => {
     const q = z.object({ owner_id: zId.optional(), mine: z.enum(['true', 'false']).optional() }).parse(req.query);
     const owner = q.mine === 'true' ? req.user!.id : (q.owner_id ?? null);
     const data = await rows(db, sql`
       select l.id, l.lead_no, l.name, l.phone, l.stage, l.next_follow_up_at, l.owner_id, o.name as owner_name,
-             s.name as source_name, ${SCORE_COLS},
-             (l.next_follow_up_at < now()) as overdue,
-             (select coalesce(sum(i.retail_price), 0) from items i where i.id = any(l.interested_item_ids)) as value
+             s.name as source_name, l.deal_value, l.party_id, ${SCORE_COLS},
+             (l.stage in ('new','contacted','interested','meeting_booked') and l.next_follow_up_at < now()) as overdue,
+             coalesce(l.deal_value, (select coalesce(sum(i.retail_price), 0) from items i where i.id = any(l.interested_item_ids))) as value,
+             case when l.deal_value is null then 'items' else 'deal' end as value_from
         from leads l join lead_sources s on s.id = l.source_id left join users o on o.id = l.owner_id
         ${SCORE_JOIN}
-       where l.stage in ('new','contacted','interested','meeting_booked')
+       where (l.stage in ('new','contacted','interested','meeting_booked')
+              or (l.stage = 'converted' and l.converted_at >= now() - interval '30 days')
+              or (l.stage = 'lost' and l.updated_at >= now() - interval '30 days'))
          and (${owner}::uuid is null or l.owner_id = ${owner}::uuid)
        order by l.next_follow_up_at asc nulls last`);
-    res.json({ data, stages: ['new', 'contacted', 'interested', 'meeting_booked'] });
+    res.json({ data, stages: ['new', 'contacted', 'interested', 'meeting_booked', 'converted', 'lost'] });
   });
 
   r.get('/:id', requirePerm('leads:read'), async (req, res) => {
@@ -454,7 +462,12 @@ export function leadsRouter(db: DB) {
       select a.id, a.type, a.note, a.at, u.name as user_name
         from lead_activities a left join users u on u.id = a.user_id
        where a.lead_id = ${id} order by a.at desc, a.id`);
-    res.json({ data: { ...lead, activities, plan: await planView(db, { planId: (lead as any).plan_id, planStep: (lead as any).plan_step, planStartedAt: (lead as any).plan_started_at }) } });
+    // Quotes and orders made for this lead, with their value before GST.
+    const orders = await rows(db, sql`
+      select o.id, o.order_no, o.status, o.order_date,
+             (select coalesce(sum(x.qty * x.rate - x.discount), 0)::numeric(14,2) from sales_order_lines x where x.order_id = o.id) as amount
+        from sales_orders o where o.lead_id = ${id} order by o.order_date desc, o.created_at desc`);
+    res.json({ data: { ...lead, activities, orders, plan: await planView(db, { planId: (lead as any).plan_id, planStep: (lead as any).plan_step, planStartedAt: (lead as any).plan_started_at }) } });
   });
 
   const zCapture = z.object({
@@ -524,6 +537,7 @@ export function leadsRouter(db: DB) {
       next_follow_up_at: zWhen,
       address: zAddress.nullable(),
       gstin: emptyToNull(zGstin),
+      deal_value: emptyToNull(zMoney),
     }).partial().parse(req.body);
     const updated = await inTx(db, req, async (ctx) => {
       const [before] = await ctx.tx.select().from(leads).where(eq(leads.id, id)).for('update');
@@ -538,6 +552,7 @@ export function leadsRouter(db: DB) {
       if (b.next_follow_up_at !== undefined) patch.nextFollowUpAt = b.next_follow_up_at;
       if (b.address !== undefined) patch.address = b.address;
       if (b.gstin !== undefined) patch.gstin = b.gstin;
+      if (b.deal_value !== undefined) patch.dealValue = b.deal_value;
       const [row] = await ctx.tx.update(leads).set(patch).where(eq(leads.id, id)).returning();
       await audit(ctx, 'lead', id, 'update', before, row);
       return row;

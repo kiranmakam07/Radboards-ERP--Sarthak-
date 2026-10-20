@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { EmployeesMaster, ItemsMaster, PartiesMaster } from '@/components/masters';
+import { EmployeesMaster, PartiesMaster } from '@/components/masters';
+import { ProductList } from '@/components/products';
 import { Loading, Page, Stat, date } from '@/components/ui';
 import { useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
-const TABS = ['Items', 'Customers', 'Suppliers', 'Employees'] as const;
+const TABS = ['Products', 'Customers', 'Suppliers', 'Employees'] as const;
 type Tab = (typeof TABS)[number];
 
 /**
@@ -17,7 +18,7 @@ type Tab = (typeof TABS)[number];
  */
 export default function MastersPage() {
   const can = useCan();
-  const [tab, setTab] = useState<Tab>('Items');
+  const [tab, setTab] = useState<Tab>('Products');
   const { data, loading, error, reload } = useGet<{ data: any }>('/masters/summary');
   const s = data?.data;
   const changed = (at: string | null) => (at ? `last changed ${date(at.slice(0, 10))}` : 'none yet');
@@ -32,7 +33,7 @@ export default function MastersPage() {
       <Loading loading={loading && !s} error={error} />
       {s && (
         <div className="stats">
-          <Stat label="Items" value={s.items} hint={`${s.items_inactive ? `${s.items_inactive} switched off · ` : ''}${changed(s.items_changed_at)}`} />
+          <Stat label="Products" value={s.items} hint={`${s.items_inactive ? `${s.items_inactive} switched off · ` : ''}${changed(s.items_changed_at)}`} />
           <Stat label="Customers and dealers" value={s.customers} hint={changed(s.customers_changed_at)} />
           <Stat label="Suppliers" value={s.suppliers} hint={changed(s.suppliers_changed_at)} />
           <Stat label="Employees" value={s.employees} hint={`${s.employees_left ? `${s.employees_left} have left · ` : ''}${changed(s.employees_changed_at)}`} />
@@ -41,7 +42,7 @@ export default function MastersPage() {
       <div className="filters">
         {TABS.map((t) => <button key={t} type="button" className={tab === t ? 'primary' : undefined} onClick={() => setTab(t)}>{t}</button>)}
       </div>
-      {tab === 'Items' && <ItemsMaster onChange={reload} />}
+      {tab === 'Products' && <ProductList embedded />}
       {tab === 'Customers' && <PartiesMaster key="customers" side="customers" onChange={reload} />}
       {tab === 'Suppliers' && <PartiesMaster key="suppliers" side="suppliers" onChange={reload} />}
       {tab === 'Employees' && (can('employees:manage') || can('hr:read')

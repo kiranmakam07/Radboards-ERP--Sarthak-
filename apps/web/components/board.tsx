@@ -15,7 +15,8 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as R
  * rather than the browser's drag and drop, which phones do not support. Keyboard and screen-reader
  * users move a card from the pop-up it opens, so every move has a way that needs no dragging.
  */
-export type BoardColumn = { key: string; title: string; hint?: string };
+/** A column: its title, an optional line under it, and an optional figure for it (the value of its cards). */
+export type BoardColumn = { key: string; title: string; hint?: string; total?: string };
 
 type Held = {
   item: unknown; key: string; from: string; el: HTMLElement; type: string; movable: boolean;
@@ -151,6 +152,7 @@ export function Board<T>({ columns, items, columnOf, keyOf, render, canMove, onM
           return (
             <section key={c.key} className={target ? 'board-col over' : 'board-col'} data-board-col={c.key} aria-label={c.title}>
               <h2>{c.title} <span className="muted small">{cards.length}</span></h2>
+              {c.total ? <p className="board-total">{c.total}</p> : null}
               {c.hint ? <p className="muted small board-hint">{c.hint}</p> : null}
               {cards.map((i) => {
                 const k = keyOf(i);

@@ -4,8 +4,9 @@ import { istDate } from '@radcore/shared';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, Table, Toggle, date, dateTime, inr, num, sub } from '@/components/ui';
-import { Steps } from '@/components/charts';
+import {
+  ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, SmartButton, StatusBar, Table, Toggle, date, dateTime, inr, num, sub,
+} from '@/components/ui';
 import { EditLines, linesKey } from '@/components/edit-lines';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -22,19 +23,34 @@ export default function PurchaseOrderPage() {
   const waText = `Purchase order ${po.po_no} from ${po.company.name}\n${po.lines.map((l: any) => `${l.item_name} x ${num(l.qty)} @ Rs ${inr(l.rate)}`).join('\n')}`;
   const waPhone = String(po.supplier_phone ?? '').replace(/\D/g, '');
 
+  const ordered = po.lines.reduce((t: number, l: any) => t + Number(l.qty), 0);
+  const received = po.lines.reduce((t: number, l: any) => t + Number(l.received_qty), 0);
+  const billed = po.bills.reduce((t: number, b: any) => t + Number(b.grand_total), 0);
+
   return (
-    <Page title={`PO ${po.po_no}`} actions={
+    <Page title={`Purchase order ${po.po_no}`}
+      smart={
+        <>
+          <SmartButton icon="store" value={po.supplier_name} label="Supplier" href={`/parties/${po.supplier_id}`} />
+          <SmartButton icon="stores" value={`${num(received)} of ${num(ordered)}`} label={`Received · ${po.receipts.length} receipt${po.receipts.length === 1 ? '' : 's'}`}
+            href={po.receipts.length ? '#receipts' : null} tone={received > 0 && received < ordered ? 'amber' : undefined} />
+          <SmartButton icon="accounts" value={po.bills.length} label={po.bills.length ? `Bills · ₹${inr(billed).replace(/\.00$/, '')}` : 'Bills'} href={po.bills.length ? '#bills' : null} />
+        </>
+      }
+      status={
+        <StatusBar steps={['Draft', 'Sent to supplier', 'Goods arriving', 'All received']}
+          current={{ draft: 0, sent: 1, partly_received: 2, received: 3, closed: 3 }[po.status as string] ?? 0}
+          stopped={po.status === 'cancelled' ? 'Cancelled' : po.status === 'closed' ? 'Closed' : null} />
+      }
+      actions={
       <>
+        {can('po:write') && po.status === 'draft' && <ActionButton kind="primary" onClick={() => post(`/purchasing/orders/${id}/send`)} onDone={reload}>Mark as sent</ActionButton>}
         <Link className="button" href={`/purchasing/orders/${id}/print`}>Print / PDF</Link>
         {waPhone && <a className="button" target="_blank" rel="noreferrer" href={`https://wa.me/${waPhone}?text=${encodeURIComponent(waText)}`}>Share on WhatsApp</a>}
-        {can('po:write') && po.status === 'draft' && <ActionButton kind="primary" onClick={() => post(`/purchasing/orders/${id}/send`)} onDone={reload}>Mark as sent</ActionButton>}
         {can('po:write') && ['draft', 'sent'].includes(po.status) && <ActionButton kind="danger" confirm="Cancel this PO?" onClick={() => post(`/purchasing/orders/${id}/cancel`)} onDone={reload}>Cancel</ActionButton>}
         {can('po:write') && ['partly_received', 'received'].includes(po.status) && <ActionButton confirm="Close this PO? Nothing more can be received against it." onClick={() => post(`/purchasing/orders/${id}/close`)} onDone={reload}>Close PO</ActionButton>}
       </>
     }>
-      <Steps steps={['Draft', 'Sent to supplier', 'Goods arriving', 'All received']}
-        current={{ draft: 0, sent: 1, partly_received: 2, received: 4, closed: 4 }[po.status as string] ?? 0}
-        stopped={po.status === 'cancelled' ? 'Cancelled' : null} />
       <Card>
         <KV rows={[
           ['Status', <Badge value={po.status} />], ['Supplier', <Link href={`/parties/${po.supplier_id}`}>{po.supplier_name}</Link>],
@@ -74,13 +90,13 @@ export default function PurchaseOrderPage() {
           </Toggle>
         )}
         <div className="grid">
-          <Card title="Goods receipts">
+          <Card title="Goods receipts" id="receipts">
             <Table rows={po.receipts} empty="Nothing received yet." rowHref={(r) => `/purchasing/receipts/${r.id}`} columns={[
               { key: 'grn_no', title: 'GRN' }, { key: 'received_at', title: 'Received', render: (r) => dateTime(r.received_at) },
               { key: 'status', title: 'Status', render: (r) => <Badge value={r.status} /> },
             ]} />
           </Card>
-          <Card title="Bills & debit notes">
+          <Card title="Bills & debit notes" id="bills">
             <Table rows={po.bills} empty="No supplier invoice recorded yet." rowHref={(r) => `/purchasing/bills/${r.id}`} columns={[
               { key: 'bill_no', title: 'Number' }, { key: 'supplier_invoice_no', title: 'Supplier inv.' },
               { key: 'bill_date', title: 'Date', render: (r) => date(r.bill_date) },

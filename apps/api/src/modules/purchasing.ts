@@ -488,6 +488,12 @@ export function purchasingRouter(db: DB) {
     sendList(req, res, data, 'purchase-orders');
   });
 
+  /** How many purchase orders are at each status: the counters above the list. */
+  r.get('/orders/summary', requirePerm('purchasing:read'), async (_req, res) => {
+    const counts = await rows<{ status: string; n: number }>(db, sql`select status::text as status, count(*)::int as n from purchase_orders group by status`);
+    res.json({ data: Object.fromEntries(counts.map((c) => [c.status, c.n])) });
+  });
+
   r.get('/orders/:id', requirePerm('purchasing:read'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const [po] = await rows(db, sql`

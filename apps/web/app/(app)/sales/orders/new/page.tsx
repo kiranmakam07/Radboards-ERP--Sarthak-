@@ -23,6 +23,8 @@ function NewOrder() {
     try {
       const res = await post('/sales/orders', {
         party_id: partyId, channel: party?.party_type === 'dealer' ? 'dealer' : 'store', notes, lines: toApiLines(lines),
+        // A quote started from a lead stays linked to it (the lead's page lists it).
+        lead_id: params.get('lead_id') || undefined,
       });
       router.push(`/sales/orders/${res.data.id}`);
     } catch (e) {

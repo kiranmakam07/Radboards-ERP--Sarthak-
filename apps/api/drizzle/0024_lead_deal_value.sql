@@ -1,0 +1,1 @@
+ALTER TABLE "leads" ADD COLUMN "deal_value" numeric(12, 2);

@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { useState } from 'react';
 import { STATE_CODES } from '@radcore/shared';
 import { partyBody, partyFields } from '@/components/party-form';
-import { Badge, Card, CsvLink, Form, KV, Loading, Page, Table, Toggle, date, inr, label } from '@/components/ui';
+import { Badge, Card, CsvLink, FormModal, KV, Loading, Page, SmartButton, Table, date, inr, label } from '@/components/ui';
 import { patch, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -14,14 +15,29 @@ export default function PartyPage() {
   const { data, loading, error, reload } = useGet<{ data: any }>(`/parties/${id}`);
   const priceLists = useGet<{ data: any[] }>('/masters/price-lists');
   const ledger = useGet<{ data: any[]; closing_balance: string }>(can('accounts:read') ? `/parties/${id}/ledger` : null);
+  const [editing, setEditing] = useState(false);
   const p = data?.data;
   if (!p) return <Page title="Party"><Loading loading={loading} error={error} /></Page>;
   const bal = Number(p.balance);
   const a = p.billing_address ?? {};
+  const owed = (rows: any[]) => rows.reduce((t, r) => t + Number(r.outstanding), 0);
+  const rupees = (n: number) => `₹${inr(n).replace(/\.00$/, '')}`;
 
   return (
-    <Page title={p.name} actions={
+    <Page title={p.name}
+      smart={
+        <>
+          <SmartButton icon="rupee" value={bal === 0 ? 'Nil' : rupees(Math.abs(bal))} label={bal === 0 ? 'Balance' : bal > 0 ? 'They owe us' : 'We owe them'}
+            tone={bal > 0 ? 'amber' : undefined} href={ledger.data ? '#ledger' : null} />
+          {p.party_type !== 'supplier' ? <SmartButton icon="accounts" value={p.open_invoices.length} label={p.open_invoices.length ? `Unpaid invoices · ${rupees(owed(p.open_invoices))}` : 'Unpaid invoices'}
+            href={p.open_invoices.length ? '#unpaid-invoices' : null} tone={p.open_invoices.length ? 'amber' : undefined} /> : null}
+          {p.open_bills.length > 0 ? <SmartButton icon="store" value={p.open_bills.length} label={`Unpaid bills · ${rupees(owed(p.open_bills))}`} href="#unpaid-bills" /> : null}
+          {p.lead_id ? <SmartButton icon="crm" value="Lead" label="Where they came from" href={`/leads/${p.lead_id}`} /> : null}
+        </>
+      }
+      actions={
       <>
+        {can('parties:manage') ? <button type="button" className="primary" onClick={() => setEditing(true)}>Edit</button> : null}
         {p.party_type !== 'supplier' && can('quickbill:create') && <Link className="button" href={`/quick-bill?party_id=${p.id}`}>Quick bill</Link>}
         {p.party_type !== 'supplier' && can('sales:write') && <Link className="button" href={`/sales/orders/new?party_id=${p.id}`}>New quote / order</Link>}
         {can('payments:write') && <Link className="button" href={`/payments?party_id=${p.id}`}>Record payment</Link>}
@@ -39,21 +55,20 @@ export default function PartyPage() {
         ]} />
       </Card>
 
-      {can('parties:manage') && (
-        <Toggle label="Edit party">
-          <Form key={p.updated_at} fields={[...partyFields(priceLists.data?.data ?? [], false), { name: 'active', label: 'Active (untick to switch this party off)', type: 'checkbox' }]}
+      {editing && (
+        <FormModal title={`Edit ${p.name}`} submit="Save" wide onClose={() => setEditing(false)}
+            fields={[...partyFields(priceLists.data?.data ?? [], false), { name: 'active', label: 'Active (untick to switch this party off)', type: 'checkbox' }]}
             initial={{
               name: p.name, phone: p.phone ?? '', email: p.email ?? '', gstin: p.gstin ?? '', pan: p.pan ?? '', state_code: p.gstin ? '' : p.state_code,
               line1: a.line1 ?? '', city: a.city ?? '', pincode: a.pincode ?? '', price_list_id: p.price_list_id ?? '',
               credit_limit: p.credit_limit ?? '', payment_terms_days: p.payment_terms_days ?? '', active: p.active,
             }}
             onSubmit={(v) => patch(`/parties/${id}`, partyBody(v))} onDone={reload} />
-        </Toggle>
       )}
       {!can('parties:manage') && can('parties:write') ? <p className="muted small no-print">This record is part of the masters. Ask an admin to change it.</p> : null}
 
       {p.open_invoices.length > 0 && (
-        <Card title="Unpaid invoices">
+        <Card title="Unpaid invoices" id="unpaid-invoices">
           <Table rows={p.open_invoices} rowHref={(r) => `/invoices/${r.invoice_id}`} columns={[
             { key: 'invoice_no', title: 'Invoice' }, { key: 'invoice_date', title: 'Date', render: (r) => date(r.invoice_date) },
             { key: 'due_date', title: 'Due', render: (r) => date(r.due_date) },
@@ -64,7 +79,7 @@ export default function PartyPage() {
         </Card>
       )}
       {p.open_bills.length > 0 && (
-        <Card title="Unpaid bills">
+        <Card title="Unpaid bills" id="unpaid-bills">
           <Table rows={p.open_bills} rowHref={(r) => `/purchasing/bills/${r.bill_id}`} columns={[
             { key: 'bill_no', title: 'Bill' }, { key: 'supplier_invoice_no', title: 'Supplier inv.' },
             { key: 'bill_date', title: 'Date', render: (r) => date(r.bill_date) }, { key: 'due_date', title: 'Due', render: (r) => date(r.due_date) },
@@ -75,7 +90,7 @@ export default function PartyPage() {
       )}
 
       {ledger.data && (
-        <Card title="Ledger" actions={<CsvLink href={`/parties/${id}/ledger`} />}>
+        <Card title="Ledger" id="ledger" actions={<CsvLink href={`/parties/${id}/ledger`} />}>
           <Table rows={ledger.data.data} empty="No transactions yet." columns={[
             { key: 'entry_date', title: 'Date', render: (r) => date(r.entry_date) },
             { key: 'narration', title: 'Particulars', render: (r) => <span style={{ whiteSpace: 'normal' }}>{r.narration}</span> },

@@ -30,14 +30,108 @@ export const label = (v: unknown) =>
   String(v ?? '').replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()).replace(SHORT_FORMS, (w) => w.toUpperCase());
 
 // ---- the page frame and its messages -----------------------------------------
-export function Page({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
+/**
+ * A screen. A list or a report is a title with its buttons beside it. A record (an order, a lead, a
+ * product) also passes `status` and `smart`, and is laid out the same way everywhere:
+ *
+ *   Title ............................ smart buttons (its related records, with counts)
+ *   What can be done now (actions) ... where it stands (the status strip)
+ */
+export function Page({ title, actions, status, smart, children }: {
+  title: string; actions?: ReactNode; status?: ReactNode; smart?: ReactNode; children: ReactNode;
+}) {
+  if (status === undefined && smart === undefined) {
+    return (
+      <div className="page">
+        <div className="page-head">
+          <h1>{title}</h1>
+          <div className="actions no-print">{actions}</div>
+        </div>
+        {children}
+      </div>
+    );
+  }
   return (
-    <div className="page">
+    <div className="page record">
       <div className="page-head">
         <h1>{title}</h1>
-        <div className="actions no-print">{actions}</div>
+        {smart ? <div className="smart-buttons no-print">{smart}</div> : null}
+      </div>
+      <div className="record-bar no-print">
+        <div className="actions">{actions}</div>
+        {status}
       </div>
       {children}
+    </div>
+  );
+}
+
+/**
+ * Where a record stands, as a strip of stages: the ones passed are filled in, the current one is
+ * the brand colour, the rest wait. A record that left the road (cancelled, lost) ends in red.
+ */
+export function StatusBar({ steps, current, stopped, onPick }: {
+  steps: string[]; current: number; stopped?: string | null;
+  /** When given, the other stages are buttons: clicking one moves the record there (the screen asks first if it must). */
+  onPick?: (index: number) => void;
+}) {
+  return (
+    <ol className={onPick ? 'statusbar pickable' : 'statusbar'} aria-label="Where it stands">
+      {steps.map((st, i) => (
+        <li key={st} className={stopped ? 'todo' : i < current ? 'done' : i === current ? 'now' : 'todo'}
+          aria-current={!stopped && i === current ? 'step' : undefined}>
+          {onPick && (stopped || i !== current) ? <button type="button" title={`Move to ${st}`} onClick={() => onPick(i)}>{st}</button> : st}
+        </li>
+      ))}
+      {stopped ? <li className="stopped" aria-current="step">{stopped}</li> : null}
+    </ol>
+  );
+}
+
+/** A related record or list, with a count: "Invoices 2", "In stock 14". Opens it. */
+export function SmartButton({ icon, value, label: l, href, onClick, tone }: {
+  icon: string; value: ReactNode; label: string; href?: string | null; onClick?: () => void; tone?: 'red' | 'amber' | 'green';
+}) {
+  const body = (
+    <>
+      <Icon name={icon} size={18} />
+      <span><span className={`smart-value${tone ? ` ${tone}` : ''}`}>{value}</span><span className="smart-label">{l}</span></span>
+    </>
+  );
+  if (onClick) return <button type="button" className="smart" onClick={onClick}>{body}</button>;
+  if (!href) return <span className="smart">{body}</span>;
+  return href.startsWith('#') ? <a className="smart" href={href}>{body}</a> : <Link className="smart" href={href}>{body}</Link>;
+}
+
+/**
+ * Cards above a list that are also its filters: "3 To confirm", "2 To deliver". The chosen one is
+ * outlined; choosing it again shows everything.
+ */
+export function CountCards<T extends string>({ cards, value, onChange }: {
+  cards: { key: T; label: string; count: number | null | undefined; tone?: 'red' | 'amber' | 'green' }[];
+  value: T | ''; onChange: (v: T | '') => void;
+}) {
+  return (
+    <div className="counters no-print" role="group" aria-label="Show only">
+      {cards.map((c) => (
+        <button key={c.key} type="button" className={`counter${c.tone ? ` ${c.tone}` : ''}`} aria-pressed={value === c.key}
+          onClick={() => onChange(value === c.key ? '' : c.key)}>
+          <span className="counter-value">{c.count ?? '·'}</span>
+          <span className="counter-label">{c.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Tabs across the top of a record's details. The screen shows the chosen tab's part itself. */
+export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { key: T; label: string }[]; value: T; onChange: (v: T) => void }) {
+  return (
+    <div className="tabs no-print" role="tablist">
+      {tabs.map((t) => (
+        <button key={t.key} type="button" role="tab" aria-selected={value === t.key} className={value === t.key ? 'on' : undefined}
+          onClick={() => onChange(t.key)}>{t.label}</button>
+      ))}
     </div>
   );
 }
@@ -441,9 +535,9 @@ export function FormModal({ title, onClose, intro, wide, ...form }: {
   );
 }
 
-export function Card({ title, children, actions }: { title?: string; children: ReactNode; actions?: ReactNode }) {
+export function Card({ title, children, actions, id }: { title?: string; children: ReactNode; actions?: ReactNode; id?: string }) {
   return (
-    <section className="card">
+    <section className="card" id={id}>
       {title ? <div className="card-head"><h2>{title}</h2><div className="actions no-print">{actions}</div></div> : null}
       {children}
     </section>

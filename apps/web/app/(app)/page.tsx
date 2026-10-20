@@ -6,25 +6,15 @@ import { Donut, Flow, LineChart, compactRupees, fillDays, rupees, type FlowStep 
 import { Icon } from '@/components/icons';
 import { Card, Page, Stat, inr } from '@/components/ui';
 import { useGet } from '@/lib/api';
+import { NAV } from '@/lib/nav';
 import { useCan, useSession } from '@/lib/session';
 
-const TILES: [string, string, string, string][] = [
-  ['/walk-in', 'Walk-in', 'leads:write', 'store'],
-  ['/quick-bill', 'Quick bill', 'quickbill:create', 'sales'],
-  ['/leads/pipeline', 'Pipeline', 'leads:read', 'crm'],
-  ['/sales/orders', 'Quotes & orders', 'sales:read', 'sales'],
-  ['/purchasing/receipts', 'Inward & QC', 'grn:write', 'stores'],
-  ['/stock', 'Stock', 'stock:read', 'stores'],
-  ['/payments', 'Payments', 'payments:read', 'accounts'],
-  ['/accounts/reports', 'Books & reports', 'accounts:read', 'accounts'],
-  ['/hr/attendance', 'Attendance', 'hr:read', 'hr'],
-  ['/ops/tasks', 'Tasks', 'ops:read', 'operations'],
-];
-
 /**
- * Home: the business at a glance. A row of headline figures, the month's sales and where the leads
- * stand, then each flow as a row of steps with the number of things waiting there right now; every
- * figure opens the list behind it. People only see what their role works on.
+ * Home: where to go, then the business at a glance. First a tile for each section of the app the
+ * person may use (the same sections as the menu, lib/nav.ts), then a row of headline figures, the
+ * month's sales and where the leads stand, then each flow as a row of steps with the number of things
+ * waiting there right now; every figure opens the list behind it. People only see what their role
+ * works on.
  */
 export default function Home() {
   const { user } = useSession();
@@ -110,8 +100,18 @@ export default function Home() {
 
   const today = istDate();
   const monthStart = `${today.slice(0, 7)}-01`;
+  // Each section the person can use, opening at its first screen they may see.
+  const sections = NAV.map((g) => ({ ...g, first: g.items.find((i) => !i.perm || can(i.perm)) })).filter((g) => g.first);
   return (
     <Page title={`Hello, ${user.name.split(' ')[0]}`}>
+      <div className="app-grid">
+        {sections.map((g) => (
+          <Link key={g.group} href={g.first!.href} className="app-tile">
+            <span className="app-icon"><Icon name={g.icon} size={22} /></span>
+            <span><strong>{g.group}</strong><span className="small">{g.blurb}</span></span>
+          </Link>
+        ))}
+      </div>
       {headline.length > 0 && (
         <>
           <div className="section-title"><h2>General report</h2><span className="muted small">As of now</span></div>
@@ -150,11 +150,6 @@ export default function Home() {
       <Flow title="From purchase order to stock" steps={purchase} />
       <Flow title="From application to joining" steps={hiring} />
       <Flow title="Needs attention" steps={attention} arrows={false} />
-      {/* Store screens are at most two taps away (PRD section 9). */}
-      <div className="section-title"><h2>Go to</h2></div>
-      <div className="home-tiles">
-        {TILES.filter(([, , perm]) => can(perm)).map(([href, label, , icon]) => <Link key={href} href={href}><Icon name={icon} size={20} />{label}</Link>)}
-      </div>
     </Page>
   );
 }
