@@ -7,6 +7,7 @@ import { LeadAlerts } from '@/components/crm';
 import { Icon } from '@/components/icons';
 import { InstallButton } from '@/components/install';
 import { ThemeButton } from '@/components/theme';
+import { Collapse, label, usePresence } from '@/components/ui';
 import { api, post, qs, useGet } from '@/lib/api';
 import { NAV } from '@/lib/nav';
 import { SessionContext, type Session } from '@/lib/session';
@@ -72,14 +73,16 @@ function Shell({ data, can, active, here, activeGroup, home, menuOpen, setMenuOp
                   onClick={() => setOpenGroup(open ? null : g.group)}>
                   <Icon name={g.icon} /><span>{g.group}</span><Icon name="down" size={16} className="chevron" />
                 </button>
-                <div id={panel} className="sub" hidden={!open}>
-                  {items.map((i) => (
-                    <Link key={i.href} href={i.href} className={i.href === active ? 'active' : undefined} onClick={close}
-                      aria-current={i.href === active ? 'page' : undefined}>
-                      <Icon name={i.href === active ? 'right' : 'dot'} size={14} />{i.label}
-                    </Link>
-                  ))}
-                </div>
+                <Collapse id={panel} open={open}>
+                  <div className="sub">
+                    {items.map((i) => (
+                      <Link key={i.href} href={i.href} className={i.href === active ? 'active' : undefined} onClick={close}
+                        aria-current={i.href === active ? 'page' : undefined}>
+                        <Icon name={i.href === active ? 'right' : 'dot'} size={14} />{i.label}
+                      </Link>
+                    ))}
+                  </div>
+                </Collapse>
               </div>
             );
           })}
@@ -117,6 +120,7 @@ function Search({ can }: { can: (p?: string) => boolean }) {
   const [groups, setGroups] = useState<{ title: string; hits: Hit[] }[]>([]);
   const [at, setAt] = useState(0);
   const box = useRef<HTMLDivElement>(null);
+  const results = usePresence(open && q.trim().length >= 2, 140);
 
   useEffect(() => {
     const term = q.trim();
@@ -173,8 +177,8 @@ function Search({ can }: { can: (p?: string) => boolean }) {
           if (e.key === 'Escape') setOpen(false);
         }} />
       <Icon name="search" size={17} />
-      {open && q.trim().length >= 2 && (
-        <div className="search-results" role="listbox">
+      {results.mounted && (
+        <div className="search-results" role="listbox" data-state={results.closing ? 'closing' : 'open'}>
           {flat.length === 0 ? <p className="muted small" style={{ margin: 8 }}>Nothing found for “{q.trim()}”.</p> : groups.map((g) => (
             <div key={g.title}>
               <h4>{g.title}</h4>
@@ -205,6 +209,8 @@ function Waiting() {
 
 function MeMenu({ data }: { data: Session }) {
   const [open, setOpen] = useState(false);
+  // Drawn a moment longer after closing, so it can fade away.
+  const { mounted, closing } = usePresence(open);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -220,13 +226,27 @@ function MeMenu({ data }: { data: Session }) {
       <button type="button" className="avatar" aria-haspopup="menu" aria-expanded={open} aria-label={`${data.user.name}: your menu`} onClick={() => setOpen(!open)}>
         {initials || 'R'}
       </button>
-      {open && (
-        <div className="me-menu" role="menu">
-          <div className="who"><div>{data.user.name}</div><div className="role">{data.user.role}</div></div>
-          <Link href="/account" role="menuitem" onClick={() => setOpen(false)}><Icon name="key" />My password</Link>
-          <ThemeButton />
-          <InstallButton className="install" />
-          <button type="button" role="menuitem" onClick={async () => { await post('/auth/logout'); window.location.href = '/login'; }}><Icon name="logout" />Sign out</button>
+      {mounted && (
+        <div className="me-menu" role="menu" data-state={closing ? 'closing' : 'open'}>
+          <div className="me-head">
+            <span className="avatar big" aria-hidden="true">{initials || 'R'}</span>
+            <span className="me-who"><strong>{data.user.name}</strong><span>{data.user.phone}</span></span>
+            <span className="me-role">{label(data.user.role)}</span>
+          </div>
+          <div className="me-items">
+            <Link href="/account" role="menuitem" className="me-item" onClick={() => setOpen(false)}>
+              <span className="me-icon"><Icon name="key" size={17} /></span>
+              <span className="me-text">My password<small>Change how you sign in</small></span>
+            </Link>
+            <ThemeButton />
+            <InstallButton className="me-item" />
+          </div>
+          <div className="me-foot">
+            <button type="button" role="menuitem" className="me-item danger" onClick={async () => { await post('/auth/logout'); window.location.href = '/login'; }}>
+              <span className="me-icon"><Icon name="logout" size={17} /></span>
+              <span className="me-text">Sign out</span>
+            </button>
+          </div>
         </div>
       )}
     </div>

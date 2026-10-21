@@ -67,6 +67,9 @@ export default function ProductPage() {
         ...(p.is_stock_item ? [{ key: 'stock' as Tab, label: 'Stock' }] : []), { key: 'pictures', label: 'Pictures' },
       ]} />
 
+      {/* Keyed by the tab, so the new tab's content fades in. */}
+      <div key={tab} className="tab-panel">
+
       {tab === 'overview' ? (
         <div className="grid">
           <Card title="What it is">
@@ -139,6 +142,7 @@ export default function ProductPage() {
       ) : null}
 
       {tab === 'pictures' ? <Card title="Pictures"><Pictures itemId={id} canChange={write} onChange={reload} /></Card> : null}
+      </div>
 
       {editing ? (
         <FormModal title={`Edit ${p.name}`} submit="Save" wide onClose={() => setEditing(false)}

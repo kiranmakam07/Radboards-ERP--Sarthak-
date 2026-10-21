@@ -37,7 +37,8 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1, them
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     // The theme script sets data-theme on <html> before React takes over; React is told not to mind.
-    <html lang="en" suppressHydrationWarning>
+    // data-scroll-behavior: links within a page glide (globals.css), but Next.js jumps to the top of a new screen.
+    <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth">
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
