@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Icon } from './icons';
 
 type InstallPrompt = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
 declare global {
@@ -13,6 +14,16 @@ declare global {
  * button (caught early by the script in app/layout.tsx); Safari on an iPhone has no such prompt,
  * so there the button explains the two taps instead. Nothing is shown once it is installed.
  */
+/** Its icon and words; in the avatar menu the icon sits on a tile and a line under the words explains it. */
+function InstallLabel() {
+  return (
+    <>
+      <span className="me-icon"><Icon name="install" size={17} /></span>
+      <span className="me-text">Install app<small>Open RadCore like an app on this device</small></span>
+    </>
+  );
+}
+
 export function InstallButton({ className }: { className?: string }) {
   const [prompt, setPrompt] = useState<InstallPrompt | null>(null);
   const [mode, setMode] = useState<'unknown' | 'installed' | 'ios' | 'other'>('unknown');
@@ -43,7 +54,7 @@ export function InstallButton({ className }: { className?: string }) {
         window.__installPrompt = null;
         setPrompt(null);
       }}>
-        <span aria-hidden="true">⤓</span> Install app
+        <InstallLabel />
       </button>
     );
   }
@@ -51,7 +62,7 @@ export function InstallButton({ className }: { className?: string }) {
   return (
     <>
       <button type="button" className={className} aria-expanded={help} onClick={() => setHelp(!help)}>
-        <span aria-hidden="true">⤓</span> Install app
+        <InstallLabel />
       </button>
       {help ? <p className="install-help">In Safari, tap the Share button, then “Add to Home Screen”.</p> : null}
     </>

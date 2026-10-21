@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useContext, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { formatDate, formatINR } from '@radcore/shared';
 import { BarList, Donut, LineChart, count } from '@/components/charts';
 import { Icon } from '@/components/icons';
@@ -144,9 +144,61 @@ export function Notice({ children }: { children: ReactNode }) {
   return children ? <div className="notice">{children}</div> : null;
 }
 
+/** While a screen's data is on its way: grey bars that shimmer where the content will be. */
 export function Loading({ loading, error }: { loading: boolean; error: string | null }) {
   if (error) return <ErrorBox error={error} />;
-  return loading ? <p className="muted">Loading…</p> : null;
+  if (!loading) return null;
+  return (
+    <div className="skeleton" role="status" aria-label="Loading">
+      <span style={{ width: '38%' }} /><span /><span /><span style={{ width: '72%' }} />
+    </div>
+  );
+}
+
+/**
+ * A part that slides open and shut (a menu section). Its real height is measured and animated to,
+ * then left free, so whatever it holds is never cut off; shut, it cannot be tabbed into.
+ */
+export function Collapse({ open, id, className, children }: { open: boolean; id?: string; className?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Drawn shut or open from the start, so nothing flashes; after that, only moved by the effect below.
+  const [startOpen] = useState(open);
+  const first = useRef(true);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (first.current) { first.current = false; return; }
+    // Once open, the height is let go, so the part can grow or shrink with what it holds.
+    const end = (e: TransitionEvent) => { if (e.propertyName === 'height' && open) el.style.height = 'auto'; };
+    el.style.height = `${open ? 0 : el.scrollHeight}px`;
+    void el.offsetHeight; // the starting height takes effect before the change, so it animates
+    el.style.height = `${open ? el.scrollHeight : 0}px`;
+    el.addEventListener('transitionend', end);
+    return () => el.removeEventListener('transitionend', end);
+  }, [open]);
+  return (
+    <div ref={ref} id={id} className={`collapse${className ? ` ${className}` : ''}`} data-open={open} inert={!open}
+      style={startOpen ? undefined : { height: 0 }}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Keeps something on screen for a moment after it is closed, so it can animate away instead of
+ * vanishing: `mounted` says whether to draw it, `closing` whether it is on its way out.
+ */
+export function usePresence(open: boolean, ms = 160) {
+  const [mounted, setMounted] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      return undefined;
+    }
+    const t = window.setTimeout(() => setMounted(false), ms);
+    return () => window.clearTimeout(t);
+  }, [open, ms]);
+  return { mounted: open || mounted, closing: !open && mounted };
 }
 
 const TONES: Record<string, string> = {
@@ -266,7 +318,7 @@ export function Table<T extends Record<string, any>>({
   const path = usePathname();
   const [view, setView] = useView(`radcore-view:${path}:${chart?.name ?? ''}`, chart?.first ?? 'table');
   if (!rows) return null;
-  if (rows.length === 0) return <p className="muted">{empty}</p>;
+  if (rows.length === 0) return <div className="empty"><span className="empty-icon"><Icon name="table" size={20} /></span><p>{empty}</p></div>;
   if (chart) {
     return (
       <>
@@ -509,13 +561,20 @@ export function ActionButton({
  */
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   const titleId = useId();
+  // Closed by its × or Esc, it first plays its closing animation, then tells the screen.
+  const [closing, setClosing] = useState(false);
+  const close = () => {
+    if (closing) return;
+    setClosing(true);
+    window.setTimeout(onClose, 150);
+  };
   return (
-    <dialog className={wide ? 'modal wide' : 'modal'} aria-labelledby={titleId}
+    <dialog className={`modal${wide ? ' wide' : ''}${closing ? ' closing' : ''}`} aria-labelledby={titleId}
       ref={(d) => { if (d && !d.open) d.showModal(); }}
-      onCancel={(e) => { e.preventDefault(); onClose(); }}>
+      onCancel={(e) => { e.preventDefault(); close(); }}>
       <div className="modal-head">
         <h2 id={titleId}>{title}</h2>
-        <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button>
+        <button type="button" className="icon-button" aria-label="Close" onClick={close}>×</button>
       </div>
       <div className="modal-body">{children}</div>
     </dialog>

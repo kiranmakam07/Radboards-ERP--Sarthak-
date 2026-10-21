@@ -16,15 +16,22 @@ const current = (): Theme => (document.documentElement.dataset.theme === 'dark' 
 export function ThemeButton() {
   // The menu this sits in only opens after a click, so the page is already in the browser here.
   const [theme, setTheme] = useState<Theme>(current);
+  const dark = theme === 'dark';
   const flip = () => {
-    const next: Theme = theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = next;
+    const next: Theme = dark ? 'light' : 'dark';
+    // Colours cross-fade for a moment instead of jumping (globals.css, .theme-fade).
+    const root = document.documentElement;
+    root.classList.add('theme-fade');
+    window.setTimeout(() => root.classList.remove('theme-fade'), 400);
+    root.dataset.theme = next;
     try { localStorage.setItem('radcore-theme', next); } catch { /* private window: works for this visit only */ }
     setTheme(next);
   };
   return (
-    <button type="button" role="menuitem" onClick={flip}>
-      <Icon name={theme === 'dark' ? 'sun' : 'moon'} />{theme === 'dark' ? 'Light mode' : 'Dark mode'}
+    <button type="button" role="menuitemcheckbox" aria-checked={dark} className="me-item" onClick={flip}>
+      <span className="me-icon"><Icon name="moon" size={17} /></span>
+      <span className="me-text">Dark mode<small>{dark ? 'On' : 'Off'}</small></span>
+      <span className={dark ? 'switch on' : 'switch'} aria-hidden="true"><span /></span>
     </button>
   );
 }
