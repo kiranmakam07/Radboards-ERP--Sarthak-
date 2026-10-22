@@ -104,6 +104,10 @@ export const ADJUSTMENT_STATUSES = ['pending', 'approved', 'rejected'] as const;
  */
 export const UNIT_STATUSES = ['available', 'reserved', 'demo', 'under_repair', 'quarantine', 'damaged', 'rtv', 'sold', 'scrapped'] as const;
 export type UnitStatus = (typeof UNIT_STATUSES)[number];
+/** A reservation holds stock for one order: open until delivered (fulfilled), let go (released) or past its date (expired). */
+export const RESERVATION_STATUSES = ['open', 'fulfilled', 'released', 'expired'] as const;
+export type ReservationStatus = (typeof RESERVATION_STATUSES)[number];
+
 /** The statuses a unit can be sold from. */
 export const SELLABLE_UNIT_STATUSES = ['available', 'demo'] as const satisfies readonly UnitStatus[];
 

@@ -116,6 +116,24 @@ export default function OrderPage() {
           : <Toggle label="Deliver part of the order"><PartialDelivery order={o} onDone={reload} /></Toggle>
       )}
 
+      {o.reservations.length > 0 || (write && ['draft', 'confirmed'].includes(o.status) && pendingDelivery) ? (
+        <Card title="Stock held for this order" id="held">
+          <Table rows={o.reservations} empty="Nothing held yet. Holding stock keeps it from being sold to anyone else." columns={[
+            { key: 'item_name', title: 'Item', render: (r) => <>{r.item_name}{r.serial_no ? <span className="muted small"> · {r.serial_no}</span> : null}</> },
+            { key: 'qty', title: 'Qty', align: 'right', render: (r) => num(r.qty) },
+            { key: 'location', title: 'At' },
+            { key: 'expires_on', title: 'Held until', render: (r) => (r.expires_on ? date(r.expires_on) : 'Delivered') },
+            { key: 'status', title: 'Status', render: (r) => <Badge value={r.status} /> },
+            { key: 'x', title: '', render: (r) => (write && r.status === 'open' ? (
+              <ActionButton confirm="Let this stock go? Anyone can then sell it." onClick={() => post(`/sales/reservations/${r.id}/release`, {})} onDone={reload}>Let go</ActionButton>
+            ) : null) },
+          ]} />
+          {write && ['draft', 'confirmed'].includes(o.status) && pendingDelivery ? (
+            <Toggle label="Hold stock for this order"><HoldStock order={o} onDone={reload} /></Toggle>
+          ) : null}
+        </Card>
+      ) : null}
+
       <div className="grid no-print">
         <Card title="Deliveries" id="deliveries">
           <Table rows={o.deliveries} empty="Nothing delivered yet." rowHref={(r) => `/sales/deliveries/${r.id}`} columns={[
@@ -172,6 +190,56 @@ function PartialDelivery({ order, onDone }: { order: any; onDone: () => void }) 
             setError((e as Error).message);
           }
         }}>Deliver</button>
+        <ErrorBox error={error} />
+      </div>
+    </div>
+  );
+}
+
+/** Hold stock for the order (a booking): how much of each line, where, until when; serials for items kept by serial. */
+function HoldStock({ order, onDone }: { order: any; onDone: () => void }) {
+  const places = useGet<{ data: { id: string; name: string; type: string; active: boolean }[] }>('/masters/locations');
+  const sellFrom = (places.data?.data ?? []).filter((l) => l.active && ['stores', 'showroom', 'demo', 'franchise'].includes(l.type));
+  const fallback = sellFrom.find((l) => l.type === (order.channel === 'store' ? 'showroom' : 'stores'))?.id ?? '';
+  const [where, setWhere] = useState('');
+  const [until, setUntil] = useState('');
+  const [qty, setQty] = useState<Record<string, string>>({});
+  const [serials, setSerials] = useState<Record<string, string[]>>({});
+  const [error, setError] = useState<string | null>(null);
+  const at = where || fallback;
+  const open = order.lines.filter((l: any) => Number(l.delivered_qty) < Number(l.qty));
+  return (
+    <div>
+      <div className="form">
+        <label><span>Held at</span><select value={at} onChange={(e) => setWhere(e.target.value)}>{sellFrom.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
+        <label><span>Held until</span><input type="date" value={until} onChange={(e) => setUntil(e.target.value)} /><small className="muted">Empty: until it is delivered</small></label>
+      </div>
+      <Table rows={open} columns={[
+        { key: 'item_name', title: 'Item', render: (r) => (
+          <>
+            {r.item_name}
+            {r.is_serialised ? <SerialPicker itemId={r.item_id} locationId={at || null} qty={Number(qty[r.id] || 0)} value={serials[r.id] ?? []}
+              onChange={(s) => { setSerials({ ...serials, [r.id]: s }); setQty({ ...qty, [r.id]: String(s.length) }); }} /> : null}
+          </>
+        ) },
+        { key: 'pending', title: 'Still to deliver', align: 'right', render: (r) => num(sub(r.qty, r.delivered_qty)) },
+        { key: 'hold', title: 'Hold', align: 'right', render: (r) => (
+          <input type="number" min="0" step="any" style={{ width: 90 }} value={qty[r.id] ?? ''} onChange={(e) => setQty({ ...qty, [r.id]: e.target.value })} />
+        ) },
+      ]} />
+      <div className="form-foot" style={{ marginTop: 10 }}>
+        <button type="button" className="primary" onClick={async () => {
+          setError(null);
+          try {
+            const lines = Object.entries(qty).filter(([, q]) => Number(q) > 0)
+              .map(([order_line_id, q]) => ({ order_line_id, qty: q, location_id: at, ...(serials[order_line_id]?.length ? { serials: serials[order_line_id] } : {}) }));
+            await post(`/sales/orders/${order.id}/reservations`, { lines, expires_on: until || null });
+            setQty({}); setSerials({});
+            onDone();
+          } catch (e) {
+            setError((e as Error).message);
+          }
+        }}>Hold</button>
         <ErrorBox error={error} />
       </div>
     </div>

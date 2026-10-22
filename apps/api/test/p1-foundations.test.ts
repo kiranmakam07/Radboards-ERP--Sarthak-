@@ -261,3 +261,70 @@ describe('0027 unit serials and batches', () => {
     await expectBooksHealthy(w);
   });
 });
+
+describe('0028 stock reservations', () => {
+  const onHandRow = async (sku: string) => (await (await w.as('stores')).get('/api/stock/on-hand?include_zero=true').expect(200)).body.data.find((r: any) => r.sku === sku);
+  const order = async (lines: object[], extra: object = {}) => {
+    const sales = await w.as('sales');
+    const o = (await sales.post('/api/sales/orders').send({ channel: 'store', party_id: id.franchisee, lines, ...extra }).expect(201)).body.data;
+    return (await sales.get(`/api/sales/orders/${o.id}`).expect(200)).body.data;
+  };
+
+  it('holds stock for an order: it is no longer available to anyone else', async () => {
+    await openingStock(w, id.showroom!, [{ item_id: id['HLM-EV']!, qty_change: '5', unit_cost: '700' }]);
+    const sales = await w.as('sales');
+    const o = await order([{ item_id: id['HLM-EV'], qty: 3 }]);
+    id.holdOrder = o.id;
+    await sales.post(`/api/sales/orders/${o.id}/reservations`).send({ lines: [{ order_line_id: o.lines[0].id, qty: 3, location_id: id.showroom }], expires_on: addDays(istDate(), 7) }).expect(201);
+    expect((await sales.post(`/api/sales/orders/${o.id}/reservations`).send({ lines: [{ order_line_id: o.lines[0].id, qty: 1, location_id: id.showroom }] }).expect(409)).body.error.message)
+      .toMatch(/more HLM-EV than the order still needs/);
+    const row = await onHandRow('HLM-EV');
+    expect([Number(row.showroom_qty), Number(row.reserved_qty), Number(row.available_qty)]).toEqual([5, 3, 2]);
+    const view = await rows<{ qty: string; reserved: string; available: string }>(w.db, sql`
+      select qty::text, reserved::text, available::text from v_stock_on_hand where item_id = ${id['HLM-EV']} and location_id = ${id.showroom}`);
+    expect(view[0]).toEqual({ qty: '5.000', reserved: '3.000', available: '2.000' });
+
+    // The counter can sell the 2 that are free, not the 3 that are held.
+    const store = await w.as('store');
+    const sell = (qty: number) => store.post('/api/sales/quick-bill').send({ lines: [{ item_id: id['HLM-EV'], qty }], payments: [{ mode: 'cash', amount: qty * 1050 }] });
+    expect((await sell(3).expect(409)).body.error.message).toMatch(/Only 2.000 of HLM-EV is free here: 3.000 is reserved for other orders/);
+    await sell(2).expect(201);
+  });
+
+  it('delivering the order uses up what was held for it', async () => {
+    const sales = await w.as('sales');
+    await sales.post(`/api/sales/orders/${id.holdOrder}/confirm`).send({}).expect(200);
+    await sales.post(`/api/sales/orders/${id.holdOrder}/deliver`).send({ location_id: id.showroom }).expect(201);
+    const o = (await sales.get(`/api/sales/orders/${id.holdOrder}`).expect(200)).body.data;
+    expect(o.reservations.map((r: any) => r.status)).toEqual(['fulfilled']);
+    expect(Number((await onHandRow('HLM-EV')).reserved_qty)).toBe(0);
+  });
+
+  it('holds a named unit: it cannot be sold to someone else or moved, until it is let go', async () => {
+    const sales = await w.as('sales');
+    const o = await order([{ item_id: id.ev, qty: 1 }]);
+    const res = await sales.post(`/api/sales/orders/${o.id}/reservations`).send({ lines: [{ order_line_id: o.lines[0].id, qty: 1, location_id: id.showroom, serials: ['EV002'] }] }).expect(201);
+    const [ev002] = await rows<{ status: string }>(w.db, sql`select status::text from units where serial_no = 'EV002'`);
+    expect(ev002!.status).toBe('reserved');
+    const quick = await (await w.as('store')).post('/api/sales/quick-bill').send({ lines: [{ item_id: id.ev, qty: 1, serials: ['EV002'] }], payments: [{ mode: 'upi', amount: 84000 }] }).expect(409);
+    expect(quick.body.error.message).toMatch(/EV-X1 EV002 is reserved for another order/);
+    await (await w.as('stores')).post('/api/stock/transfers').send({ from_location_id: id.showroom, to_location_id: id.stores, reason: 'Back', lines: [{ item_id: id.ev, qty: 1, serials: ['EV002'] }] }).expect(409);
+
+    await sales.post(`/api/sales/reservations/${res.body.data[0].id}/release`).send({}).expect(200);
+    expect((await rows<{ status: string }>(w.db, sql`select status::text from units where serial_no = 'EV002'`))[0]!.status).toBe('available');
+
+    // Held again, then the hold runs out: the next reservation or delivery lets it go.
+    await sales.post(`/api/sales/orders/${o.id}/reservations`).send({ lines: [{ order_line_id: o.lines[0].id, qty: 1, location_id: id.showroom, serials: ['EV002'] }], expires_on: istDate() }).expect(201);
+    await w.db.execute(sql`update stock_reservations set expires_on = ${addDays(istDate(), -1)}::date where status = 'open' and unit_id is not null`);
+    // (a demo unit can be held for a customer too)
+    const other = await order([{ item_id: id.ev, qty: 1 }]);
+    await sales.post(`/api/sales/orders/${other.id}/reservations`).send({ lines: [{ order_line_id: other.lines[0].id, qty: 1, location_id: id.demo, serials: ['EV001'] }] }).expect(201);
+    expect((await rows<{ status: string }>(w.db, sql`select status::text from units where serial_no = 'EV002'`))[0]!.status).toBe('available');
+
+    // Cancelling an order lets its holds go.
+    await sales.post(`/api/sales/orders/${o.id}/reservations`).send({ lines: [{ order_line_id: o.lines[0].id, qty: 1, location_id: id.showroom, serials: ['EV002'] }] }).expect(201);
+    await sales.post(`/api/sales/orders/${o.id}/cancel`).send({ reason: 'Customer went elsewhere' }).expect(200);
+    expect((await sales.get(`/api/sales/orders/${o.id}`).expect(200)).body.data.reservations.map((r: any) => r.status)).toEqual(['released', 'expired', 'released']);
+    expect((await rows<{ status: string }>(w.db, sql`select status::text from units where serial_no = 'EV002'`))[0]!.status).toBe('available');
+  });
+});
