@@ -31,6 +31,7 @@ import { paymentsRouter } from './modules/payments';
 import { myPayslipRouter, payrollRouter, publicPayslipRouter } from './modules/payroll';
 import { projectsRouter } from './modules/projects';
 import { purchasingRouter } from './modules/purchasing';
+import { reservationsRouter } from './modules/reservations';
 import { salesRouter } from './modules/sales';
 import { publicSharesRouter, sharesRouter } from './modules/shares';
 import { tdsRouter } from './modules/tds';
@@ -176,6 +177,7 @@ export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   app.use('/api/crm', crmRouter(db, deps));
   // Sales
   app.use('/api/sales/online', onlineRouter(db, deps));
+  app.use('/api/sales', reservationsRouter(db));
   app.use('/api/sales', salesRouter(db));
   // Stores
   app.use('/api/purchasing', purchasingRouter(db));

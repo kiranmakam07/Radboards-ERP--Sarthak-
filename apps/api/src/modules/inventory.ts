@@ -8,6 +8,7 @@ import { postJournal } from '../core/journal';
 import { nextNumber } from '../core/numbering';
 import { lockItems, onHand, stockIn, stockOut, valuation } from '../core/stock';
 import { cleanSerials, needsSerials, unitsBySerial, unitsIn, unitsMove, unitsOut } from '../core/units';
+import { assertFree } from './reservations';
 import { rows, type DB } from '../db/client';
 import {
   items, locations, stockAdjustmentLines, stockAdjustments, stockMovements, stockTransferLines, stockTransfers,
@@ -65,6 +66,8 @@ export async function createTransfer(
     const available = await onHand(tx, item.id, from.id);
     // A transfer must move goods that are physically there: never allowed to go negative.
     if (available.lt(q)) throw conflict(`Only ${fmtQty(available)} of ${item.name} in ${from.name}`);
+    // Nor stock held for an order.
+    if (!needsSerials(item)) await assertFree(ctx, item, from.id, q, null);
     const v = await valuation(tx, item.id);
     const unitCost = v.qty.gt(0) ? round2(v.value.div(v.qty)) : D(item.purchaseCost);
     const value = round2(q.times(unitCost));
@@ -231,7 +234,9 @@ export function inventoryRouter(db: DB) {
              coalesce(sum(s.qty) filter (where l.type = 'job_work'), 0) as job_work_qty,
              -- demo units, the workshop, a franchisee's store, on the road: ours, but not on the shelf to sell
              coalesce(sum(s.qty) filter (where l.type in ('service_bay', 'demo', 'franchise', 'in_transit')), 0) as elsewhere_qty,
-             coalesce(sum(s.qty) filter (where l.type in ('stores', 'showroom')), 0) as available_qty,
+             -- held for orders (reservations), and what is left to sell: on the shelf less what is held
+             coalesce(sum(s.reserved) filter (where l.type in ('stores', 'showroom')), 0) as reserved_qty,
+             coalesce(sum(s.available) filter (where l.type in ('stores', 'showroom')), 0) as available_qty,
              coalesce(max(v.value), 0) as value, max(v.avg_cost) as avg_cost
         from items i
         left join v_stock_on_hand s on s.item_id = i.id

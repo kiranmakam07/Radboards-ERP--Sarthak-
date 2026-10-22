@@ -27,6 +27,7 @@ import { captureLead, convertLead, sourceIdByName } from './leads';
 import { applyCredit, assertCreditsCovered, creditsFor, unapplyAllOn, unapplyCredit } from './credits';
 import { cancelPayment, createPayment } from './payments';
 import { partyBalance, type Party } from './parties';
+import { assertFree, expireReservations, fulfil, release, reservationsOf } from './reservations';
 
 /**
  * Selling, from the quote to the invoice.
@@ -312,6 +313,7 @@ export async function cancelOrder(ctx: Ctx, id: string, reason: string): Promise
   // "Cancelled before delivery" (PRD 6.1). After delivery the route is a credit note.
   if (lines.some((l) => D(l.deliveredQty).gt(0))) throw conflict('Goods have been delivered. Raise a credit note instead of cancelling.');
   const [updated] = await tx.update(salesOrders).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(salesOrders.id, id)).returning();
+  await release(ctx, { orderId: id }, `Order cancelled: ${reason}`);
   await audit(ctx, 'sales_order', id, 'cancel', { status: order.status }, { status: 'cancelled', reason });
   return updated!;
 }
@@ -358,6 +360,7 @@ export async function deliverOrder(
   if ((UNSELLABLE_LOCATION_TYPES as readonly string[]).includes(location.type)) throw badRequest(`Goods at ${location.name} cannot be delivered from there`);
 
   const date = input.date ?? istDate();
+  await expireReservations(ctx);
   const itemRows = await lockItems(tx, want.map((w) => w.line.itemId));
   const itemById = new Map(itemRows.map((i) => [i.id, i]));
   const { number } = await nextNumber(tx, 'delivery', date);
@@ -374,13 +377,21 @@ export async function deliverOrder(
     const serials = needsSerials(item) ? cleanSerials(item, w.qty, w.serials) : null;
     let soldUnits: string[] = [];
     if (serials) {
+      // A unit reserved can go only on the order it is reserved for.
+      const held = await rows<{ serial_no: string; sales_order_id: string }>(tx, sql`
+        select u.serial_no, r.sales_order_id from units u join stock_reservations r on r.unit_id = u.id and r.status = 'open'
+         where u.item_id = ${item.id} and u.status = 'reserved'`);
+      const others = held.find((h) => serials.includes(h.serial_no) && h.sales_order_id !== orderId);
+      if (others) throw conflict(`${item.name} ${others.serial_no} is reserved for another order`);
       const out = await unitsOut(ctx, {
         item, locationId, serials, movementType: 'sale_out', refType: 'delivery', refId: delivery!.id, event: 'sold', status: 'sold', soldOn: date,
+        fromStatuses: ['available', 'demo', 'reserved'],
       });
       cogs = cogs.plus(out.value);
       unitCost = out.value.div(w.qty).toDecimalPlaces(2);
       soldUnits = out.units.map((u) => u.id);
     } else if (item.isStockItem) {
+      await assertFree(ctx, item, locationId, w.qty, orderId);
       const out = await stockOut(ctx, {
         itemId: item.id, locationId, qty: w.qty, movementType: 'sale_out', refType: 'delivery', refId: delivery!.id,
         itemName: item.name, fallbackCost: item.purchaseCost,
@@ -395,6 +406,7 @@ export async function deliverOrder(
     if (soldUnits.length) {
       await tx.update(units).set({ soldDeliveryLineId: dl!.id, soldInvoiceLineId: null }).where(inArray(units.id, soldUnits));
     }
+    if (item.isStockItem) await fulfil(ctx, w.line.id, locationId, w.qty, soldUnits);
     await tx
       .update(salesOrderLines)
       .set({ deliveredQty: fmtQty(D(w.line.deliveredQty).plus(w.qty)) })
@@ -1012,6 +1024,7 @@ export function salesRouter(db: DB) {
            where d.order_id = ${id} order by d.delivered_at`),
         invoices: await rows(db, sql`
           select id, doc_type, invoice_no, invoice_date, grand_total, status from invoices where order_id = ${id} order by created_at`),
+        reservations: await reservationsOf(db, id),
         company: await getCompany(db),
       },
     });

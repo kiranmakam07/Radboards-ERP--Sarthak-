@@ -9,7 +9,7 @@ import {
   INTERVAL_UNITS, INTERVIEW_MODES, INTERVIEW_RESULTS, INTERVIEW_STATUSES, INVOICE_DOC_TYPES, INVOICE_STATUSES, ITEM_TYPES,
   LEAD_ACTIVITY_TYPES, LEAD_STAGES, LOCATION_TYPES, MOVEMENT_TYPES, OPENING_STATUSES, ORDER_STATUSES, PARTY_TYPES,
   PAYMENT_DIRECTIONS, PAYMENT_MODES, PO_STATUSES, PROJECT_STATUSES, REJECT_REASONS, ROLES, TASK_FREQUENCIES, TASK_STATUSES,
-  UNIT_STATUSES,
+  RESERVATION_STATUSES, UNIT_STATUSES,
 } from '@radcore/shared';
 
 // Money is numeric(12,2) in INR, quantities numeric(12,3) (PRD section 8).
@@ -27,6 +27,7 @@ const stamps = {
 
 export const roleEnum = pgEnum('user_role', ROLES);
 export const unitStatusEnum = pgEnum('unit_status', UNIT_STATUSES);
+export const reservationStatusEnum = pgEnum('reservation_status', RESERVATION_STATUSES);
 export const partyTypeEnum = pgEnum('party_type', PARTY_TYPES);
 export const itemTypeEnum = pgEnum('item_type', ITEM_TYPES);
 export const locationTypeEnum = pgEnum('location_type', LOCATION_TYPES);
@@ -626,6 +627,30 @@ export const deliveryLines = pgTable('delivery_lines', {
   /** The serials handed over, for a serialised item (printed on the challan). */
   serials: jsonb('serials').$type<string[]>(),
 }, (t) => [index('delivery_lines_delivery_idx').on(t.deliveryId), check('delivery_lines_qty_pos', sql`${t.qty} > 0`)]);
+
+/**
+ * Stock held for one sales order (a booking): a quantity at a place, or a named unit. Available stock
+ * is on hand less the open reservations (v_stock_on_hand.available); delivering the order fulfils them.
+ */
+export const stockReservations = pgTable('stock_reservations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  itemId: uuid('item_id').notNull().references(() => items.id),
+  locationId: uuid('location_id').notNull().references(() => locations.id),
+  unitId: uuid('unit_id').references(() => units.id),
+  qty: qty('qty').notNull(),
+  salesOrderId: uuid('sales_order_id').notNull().references(() => salesOrders.id),
+  salesOrderLineId: uuid('sales_order_line_id').references(() => salesOrderLines.id),
+  /** Held until this day; after it the stock is free again. Empty: until delivered or let go. */
+  expiresOn: date('expires_on'),
+  status: reservationStatusEnum('status').notNull().default('open'),
+  closedAt: ts('closed_at'),
+  ...stamps,
+}, (t) => [
+  index('stock_reservations_item_loc_idx').on(t.itemId, t.locationId),
+  index('stock_reservations_order_idx').on(t.salesOrderId),
+  check('stock_reservations_qty_pos', sql`${t.qty} > 0`),
+  check('stock_reservations_unit_qty_chk', sql`${t.unitId} is null or ${t.qty} = 1`),
+]);
 
 // ----------------------------------------------------------------------------
 // 8.7 invoices - legal record, immutable once issued (see triggers)
