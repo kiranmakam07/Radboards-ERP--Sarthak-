@@ -130,6 +130,13 @@ export const branches = pgTable('branches', {
 /** Every row belongs to an entity; until a second one exists, the default one (rc_default_entity()). */
 const entityId = () => uuid('entity_id').notNull().default(sql`rc_default_entity()`).references((): AnyPgColumn => entities.id);
 
+/**
+ * The currency a supplier's document or a payment is in, and the rupees one unit of it was worth
+ * that day. The books stay in rupees: amounts on the document are rupees at this rate.
+ */
+const currency = () => char('currency', { length: 3 }).notNull().default('INR');
+const fxRate = () => numeric('fx_rate', { precision: 12, scale: 6 }).notNull().default('1');
+
 export const numberSeries = pgTable('number_series', {
   id: uuid('id').primaryKey().defaultRandom(),
   docType: text('doc_type').notNull(),
@@ -798,11 +805,13 @@ export const purchaseOrders = pgTable('purchase_orders', {
   entityId: entityId(),
   supplierId: uuid('supplier_id').notNull().references(() => parties.id),
   status: poStatusEnum('status').notNull().default('draft'),
+  currency: currency(),
+  fxRate: fxRate(),
   orderDate: date('order_date').notNull(),
   expectedDate: date('expected_date'),
   notes: text('notes'),
   ...stamps,
-}, (t) => [index('purchase_orders_supplier_idx').on(t.supplierId)]);
+}, (t) => [index('purchase_orders_supplier_idx').on(t.supplierId), check('purchase_orders_fx_rate_pos', sql`${t.fxRate} > 0`)]);
 
 export const purchaseOrderLines = pgTable('purchase_order_lines', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -830,6 +839,8 @@ export const purchaseBills = pgTable('purchase_bills', {
   purchaseOrderId: uuid('purchase_order_id').references(() => purchaseOrders.id),
   againstBillId: uuid('against_bill_id').references((): AnyPgColumn => purchaseBills.id),
   placeOfSupply: char('place_of_supply', { length: 2 }).notNull(),
+  currency: currency(),
+  fxRate: fxRate(),
   taxableTotal: money('taxable_total').notNull(),
   cgstTotal: money('cgst_total').notNull().default('0'),
   sgstTotal: money('sgst_total').notNull().default('0'),
@@ -849,6 +860,7 @@ export const purchaseBills = pgTable('purchase_bills', {
   ...stamps,
 }, (t) => [
   unique('purchase_bills_no_fy_uq').on(t.docType, t.billNo, t.fy),
+  check('purchase_bills_fx_rate_pos', sql`${t.fxRate} > 0`),
   uniqueIndex('purchase_bills_supplier_inv_uq').on(t.supplierId, t.supplierInvoiceNo)
     .where(sql`${t.docType} = 'bill' and ${t.status} = 'posted' and ${t.supplierInvoiceNo} is not null`),
   index('purchase_bills_supplier_idx').on(t.supplierId),
@@ -960,8 +972,11 @@ export const payments = pgTable('payments', {
   partyId: uuid('party_id').references(() => parties.id),
   mode: paymentModeEnum('mode').notNull(),
   accountId: uuid('account_id').notNull().references(() => accounts.id),
-  /** The money that actually moved through cash or the bank. */
+  /** The money that actually moved through cash or the bank, in rupees. */
   amount: money('amount').notNull(),
+  /** Paid in a foreign currency: which, and its rate in rupees on the day (amount / fx_rate is the foreign sum). */
+  currency: currency(),
+  fxRate: fxRate(),
   /**
    * Tax held back on this payment: by us from a supplier (money out), or by the customer from
    * us (money in). The party's account is settled for amount + tds_amount, and that much can be
@@ -979,6 +994,7 @@ export const payments = pgTable('payments', {
   index('payments_party_idx').on(t.partyId),
   check('payments_amount_pos', sql`${t.amount} > 0`),
   check('payments_tds_chk', sql`${t.tdsAmount} >= 0`),
+  check('payments_fx_rate_pos', sql`${t.fxRate} > 0`),
 ]);
 
 /** TDS paid over to the government: what we held back from vendors, or from salaries. */
@@ -1005,7 +1021,14 @@ export const paymentAllocations = pgTable('payment_allocations', {
   paymentId: uuid('payment_id').notNull().references(() => payments.id),
   invoiceId: uuid('invoice_id').references(() => invoices.id),
   purchaseBillId: uuid('purchase_bill_id').references(() => purchaseBills.id),
+  /** Of the payment, in rupees at the payment's rate. */
   amount: money('amount').notNull(),
+  /**
+   * A foreign bill paid at a different rate than it was booked at: the rupees the bill is cleared by
+   * beyond what was paid (a gain, +) or short of it (a loss, -). The bill is cleared by amount + this;
+   * the difference is booked to Foreign Exchange Gain / Loss.
+   */
+  fxDifference: money('fx_difference').notNull().default('0'),
   ...stamps,
 }, (t) => [
   index('payment_allocations_payment_idx').on(t.paymentId),

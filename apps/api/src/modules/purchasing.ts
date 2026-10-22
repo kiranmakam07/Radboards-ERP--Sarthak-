@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  D, PO_STATUSES, addDays, computeLine, computeTotals, isInterState, istDate, money, qty as fmtQty,
+  round2, D, PO_STATUSES, addDays, computeLine, computeTotals, isInterState, istDate, money, qty as fmtQty,
   type LineTax,
 } from '@radcore/shared';
 import { audit } from '../core/audit';
@@ -20,7 +20,7 @@ import {
 } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
 import {
-  emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSerials, zSignedMoney, zText, type Ctx,
+  emptyToNull, fxOf, inTx, sendList, zCurrency, zDate, zFxRate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSerials, zSignedMoney, zText, type Ctx,
 } from '../lib/http';
 
 import { chargeState } from './jobwork';
@@ -52,8 +52,11 @@ async function loadSupplier(tx: DB, id: string) {
 
 type PoLineInput = { itemId: string; qty: string; rate?: string | null };
 
-/** PO lines, at the GST rate in force on the PO date (core/taxrates.ts). */
-async function buildPoLines(tx: DB, input: PoLineInput[], date: string) {
+/**
+ * PO lines, at the GST rate in force on the PO date (core/taxrates.ts). A PO in a foreign currency
+ * gives its rates in that currency; they are kept in rupees at the PO's rate.
+ */
+async function buildPoLines(tx: DB, input: PoLineInput[], date: string, fxRate: string = '1') {
   if (input.length === 0) throw badRequest('Add at least one item');
   const found = await tx.select().from(items).where(inArray(items.id, [...new Set(input.map((l) => l.itemId))]));
   const byId = new Map(found.map((i) => [i.id, i]));
@@ -64,7 +67,8 @@ async function buildPoLines(tx: DB, input: PoLineInput[], date: string) {
     // Goods come in through the PO -> inward flow; services are booked as a bill or expense.
     if (!item.isStockItem) throw badRequest(`${item.name} is a service. Purchase orders are for goods.`);
     const { gstRate } = await taxRateOn(tx, item, date);
-    lines.push({ itemId: item.id, qty: fmtQty(l.qty), rate: money(l.rate ?? item.purchaseCost), gstRate, sort: idx });
+    const rate = l.rate != null ? round2(D(l.rate).times(fxRate)) : D(item.purchaseCost);
+    lines.push({ itemId: item.id, qty: fmtQty(l.qty), rate: money(rate), gstRate, sort: idx });
   }
   return lines;
 }
@@ -72,17 +76,21 @@ async function buildPoLines(tx: DB, input: PoLineInput[], date: string) {
 /** Purchase order: supplier, items, quantity, rate, expected date. No indents, no approval chain (PRD 7.7). */
 export async function createPurchaseOrder(
   ctx: Ctx,
-  input: { supplierId: string; orderDate: string; expectedDate?: string | null; notes?: string | null; lines: PoLineInput[] },
+  input: {
+    supplierId: string; orderDate: string; expectedDate?: string | null; notes?: string | null; lines: PoLineInput[];
+    currency?: string; fxRate?: string | null;
+  },
 ): Promise<PO> {
   const { tx } = ctx;
   await loadSupplier(tx, input.supplierId);
-  const lines = await buildPoLines(tx, input.lines, input.orderDate);
+  const fx = fxOf(input.currency ?? 'INR', input.fxRate);
+  const lines = await buildPoLines(tx, input.lines, input.orderDate, fx.fxRate);
   const { number } = await nextNumber(tx, 'purchase_order', input.orderDate);
   const [po] = await tx
     .insert(purchaseOrders)
     .values({
       poNo: number, supplierId: input.supplierId, orderDate: input.orderDate, expectedDate: input.expectedDate ?? null,
-      notes: input.notes ?? null, createdBy: ctx.user?.id ?? null,
+      currency: fx.currency, fxRate: fx.fxRate, notes: input.notes ?? null, createdBy: ctx.user?.id ?? null,
     })
     .returning();
   await tx.insert(purchaseOrderLines).values(lines.map((l) => ({ ...l, purchaseOrderId: po!.id })));
@@ -241,6 +249,8 @@ export async function createPurchaseBill(
   input: {
     supplierId: string; purchaseOrderId?: string | null; supplierInvoiceNo: string; billDate: string; dueDate?: string | null;
     roundOff?: string | null; notes?: string | null; lines: BillLineInput[];
+    /** A bill in a foreign currency: its rates are in that currency and are kept in rupees at this rate. */
+    currency?: string; fxRate?: string | null;
     /** The job work challan this bill is the job worker's charge for. */
     jobWorkId?: string | null;
   },
@@ -260,12 +270,13 @@ export async function createPurchaseBill(
   // Supplier in another state charges IGST; same state charges CGST + SGST.
   const inter = isInterState(company.state_code, supplier.stateCode ?? company.state_code);
 
+  const fx = fxOf(input.currency ?? 'INR', input.fxRate);
   const resolved = input.lines.map((l) => {
     const pol = l.poLineId ? poLines.find((p) => p.id === l.poLineId) : undefined;
     if (l.poLineId && !pol) throw badRequest('A bill line points to a PO line that is not on this purchase order');
     const itemId = pol?.itemId ?? l.itemId;
     if (!itemId) throw badRequest('Each bill line needs an item');
-    return { ...l, itemId, pol };
+    return { ...l, rate: money(round2(D(l.rate).times(fx.fxRate))), itemId, pol };
   });
   const itemRows = await tx.select().from(items).where(inArray(items.id, [...new Set(resolved.map((l) => l.itemId))]));
   const itemById = new Map(itemRows.map((i) => [i.id, i]));
@@ -329,7 +340,7 @@ export async function createPurchaseBill(
     .values({
       docType: 'bill', billNo: number, fy, supplierInvoiceNo: input.supplierInvoiceNo, billDate: input.billDate,
       dueDate: input.dueDate ?? addDays(input.billDate, supplier.paymentTermsDays ?? 0), supplierId: supplier.id,
-      purchaseOrderId: input.purchaseOrderId ?? null, placeOfSupply: company.state_code,
+      purchaseOrderId: input.purchaseOrderId ?? null, placeOfSupply: company.state_code, currency: fx.currency, fxRate: fx.fxRate,
       taxableTotal: money(totals.taxableTotal), cgstTotal: money(totals.cgstTotal), sgstTotal: money(totals.sgstTotal),
       igstTotal: money(totals.igstTotal), roundOff: money(roundOff), grandTotal: money(grand),
       mismatches: mismatches.length ? mismatches : null, notes: input.notes ?? null, createdBy: ctx.user?.id ?? null,
@@ -542,9 +553,13 @@ export function purchasingRouter(db: DB) {
     const b = z.object({
       supplier_id: zId, order_date: zDate.default(() => istDate()), expected_date: emptyToNull(zDate).optional(),
       notes: emptyToNull(z.string().trim().max(2000)).optional(), lines: z.array(zPoLine).min(1).max(200),
+      currency: zCurrency, fx_rate: emptyToNull(zFxRate).optional(),
     }).parse(req.body);
     const po = await inTx(db, req, (ctx) =>
-      createPurchaseOrder(ctx, { supplierId: b.supplier_id, orderDate: b.order_date, expectedDate: b.expected_date, notes: b.notes, lines: b.lines.map(toPoLine) }));
+      createPurchaseOrder(ctx, {
+        supplierId: b.supplier_id, orderDate: b.order_date, expectedDate: b.expected_date, notes: b.notes, lines: b.lines.map(toPoLine),
+        currency: b.currency, fxRate: b.fx_rate,
+      }));
     res.status(201).json({ data: po });
   });
 
@@ -555,7 +570,7 @@ export function purchasingRouter(db: DB) {
       const [po] = await ctx.tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).for('update');
       must(po, 'Purchase order');
       if (po!.status !== 'draft') throw conflict('Only a draft PO can be edited');
-      const lines = await buildPoLines(ctx.tx, b.lines.map(toPoLine), po!.orderDate);
+      const lines = await buildPoLines(ctx.tx, b.lines.map(toPoLine), po!.orderDate, po!.fxRate);
       await ctx.tx.delete(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, id));
       await ctx.tx.insert(purchaseOrderLines).values(lines.map((l) => ({ ...l, purchaseOrderId: id })));
       await audit(ctx, 'purchase_order', id, 'update_lines', null, lines);
@@ -747,6 +762,7 @@ export function purchasingRouter(db: DB) {
       round_off: emptyToNull(zSignedMoney).optional(),
       notes: emptyToNull(z.string().trim().max(2000)).optional(),
       job_work_id: emptyToNull(zId).optional(),
+      currency: zCurrency, fx_rate: emptyToNull(zFxRate).optional(),
       lines: z.array(z.object({
         po_line_id: emptyToNull(zId).optional(), item_id: emptyToNull(zId).optional(), qty: zQty, rate: zMoney,
         description: emptyToNull(z.string().trim().max(300)).optional(),
@@ -755,7 +771,7 @@ export function purchasingRouter(db: DB) {
     const bill = await inTx(db, req, (ctx) =>
       createPurchaseBill(ctx, {
         supplierId: b.supplier_id, purchaseOrderId: b.purchase_order_id, supplierInvoiceNo: b.supplier_invoice_no, billDate: b.bill_date,
-        dueDate: b.due_date, roundOff: b.round_off, notes: b.notes, jobWorkId: b.job_work_id,
+        dueDate: b.due_date, roundOff: b.round_off, notes: b.notes, jobWorkId: b.job_work_id, currency: b.currency, fxRate: b.fx_rate,
         lines: b.lines.map((l) => ({ poLineId: l.po_line_id, itemId: l.item_id, qty: l.qty, rate: l.rate, description: l.description })),
       }));
     res.status(201).json({ data: bill });

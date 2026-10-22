@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { LineEditor, toApiLines, type ItemLite, type Line } from '@/components/lines';
-import { Card, ErrorBox, Page } from '@/components/ui';
+import { Card, CurrencyFields, ErrorBox, Page, currencyBody } from '@/components/ui';
 import { post, useGet } from '@/lib/api';
 
 export default function NewPurchaseOrderPage() {
@@ -14,12 +14,13 @@ export default function NewPurchaseOrderPage() {
   const [expected, setExpected] = useState('');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
+  const [money, setMoney] = useState({ currency: 'INR', fx_rate: '' });
   const [error, setError] = useState<string | null>(null);
 
   async function save() {
     setError(null);
     try {
-      const res = await post('/purchasing/orders', { supplier_id: supplierId, expected_date: expected, notes, lines: toApiLines(lines, false) });
+      const res = await post('/purchasing/orders', { supplier_id: supplierId, expected_date: expected, notes, lines: toApiLines(lines, false), ...currencyBody(money) });
       router.push(`/purchasing/orders/${res.data.id}`);
     } catch (e) {
       setError((e as Error).message);
@@ -36,6 +37,7 @@ export default function NewPurchaseOrderPage() {
             </select>
           </label>
           <label><span>Expected date</span><input type="date" value={expected} onChange={(e) => setExpected(e.target.value)} /></label>
+          <CurrencyFields value={money} onChange={setMoney} />
           <label className="wide"><span>Notes</span><textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
         </div>
       </Card>

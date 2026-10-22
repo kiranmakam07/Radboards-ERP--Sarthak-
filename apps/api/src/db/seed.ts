@@ -75,6 +75,8 @@ const COA: Coa[] = [
   { code: '5280', name: 'Bank Charges', type: 'expense', parent: '5000' },
   { code: '5290', name: 'Miscellaneous Expenses', type: 'expense', parent: '5000' },
   { code: '5900', name: 'Round Off', type: 'expense', key: 'round_off', parent: '5000' },
+  // A loss is a debit, a gain a credit: paying a foreign bill at a different rate than it was booked at.
+  { code: '5910', name: 'Foreign Exchange Gain / Loss', type: 'expense', key: 'forex_gain_loss', parent: '5000' },
 ];
 
 const EXPENSE_CATEGORIES: [string, string][] = [

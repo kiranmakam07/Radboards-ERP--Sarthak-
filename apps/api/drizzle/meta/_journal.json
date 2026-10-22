@@ -218,6 +218,13 @@
       "when": 1792688059539,
       "tag": "0030_tax_rates",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792688387117,
+      "tag": "0031_currency",
+      "breakpoints": true
     }
   ]
 }

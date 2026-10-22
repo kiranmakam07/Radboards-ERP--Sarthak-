@@ -3,7 +3,7 @@
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { istDate, PAYMENT_MODES, tdsOn } from '@radcore/shared';
-import { ActionButton, Badge, Card, CsvLink, ErrorBox, Loading, Page, Table, Toggle, date, inr, label } from '@/components/ui';
+import { ActionButton, Badge, Card, CsvLink, CurrencyFields, ErrorBox, Loading, Page, Table, Toggle, currencyBody, date, inr, label } from '@/components/ui';
 import { api, post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 import { rupees } from '@/components/charts';
@@ -51,6 +51,7 @@ function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () 
   const accounts = useGet<{ data: any[] }>('/accounting/money-accounts');
   const rates = useGet<{ data: any[] }>('/tds/rates');
   const [tds, setTds] = useState({ on: false, rate_id: '', base: '', amount: '' });
+  const [money, setMoney] = useState({ currency: 'INR', fx_rate: '' });
   const [partyId, setPartyId] = useState(presetParty);
   const [party, setParty] = useState<any>(null);
   const [v, setV] = useState({ amount: '', mode: 'bank_transfer', account_id: '', reference: '', paid_on: istDate(), direction: '' });
@@ -99,6 +100,7 @@ function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () 
         allocations: Object.entries(alloc).filter(([, a]) => Number(a) > 0)
           .map(([docId, amount]) => (direction === 'in' ? { invoice_id: docId, amount } : { purchase_bill_id: docId, amount })),
         ...(held > 0 ? { tds_amount: tds.amount, tds_rate_id: tds.rate_id, tds_base: tds.base } : {}),
+        ...(direction === 'out' ? currencyBody(money) : {}),
       });
       setV({ ...v, amount: '', reference: '' }); setAlloc({}); setTds({ on: false, rate_id: '', base: '', amount: '' });
       const fresh = await api(`/parties/${partyId}`);
@@ -133,6 +135,8 @@ function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () 
         </label>
         <label><span>Reference (UTR / cheque no)</span><input value={v.reference} onChange={(e) => setV({ ...v, reference: e.target.value })} /></label>
         <label><span>Date *</span><input type="date" value={v.paid_on} onChange={(e) => setV({ ...v, paid_on: e.target.value })} /></label>
+        {/* Paying a foreign supplier: the rupees that left the bank, and the rate they bought the currency at. */}
+        {direction === 'out' ? <CurrencyFields value={money} onChange={setMoney} /> : null}
         {canHold && (
           <label className="check"><input type="checkbox" checked={tds.on} onChange={(e) => setTds({ ...tds, on: e.target.checked })} />
             <span>{direction === 'in' ? 'The customer held back TDS' : 'TDS was held back from this payment'}</span></label>
