@@ -20,7 +20,7 @@ import { getSetting } from './settings';
 /** Stable keys for the accounts the posting rules use. Seeded in db/seed.ts. */
 export type SystemAccount =
   | 'cash' | 'bank' | 'debtors' | 'stock' | 'input_cgst' | 'input_sgst' | 'input_igst'
-  | 'creditors' | 'output_cgst' | 'output_sgst' | 'output_igst' | 'grni'
+  | 'creditors' | 'output_cgst' | 'output_sgst' | 'output_igst' | 'output_cess' | 'grni'
   | 'capital' | 'opening_equity' | 'retained_earnings'
   | 'sales' | 'other_income' | 'cogs' | 'purchases' | 'stock_adjustment' | 'round_off'
   | 'staff_advances' | 'salaries_payable' | 'pf_payable' | 'esic_payable' | 'pt_payable' | 'tds_payable' | 'salaries'

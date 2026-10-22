@@ -176,6 +176,13 @@
       "when": 1792504340475,
       "tag": "0024_lead_deal_value",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792672548218,
+      "tag": "0025_gst_40_and_cess",
+      "breakpoints": true
     }
   ]
 }

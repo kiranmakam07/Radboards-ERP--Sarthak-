@@ -182,6 +182,8 @@ export const PERMISSIONS = {
   'audit:read': ['admin', 'owner'],
 
   'items:read': ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin'],
+  // What stock cost us (purchase cost, average cost, stock value, margins). Everyone else sees selling prices only.
+  'costs:read': ['owner', 'stores', 'accounts', 'admin'],
   'items:write': ['admin'],
   'pricelists:write': ['admin'],
   'pricelists:approve': ['owner', 'admin'],
@@ -202,6 +204,8 @@ export const PERMISSIONS = {
   'sales:read': ['owner', 'store', 'sales', 'accounts', 'admin'],
   'sales:write': ['store', 'sales', 'accounts', 'admin'],
   'sales:override_credit': ['owner', 'accounts', 'admin'],
+  // Selling below cost, or at a bigger discount than the seller's own limit (settings: discount_limits).
+  'sales:approve_discount': ['owner', 'accounts', 'admin'],
   'quickbill:create': ['store', 'sales', 'accounts', 'admin'],
   'invoices:read': ['owner', 'store', 'sales', 'accounts', 'admin'],
   'invoices:adjust': ['accounts', 'admin'], // cancel, credit notes

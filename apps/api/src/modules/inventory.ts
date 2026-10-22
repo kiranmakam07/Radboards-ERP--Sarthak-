@@ -212,7 +212,7 @@ export function inventoryRouter(db: DB) {
   });
 
   /** Stock summary and valuation (PRD 7.8 reports). The total equals the Stock in Hand ledger balance. */
-  r.get('/valuation', requirePerm('stock:read'), async (req, res) => {
+  r.get('/valuation', requirePerm('costs:read'), async (req, res) => {
     const data = await rows<{ value: string }>(db, sql`
       select i.id as item_id, i.sku, i.name, i.item_type, i.unit, v.qty, v.avg_cost, v.value
         from v_item_valuation v join items i on i.id = v.item_id

@@ -1,6 +1,6 @@
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
-import { D, type Decimal, isIsoDate, isValidGstin, normaliseGstin, normalisePhone, type Permission, type Role } from '@radcore/shared';
+import { can, D, type Decimal, GST_RATES, isIsoDate, isValidGstin, normaliseGstin, normalisePhone, type Permission, type Role } from '@radcore/shared';
 import type { DB } from '../db/client';
 import { toXlsx } from './xlsx';
 
@@ -11,6 +11,7 @@ import { toXlsx } from './xlsx';
  *   the z* checks money, quantities, dates, phone numbers and GSTINs are read from a request the
  *                 same way everywhere; money and quantities stay as text, never floating point
  *   sendList      any list or report as JSON, or as a CSV or Excel file with ?format=
+ *   hideCosts     what stock cost us stays with the roles that hold costs:read
  */
 
 export type AuthUser = { id: string; name: string; role: Role; phone: string };
@@ -67,12 +68,14 @@ export const zQtyNonNeg = decimalString(3).refine(sized((d) => d.gte(0)), 'canno
 export const zSignedQty = decimalString(3).refine(qtyFits, 'too large');
 export const zGstRate = z.union([z.string(), z.number()]).transform((v, c) => {
   const n = Number(v);
-  if (![0, 5, 12, 18, 28].includes(n)) {
-    c.addIssue({ code: 'custom', message: 'GST rate must be 0, 5, 12, 18 or 28' });
+  if (!(GST_RATES as readonly number[]).includes(n)) {
+    c.addIssue({ code: 'custom', message: `GST rate must be one of ${GST_RATES.join(', ')}` });
     return z.NEVER;
   }
   return n.toFixed(2);
 });
+/** Compensation cess, % of the taxable value. */
+export const zCessRate = decimalString(2).refine(sized((d) => d.gte(0) && d.lte(500)), 'must be between 0 and 500');
 export const zDate = z.string().refine(isIsoDate, 'must be a date (YYYY-MM-DD)');
 /** A calendar month, as payroll and TDS name one. */
 export const zMonth = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'must be a month (YYYY-MM)');
@@ -141,8 +144,50 @@ export function toCsv(data: Record<string, unknown>[], columns?: string[]): stri
 /** True when the caller asked for a file to download rather than JSON. */
 export const wantsFile = (req: Request): boolean => req.query.format === 'csv' || req.query.format === 'xlsx';
 
+// ---------------------------------------------------------------------------
+// Cost price: what stock cost us is for the people who buy it, keep it and keep the books
+// (costs:read: owner, stores, accounts, admin). Sales, the counter and marketing work from selling
+// prices, so for them these keys are taken out of every answer of the routers that carry them
+// (app.ts mounts hideCosts in front of items, sales, purchasing, masters and stock), files included.
+// ---------------------------------------------------------------------------
+export const COST_KEYS = ['purchase_cost', 'unit_cost', 'avg_cost', 'valuation', 'cogs', 'margin', 'margin_pct'] as const;
+
+const snakeKey = (k: string) => k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+
+/** A copy of a JSON-like value without the named keys at any depth; a key matches in camelCase or snake_case. */
+export function withoutKeys(value: unknown, keys: ReadonlySet<string>): unknown {
+  if (Array.isArray(value)) return value.map((v) => withoutKeys(v, keys));
+  if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) if (!keys.has(snakeKey(k))) out[k] = withoutKeys(v, keys);
+    return out;
+  }
+  return value;
+}
+
+/** Whether the signed-in user may see cost price. */
+export const seesCosts = (req: Request): boolean => !!req.user && can(req.user.role, 'costs:read');
+
+/**
+ * Middleware: for a user without costs:read, every answer below it leaves out COST_KEYS and the
+ * `extra` keys (on the stock screens a plain `value` is stock at cost, so it goes too).
+ */
+export function hideCosts(extra: string[] = []) {
+  const keys: ReadonlySet<string> = new Set<string>([...COST_KEYS, ...extra]);
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (seesCosts(req)) return next();
+    const send = res.json.bind(res);
+    res.json = (body: unknown) => send(withoutKeys(body, keys));
+    res.locals.hiddenKeys = keys;
+    next();
+  };
+}
+
 /** Every list/report can be exported with ?format=csv or ?format=xlsx (PRD 7.11). */
-export function sendList(req: Request, res: Response, data: Record<string, unknown>[], name = 'export') {
+export function sendList(req: Request, res: Response, rowsIn: Record<string, unknown>[], name = 'export') {
+  // A file skips res.json, so the keys hideCosts hides are taken out here as well.
+  const hidden = res.locals.hiddenKeys as ReadonlySet<string> | undefined;
+  const data = hidden ? (withoutKeys(rowsIn, hidden) as Record<string, unknown>[]) : rowsIn;
   if (req.query.format === 'xlsx') {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${name}.xlsx"`);

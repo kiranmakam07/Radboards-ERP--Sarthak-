@@ -101,7 +101,7 @@ export function publicInvoiceRouter(db: DB) {
         doc_type: doc.docType, invoice_no: doc.invoiceNo, invoice_date: doc.invoiceDate, due_date: doc.dueDate, status: doc.status, reason: doc.reason,
         place_of_supply: doc.placeOfSupply, tax_inclusive: doc.taxInclusive, party_name: doc.partyName, party_gstin: doc.partyGstin, party_phone: doc.partyPhone,
         billing_address: doc.billingAddress, shipping_address: doc.shippingAddress, taxable_total: doc.taxableTotal, cgst_total: doc.cgstTotal,
-        sgst_total: doc.sgstTotal, igst_total: doc.igstTotal, round_off: doc.roundOff, grand_total: doc.grandTotal,
+        sgst_total: doc.sgstTotal, igst_total: doc.igstTotal, cess_total: doc.cessTotal, round_off: doc.roundOff, grand_total: doc.grandTotal,
         lines: lines.map((l) => ({
           id: l.id, description: l.description, hsn_sac: l.hsnSac, unit: l.unit, qty: l.qty, rate: l.rate, discount: l.discount,
           taxable_value: l.taxableValue, gst_rate: l.gstRate, line_total: l.lineTotal,

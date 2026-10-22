@@ -10,12 +10,14 @@ const TABS = ['On hand', 'Low stock', 'Movements', 'Adjustments & counts'] as co
 
 export default function StockPage() {
   const can = useCan();
+  // Stock at cost (average cost, value) only for costs:read; the API leaves it out for everyone else too.
+  const costs = can('costs:read');
   const [tab, setTab] = useState<(typeof TABS)[number]>('On hand');
   const [q, setQ] = useState('');
   const locations = useGet<{ data: any[] }>('/masters/locations');
   const items = useGet<{ data: any[] }>('/items?limit=2000');
   const onHand = useGet<{ data: any[] }>(tab === 'On hand' ? `/stock/on-hand${qs({ q, include_zero: 'true', limit: 1000 })}` : null);
-  const valuation = useGet<{ total_value: string }>(tab === 'On hand' ? '/stock/valuation' : null);
+  const valuation = useGet<{ total_value: string }>(tab === 'On hand' && costs ? '/stock/valuation' : null);
   const low = useGet<{ data: any[] }>(tab === 'Low stock' ? '/stock/low' : null);
   const moves = useGet<{ data: any[] }>(tab === 'Movements' ? '/stock/movements?limit=200' : null);
   const adjustments = useGet<{ data: any[] }>(tab === 'Adjustments & counts' ? '/stock/adjustments' : null);
@@ -46,7 +48,8 @@ export default function StockPage() {
           </div>
           <Loading loading={onHand.loading} error={onHand.error} />
           <Table rows={onHand.data?.data}
-            chart={{ kind: 'bar', name: 'Stock value', label: (r) => r.name, value: (r) => Number(r.value), format: rupees }} columns={[
+            chart={costs ? { kind: 'bar', name: 'Stock value', label: (r) => r.name, value: (r) => Number(r.value), format: rupees }
+              : { kind: 'bar', name: 'Available', label: (r) => r.name, value: (r) => Number(r.available_qty) }} columns={[
             { key: 'sku', title: 'SKU' }, { key: 'name', title: 'Item' }, { key: 'item_type', title: 'Type', render: (r) => label(r.item_type) },
             { key: 'stores_qty', title: 'Stores', align: 'right', render: (r) => num(r.stores_qty) },
             { key: 'showroom_qty', title: 'Showroom', align: 'right', render: (r) => num(r.showroom_qty) },
@@ -54,8 +57,10 @@ export default function StockPage() {
             { key: 'job_work_qty', title: 'With job workers', align: 'right', render: (r) => (Number(r.job_work_qty) ? num(r.job_work_qty) : '') },
             { key: 'rejected_qty', title: 'Rejected', align: 'right', render: (r) => (Number(r.rejected_qty) ? <span className="error small">{num(r.rejected_qty)}</span> : '') },
             { key: 'reorder_level', title: 'Reorder at', align: 'right', render: (r) => num(r.reorder_level) },
-            { key: 'avg_cost', title: 'Avg cost', align: 'right', render: (r) => inr(r.avg_cost) },
-            { key: 'value', title: 'Value', align: 'right', render: (r) => inr(r.value) },
+            ...(costs ? [
+              { key: 'avg_cost', title: 'Avg cost', align: 'right' as const, render: (r: any) => inr(r.avg_cost) },
+              { key: 'value', title: 'Value', align: 'right' as const, render: (r: any) => inr(r.value) },
+            ] : []),
           ]} />
         </>
       )}
@@ -81,8 +86,10 @@ export default function StockPage() {
             { key: 'location', title: 'Location' },
             { key: 'movement_type', title: 'Type', render: (r) => label(r.movement_type) },
             { key: 'qty', title: 'Qty', align: 'right', render: (r) => <span style={{ color: Number(r.qty) < 0 ? 'var(--danger)' : 'var(--ok)' }}>{Number(r.qty) > 0 ? '+' : ''}{num(r.qty)}</span> },
-            { key: 'unit_cost', title: 'Unit cost', align: 'right', render: (r) => inr(r.unit_cost) },
-            { key: 'value', title: 'Value', align: 'right', render: (r) => inr(r.value) },
+            ...(costs ? [
+              { key: 'unit_cost', title: 'Unit cost', align: 'right' as const, render: (r: any) => inr(r.unit_cost) },
+              { key: 'value', title: 'Value', align: 'right' as const, render: (r: any) => inr(r.value) },
+            ] : []),
             { key: 'ref_type', title: 'Source', render: (r) => label(r.ref_type) },
             { key: 'reason', title: 'Reason' }, { key: 'user_name', title: 'By' },
           ]} />

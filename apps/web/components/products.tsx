@@ -18,8 +18,8 @@ import { useCan } from '@/lib/session';
  * (In the API and the database a product is an "item": /api/items.)
  */
 
-/** The boxes of a product, in the order a person fills them in. */
-export const productFields = (categories: { id: string; name: string }[]): Field[] => [
+/** The boxes of a product, in the order a person fills them in. Purchase cost only for someone who may see costs. */
+export const productFields = (categories: { id: string; name: string }[], { costs = true }: { costs?: boolean } = {}): Field[] => [
   { name: 'name', label: 'Product name', required: true },
   { name: 'sku', label: 'Code (SKU)', required: true, help: 'Short and unique, e.g. CRU-27' },
   { name: 'item_type', label: 'Kind', type: 'select', required: true, options: ITEM_TYPES.map((t) => ({ value: t, label: label(t) })) },
@@ -27,10 +27,11 @@ export const productFields = (categories: { id: string; name: string }[]): Field
   { name: 'unit', label: 'Unit', type: 'select', required: true, options: UNITS.map((u) => ({ value: u, label: u })) },
   { name: 'hsn_sac', label: 'HSN / SAC', help: 'Needed for goods' },
   { name: 'gst_rate', label: 'GST %', type: 'select', required: true, options: GST_RATES.map((r) => ({ value: String(r), label: `${r}%` })) },
+  { name: 'cess_rate', label: 'Cess %', type: 'number', help: 'Compensation cess on top of GST; 0 for most goods' },
   { name: 'retail_price', label: 'Retail price ₹ (with GST)', type: 'number' },
   { name: 'dealer_price', label: 'Dealer price ₹ (before GST)', type: 'number' },
   { name: 'mrp', label: 'MRP ₹', type: 'number' },
-  { name: 'purchase_cost', label: 'Purchase cost ₹', type: 'number' },
+  ...(costs ? [{ name: 'purchase_cost', label: 'Purchase cost ₹', type: 'number' } as Field] : []),
   { name: 'reorder_level', label: 'Reorder level', type: 'number', help: 'Below this, it shows as low on stock' },
   { name: 'barcode', label: 'Barcode' },
 ];
@@ -44,12 +45,13 @@ export const isLow = (p: any) => p.is_stock_item && p.reorder_level !== null && 
 /** "+ New product": the required boxes in a pop-up, then the new product's own page opens to finish it. */
 export function NewProduct({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const can = useCan();
   const categories = useGet<{ data: any[] }>('/masters/item-categories');
   return (
     <FormModal title="New product" submit="Create product" wide onClose={onClose}
       intro={<p className="muted small">Pictures, price lists and stock are added on the product's own page, which opens next.</p>}
-      initial={{ item_type: 'finished_good', gst_rate: '18', unit: 'Nos' }}
-      fields={productFields(categories.data?.data ?? [])}
+      initial={{ item_type: 'finished_good', gst_rate: '18', cess_rate: '0', unit: 'Nos' }}
+      fields={productFields(categories.data?.data ?? [], { costs: can('costs:read') })}
       onSubmit={(v) => post<{ data: { id: string } }>('/items', v)}
       onDone={(r) => router.push(`/items/${r.data.id}`)} />
   );

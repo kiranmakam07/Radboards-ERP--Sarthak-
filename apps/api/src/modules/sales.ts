@@ -3,14 +3,14 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  CHANNELS, D, Decimal, ORDER_STATUSES, PAYMENT_MODES, addDays, amountInWords, can, computeLine, computeTotals,
-  isInterState, istDate, money, qty as fmtQty, STATE_CODES, type Channel, type LineTax, type PaymentMode,
+  CHANNELS, D, Decimal, ORDER_STATUSES, PAYMENT_MODES, addDays, amountInWords, can, computeLine, computeTotals, formatDate, formatINR,
+  isInterState, istDate, money, qty as fmtQty, round2, STATE_CODES, type Channel, type LineTax, type PaymentMode, type Role,
 } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { postJournal, reverseJournals } from '../core/journal';
 import { nextNumber } from '../core/numbering';
-import { getCompany } from '../core/settings';
+import { getCompany, getSetting } from '../core/settings';
 import { locationByType, lockItems, stockIn, stockOut } from '../core/stock';
 import { rows, type DB } from '../db/client';
 import {
@@ -31,7 +31,8 @@ import { partyBalance, type Party } from './parties';
  *
  *   draft (a quote) -> confirmed -> delivered -> invoiced        cancelled: any time before delivery
  *
- * - Confirming checks the customer's credit limit.
+ * - Confirming checks the prices (nothing below cost, no discount over the seller's limit, unless
+ *   someone with sales:approve_discount confirms it) and the customer's credit (limit, overdue bills).
  * - Delivering is the step that takes stock out, at average cost (Dr Cost of Goods Sold, Cr Stock).
  * - Invoicing bills what has been delivered and not yet billed, takes the next invoice number and
  *   freezes the totals and the customer's details on the document.
@@ -85,7 +86,7 @@ async function buildLines(tx: DB, party: Party | null, input: OrderLineInput[], 
     const rate = l.rate ?? (await priceFor(tx, item, priceList));
     const discount = l.discount ?? '0';
     if (D(discount).gt(D(l.qty).times(rate))) throw badRequest(`Discount on ${item.name} is more than the line amount`);
-    lines.push({ itemId: item.id, qty: fmtQty(l.qty), rate: money(rate), discount: money(discount), gstRate: item.gstRate, sort: idx });
+    lines.push({ itemId: item.id, qty: fmtQty(l.qty), rate: money(rate), discount: money(discount), gstRate: item.gstRate, cessRate: item.cessRate, sort: idx });
   }
   return { lines, taxInclusive };
 }
@@ -122,13 +123,13 @@ export async function createOrder(ctx: Ctx, input: OrderInput): Promise<Order> {
   return order!;
 }
 
-type TotalsLine = { qty: string; rate: string; discount: string; gstRate: string };
+type TotalsLine = { qty: string; rate: string; discount: string; gstRate: string; cessRate?: string | null };
 
 /** The tax and totals of an order as they stand now: the same sums the invoice will freeze. */
 export async function orderTotals(tx: DB, order: Order, lines: TotalsLine[]) {
   const company = await getCompany(tx);
   const inter = isInterState(company.state_code, order.placeOfSupply);
-  const computed = lines.map((l) => computeLine({ qty: l.qty, rate: l.rate, discount: l.discount, gstRate: l.gstRate }, inter, order.taxInclusive));
+  const computed = lines.map((l) => computeLine({ qty: l.qty, rate: l.rate, discount: l.discount, gstRate: l.gstRate, cessRate: l.cessRate ?? 0 }, inter, order.taxInclusive));
   return { computed, totals: computeTotals(computed) };
 }
 
@@ -153,28 +154,143 @@ async function refreshOrderStatus(ctx: Ctx, orderId: string): Promise<Order> {
   return updated!;
 }
 
-/** Draft to confirmed. This is where a dealer's credit limit is checked. */
-export async function confirmOrder(ctx: Ctx, id: string, opts: { overrideCredit?: boolean; skipCreditCheck?: boolean } = {}): Promise<Order> {
+// ---------------------------------------------------------------------------
+// The price check: below cost, or more discount than the seller may give
+// ---------------------------------------------------------------------------
+export type PriceProblem = {
+  item_id: string; item: string;
+  /** What one unit sells for on this order, before GST and after the line's discount. */
+  unit_price: string;
+  /** Its rate on the customer's price list, on the same footing (before GST). */
+  list_price: string;
+  discount_pct: string;
+  /** The discount the seller may give, in %; null when they may give any. */
+  limit_pct: number | null;
+  below_cost: boolean;
+  over_limit: boolean;
+};
+
+type CheckedLine = TotalsLine & { itemId: string };
+
+/** The discount a user may give without approval: their role's limit, none at all for a role without one, any for an approver. */
+async function discountLimit(tx: DB, userId: string | null): Promise<number | null> {
+  if (!userId) return null;
+  const [u] = await rows<{ role: Role }>(tx, sql`select role from users where id = ${userId}`);
+  if (!u || can(u.role, 'sales:approve_discount')) return null;
+  return (await getSetting(tx, 'discount_limits'))[u.role] ?? 0;
+}
+
+/**
+ * Each line's price before GST, after its discount, against the item's purchase cost and against its
+ * rate on the customer's price list. The discount limit is the stricter of the person who priced the
+ * order (who made it) and the person looking at it or confirming it, so neither can pass a price the
+ * other could not. Purchase cost is read here and never sent: a problem names the item, not the cost.
+ */
+export async function priceProblems(tx: DB, order: Order, lines: CheckedLine[], viewerId: string | null): Promise<PriceProblem[]> {
+  if (lines.length === 0) return [];
+  const [party] = order.partyId ? await tx.select().from(parties).where(eq(parties.id, order.partyId)) : [];
+  const priceList = await priceListFor(tx, party ?? null);
+  const found = await tx.select().from(items).where(inArray(items.id, [...new Set(lines.map((l) => l.itemId))]));
+  const byId = new Map(found.map((i) => [i.id, i]));
+  const { computed } = await orderTotals(tx, order, lines);
+  const limits = [await discountLimit(tx, order.createdBy), await discountLimit(tx, viewerId)].filter((x): x is number => x !== null);
+  const limit = limits.length ? Math.min(...limits) : null;
+  const problems: PriceProblem[] = [];
+  for (const [i, l] of lines.entries()) {
+    const item = byId.get(l.itemId);
+    if (!item || D(l.qty).lte(0)) continue;
+    const unit = round2(computed[i]!.taxableValue.div(l.qty));
+    const listRate = D(await priceFor(tx, item, priceList));
+    const listUnit = round2(priceList.taxInclusive ? listRate.times(100).div(D(l.gstRate).plus(l.cessRate ?? 0).plus(100)) : listRate);
+    const discountPct = listUnit.gt(0) ? round2(listUnit.minus(unit).div(listUnit).times(100)) : D(0);
+    const belowCost = D(item.purchaseCost).gt(0) && unit.lt(item.purchaseCost);
+    const overLimit = limit !== null && discountPct.gt(limit);
+    if (!belowCost && !overLimit) continue;
+    problems.push({
+      item_id: item.id, item: item.name, unit_price: money(unit), list_price: money(listUnit), discount_pct: discountPct.toFixed(2),
+      limit_pct: limit, below_cost: belowCost, over_limit: overLimit,
+    });
+  }
+  return problems;
+}
+
+/** The problems in a sentence each, for the message that refuses the order. */
+function priceMessage(problems: PriceProblem[]): string {
+  return problems.map((p) => (p.below_cost
+    ? `${p.item} at ₹${formatINR(p.unit_price)} before GST is below its cost.`
+    : `${p.item} is ${Number(p.discount_pct)}% below its list price of ₹${formatINR(p.list_price)}; your limit is ${p.limit_pct}%.`)).join(' ');
+}
+
+/** Draft to confirmed. This is where the prices and the customer's credit are checked. */
+export async function confirmOrder(
+  ctx: Ctx,
+  id: string,
+  opts: {
+    overrideCredit?: boolean;
+    /** Online orders: the channel has already taken the money, at the channel's own price. */
+    skipCreditCheck?: boolean;
+    skipPriceCheck?: boolean;
+    /** Paid on the spot (the quick bill): only what is left unpaid goes on credit. */
+    paidNow?: Decimal;
+    /** For the message: a quick bill refused for its price can still be saved as an order for approval. */
+    quickBill?: boolean;
+  } = {},
+): Promise<Order> {
   const { tx } = ctx;
   const { order, lines } = await lockOrder(tx, id);
   if (order.status !== 'draft') throw conflict(`Order ${order.orderNo} is already ${order.status}`);
   if (lines.length === 0) throw badRequest('Order has no items');
   const party = await loadParty(tx, order.partyId);
 
-  // Dealer credit limit (PRD 7.5): what they owe + this order must fit inside the limit.
-  if (party?.creditLimit && !opts.skipCreditCheck) {
-    const { totals } = await orderTotals(tx, order, lines);
-    const exposure = D(await partyBalance(tx, party.id)).plus(totals.grandTotal);
-    if (exposure.gt(party.creditLimit)) {
-      const allowed = opts.overrideCredit && ctx.user && can(ctx.user.role, 'sales:override_credit');
-      if (!allowed) {
+  // Prices: below purchase cost, or a discount over the seller's limit, needs sales:approve_discount.
+  if (!opts.skipPriceCheck) {
+    const problems = await priceProblems(tx, order, lines, ctx.user?.id ?? null);
+    if (problems.length > 0) {
+      if (ctx.user && !can(ctx.user.role, 'sales:approve_discount')) {
         throw conflict(
-          `${party.name} would be at ${money(exposure)} against a credit limit of ${money(party.creditLimit)}. ` +
-            'Collect payment first, or ask Accounts / the owner to override.',
-          { exposure: money(exposure), creditLimit: party.creditLimit },
+          `${priceMessage(problems)} The owner or Accounts must approve this price: ` +
+            (opts.quickBill ? 'ask one of them to make this bill, or save it as a sales order for them to confirm.' : 'ask one of them to confirm this order.'),
+          { price_problems: problems },
         );
       }
-      await audit(ctx, 'sales_order', id, 'credit_limit_override', null, { exposure: money(exposure), creditLimit: party.creditLimit });
+      await audit(ctx, 'sales_order', id, 'price_override', null, { lines: problems });
+    }
+  }
+
+  // Credit (PRD 7.5), on whatever is not paid right now. A bill paid in full is not credit at all.
+  if (party && !opts.skipCreditCheck) {
+    const { totals } = await orderTotals(tx, order, lines);
+    const onCredit = totals.grandTotal.minus(opts.paidNow ?? 0);
+    const mayOverride = Boolean(opts.overrideCredit && ctx.user && can(ctx.user.role, 'sales:override_credit'));
+    if (onCredit.gt(0)) {
+      // 1. Bills already past their due date: no more credit until they are paid.
+      const [late] = await rows<{ n: number; amount: string; oldest: string | null }>(tx, sql`
+        select count(*)::int as n, coalesce(sum(outstanding), 0)::numeric(14,2)::text as amount, min(due_date)::text as oldest
+          from v_invoice_outstanding where party_id = ${party.id} and outstanding > 0 and due_date < ${istDate()}::date`);
+      if (late && late.n > 0) {
+        if (!mayOverride) {
+          throw conflict(
+            `${party.name} has ${late.n === 1 ? 'a bill' : `${late.n} bills`} past the due date (₹${formatINR(late.amount)}, ` +
+              `the oldest due ${formatDate(late.oldest!)}). Collect that first, take this one in full, or ask Accounts / the owner to override.`,
+            { overdue: late.amount, overdueBills: late.n },
+          );
+        }
+        await audit(ctx, 'sales_order', id, 'overdue_override', null, { overdue: late.amount, bills: late.n });
+      }
+      // 2. The credit limit: what they owe + what goes on credit now must fit inside it.
+      if (party.creditLimit) {
+        const exposure = D(await partyBalance(tx, party.id)).plus(onCredit);
+        if (exposure.gt(party.creditLimit)) {
+          if (!mayOverride) {
+            throw conflict(
+              `${party.name} would be at ${money(exposure)} against a credit limit of ${money(party.creditLimit)}. ` +
+                'Collect payment first, or ask Accounts / the owner to override.',
+              { exposure: money(exposure), creditLimit: party.creditLimit },
+            );
+          }
+          await audit(ctx, 'sales_order', id, 'credit_limit_override', null, { exposure: money(exposure), creditLimit: party.creditLimit });
+        }
+      }
     }
   }
   const [updated] = await tx.update(salesOrders).set({ status: 'confirmed', updatedAt: new Date() }).where(eq(salesOrders.id, id)).returning();
@@ -320,12 +436,13 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
     } else discount = D(p.line.discount).times(p.qty).div(p.line.qty).toDecimalPlaces(2);
     const [cost] = await rows<{ c: string | null }>(tx, sql`
       select (sum(qty * unit_cost) / nullif(sum(qty), 0))::numeric(12,2)::text as c from delivery_lines where order_line_id = ${p.line.id}`);
-    const tax = computeLine({ qty: p.qty, rate: p.line.rate, discount, gstRate: p.line.gstRate }, inter, order.taxInclusive);
+    const tax = computeLine({ qty: p.qty, rate: p.line.rate, discount, gstRate: p.line.gstRate, cessRate: p.line.cessRate }, inter, order.taxInclusive);
     computed.push(tax);
     await tx.insert(invoiceLines).values({
       invoiceId: draft!.id, orderLineId: p.line.id, itemId: item.id, description: item.name, hsnSac: item.hsnSac, unit: item.unit,
       qty: fmtQty(p.qty), rate: p.line.rate, discount: money(discount), taxableValue: money(tax.taxableValue),
       gstRate: p.line.gstRate, cgst: money(tax.cgst), sgst: money(tax.sgst), igst: money(tax.igst),
+      cessRate: p.line.cessRate, cess: money(tax.cess),
       lineTotal: money(tax.lineTotal), unitCost: money(cost?.c ?? 0), sort: idx,
     });
     await tx.update(salesOrderLines).set({ invoicedQty: fmtQty(D(p.line.invoicedQty).plus(p.qty)) }).where(eq(salesOrderLines.id, p.line.id));
@@ -340,7 +457,7 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
       partyName: party?.name ?? 'Cash Sale', partyGstin: party?.gstin ?? null, partyPhone: party?.phone ?? null,
       billingAddress: party?.billingAddress ?? null, shippingAddress: party?.shippingAddress ?? party?.billingAddress ?? null,
       taxableTotal: money(totals.taxableTotal), cgstTotal: money(totals.cgstTotal), sgstTotal: money(totals.sgstTotal),
-      igstTotal: money(totals.igstTotal), roundOff: money(totals.roundOff), grandTotal: money(totals.grandTotal),
+      igstTotal: money(totals.igstTotal), cessTotal: money(totals.cessTotal), roundOff: money(totals.roundOff), grandTotal: money(totals.grandTotal),
       dueDate: addDays(invoiceDate, party?.paymentTermsDays ?? 0), updatedAt: new Date(),
     })
     .where(eq(invoices.id, draft!.id))
@@ -357,6 +474,7 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
       { account: 'output_cgst', credit: totals.cgstTotal },
       { account: 'output_sgst', credit: totals.sgstTotal },
       { account: 'output_igst', credit: totals.igstTotal },
+      { account: 'output_cess', credit: totals.cessTotal },
       { account: 'round_off', credit: totals.roundOff },
     ],
   });
@@ -375,6 +493,8 @@ export type QuickBillInput = {
   payments: { mode: PaymentMode; amount: string; accountId?: string | null; reference?: string | null }[];
   locationId?: string | null;
   notes?: string | null;
+  /** Accounts / the owner: bill on credit past the limit or with bills overdue (sales:override_credit). */
+  overrideCredit?: boolean;
 };
 
 /**
@@ -410,12 +530,13 @@ export async function quickBill(ctx: Ctx, input: QuickBillInput) {
   }
 
   const order = await createOrder(ctx, { channel: 'store', partyId, leadId, orderDate: today, lines: input.lines, notes: input.notes });
-  // Counter sale: paid (or knowingly put on credit) right now, so the dealer credit check does not apply.
-  await confirmOrder(ctx, order.id, { skipCreditCheck: true });
+  // The same price and credit checks as any order. Credit is only what is not paid now, so a bill
+  // paid in full skips the credit check, and a part-paid one is checked on the unpaid part.
+  const paid = input.payments.reduce((a, p) => a.plus(p.amount), D(0));
+  await confirmOrder(ctx, order.id, { paidNow: paid, overrideCredit: input.overrideCredit, quickBill: true });
   await deliverOrder(ctx, order.id, { locationId: input.locationId ?? (await locationByType(tx, 'showroom')), date: today });
   const invoice = await invoiceOrder(ctx, order.id, { invoiceDate: today, notes: input.notes });
 
-  const paid = input.payments.reduce((a, p) => a.plus(p.amount), D(0));
   if (paid.gt(invoice.grandTotal)) {
     throw badRequest(`Payments (${money(paid)}) are more than the bill (${invoice.grandTotal}). Enter the amount kept, not the cash handed over.`);
   }
@@ -456,9 +577,9 @@ export async function createCreditNote(
   if (date < inv!.invoiceDate) throw badRequest('Credit note cannot be dated before its invoice');
 
   const origLines = await tx.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, invoiceId)).orderBy(asc(invoiceLines.sort));
-  const prior = await rows<{ against_line_id: string; qty: string; taxable: string; cgst: string; sgst: string; igst: string }>(tx, sql`
+  const prior = await rows<{ against_line_id: string; qty: string; taxable: string; cgst: string; sgst: string; igst: string; cess: string }>(tx, sql`
     select il.against_line_id, sum(il.qty)::text as qty, sum(il.taxable_value)::text as taxable,
-           sum(il.cgst)::text as cgst, sum(il.sgst)::text as sgst, sum(il.igst)::text as igst
+           sum(il.cgst)::text as cgst, sum(il.sgst)::text as sgst, sum(il.igst)::text as igst, sum(il.cess)::text as cess
       from invoice_lines il join invoices cn on cn.id = il.invoice_id
      where cn.against_invoice_id = ${invoiceId} and cn.doc_type = 'credit_note' and cn.status = 'issued'
      group by il.against_line_id`);
@@ -473,7 +594,7 @@ export async function createCreditNote(
     })
     .returning();
 
-  let taxable = D(0), cgst = D(0), sgst = D(0), igst = D(0);
+  let taxable = D(0), cgst = D(0), sgst = D(0), igst = D(0), cess = D(0);
   const restockLines: { itemId: string; qty: Decimal; unitCost: string }[] = [];
   const seen = new Set<string>();
   for (const [idx, l] of input.lines.entries()) {
@@ -489,12 +610,14 @@ export async function createCreditNote(
     const part = (total: string, already: string | undefined) =>
       completes ? D(total).minus(already ?? 0) : D(total).times(q).div(orig.qty).toDecimalPlaces(2);
     const lt = part(orig.taxableValue, p?.taxable), lc = part(orig.cgst, p?.cgst), ls = part(orig.sgst, p?.sgst), li = part(orig.igst, p?.igst);
-    taxable = taxable.plus(lt); cgst = cgst.plus(lc); sgst = sgst.plus(ls); igst = igst.plus(li);
+    const lx = part(orig.cess, p?.cess);
+    taxable = taxable.plus(lt); cgst = cgst.plus(lc); sgst = sgst.plus(ls); igst = igst.plus(li); cess = cess.plus(lx);
     await tx.insert(invoiceLines).values({
       invoiceId: draft!.id, againstLineId: orig.id, orderLineId: orig.orderLineId, itemId: orig.itemId, description: orig.description,
       hsnSac: orig.hsnSac, unit: orig.unit, qty: fmtQty(q), rate: orig.rate,
       discount: money(D(orig.discount).times(q).div(orig.qty)), taxableValue: money(lt), gstRate: orig.gstRate,
-      cgst: money(lc), sgst: money(ls), igst: money(li), lineTotal: money(lt.plus(lc).plus(ls).plus(li)),
+      cgst: money(lc), sgst: money(ls), igst: money(li), cessRate: orig.cessRate, cess: money(lx),
+      lineTotal: money(lt.plus(lc).plus(ls).plus(li).plus(lx)),
       unitCost: orig.unitCost, sort: idx,
     });
     restockLines.push({ itemId: orig.itemId, qty: q, unitCost: orig.unitCost });
@@ -512,7 +635,7 @@ export async function createCreditNote(
        where against_invoice_id = ${invoiceId} and doc_type = 'credit_note' and status = 'issued'`);
     roundOff = D(inv!.roundOff).minus(pr?.r ?? 0);
   }
-  const grand = taxable.plus(cgst).plus(sgst).plus(igst).plus(roundOff);
+  const grand = taxable.plus(cgst).plus(sgst).plus(igst).plus(cess).plus(roundOff);
 
   const { number, fy } = await nextNumber(tx, 'credit_note', date);
   const [issued] = await tx
@@ -520,7 +643,7 @@ export async function createCreditNote(
     .set({
       invoiceNo: number, fy, status: 'issued', issuedAt: new Date(), partyName: inv!.partyName, partyGstin: inv!.partyGstin,
       partyPhone: inv!.partyPhone, billingAddress: inv!.billingAddress, shippingAddress: inv!.shippingAddress,
-      taxableTotal: money(taxable), cgstTotal: money(cgst), sgstTotal: money(sgst), igstTotal: money(igst),
+      taxableTotal: money(taxable), cgstTotal: money(cgst), sgstTotal: money(sgst), igstTotal: money(igst), cessTotal: money(cess),
       roundOff: money(roundOff), grandTotal: money(grand), updatedAt: new Date(),
     })
     .where(eq(invoices.id, draft!.id))
@@ -536,6 +659,7 @@ export async function createCreditNote(
       { account: 'output_cgst', debit: cgst },
       { account: 'output_sgst', debit: sgst },
       { account: 'output_igst', debit: igst },
+      { account: 'output_cess', debit: cess },
       { account: 'round_off', debit: roundOff },
       { account: 'debtors', partyId: inv!.partyId, credit: grand },
     ],
@@ -720,7 +844,7 @@ export async function invoiceDocument(tx: DB, id: string) {
   const [order] = inv!.orderId ? await rows(tx, sql`select id, order_no from sales_orders where id = ${inv!.orderId}`) : [];
   // HSN-wise tax summary printed at the bottom of the invoice.
   const hsn_summary = await rows(tx, sql`
-    select hsn_sac, gst_rate, sum(taxable_value) as taxable_value, sum(cgst) as cgst, sum(sgst) as sgst, sum(igst) as igst
+    select hsn_sac, gst_rate, sum(taxable_value) as taxable_value, sum(cgst) as cgst, sum(sgst) as sgst, sum(igst) as igst, sum(cess) as cess
       from invoice_lines where invoice_id = ${id} group by hsn_sac, gst_rate order by hsn_sac`);
   const company = await getCompany(tx);
   return {
@@ -790,19 +914,24 @@ export function salesRouter(db: DB) {
     const lines = await rows<TotalsLine & { gst_rate: string }>(db, sql`
       select l.*, i.sku, i.name as item_name, i.unit, i.hsn_sac
         from sales_order_lines l join items i on i.id = l.item_id where l.order_id = ${id} order by l.sort`);
-    const { computed, totals } = await orderTotals(db, order!, lines.map((l) => ({ ...l, gstRate: l.gst_rate })));
+    const { computed, totals } = await orderTotals(db, order!, lines.map((l: any) => ({ ...l, gstRate: l.gst_rate, cessRate: l.cess_rate })));
     const [party] = order!.partyId ? await db.select().from(parties).where(eq(parties.id, order!.partyId)) : [];
+    // A draft's prices, checked as confirming would check them: who may confirm it can be shown up front.
+    const priceChecks = order!.status === 'draft'
+      ? await priceProblems(db, order!, lines.map((l: any) => ({ ...l, itemId: l.item_id, gstRate: l.gst_rate, cessRate: l.cess_rate })), req.user!.id)
+      : [];
     res.json({
       data: {
         ...order,
         party: party ?? null,
+        price_problems: priceChecks,
         lines: lines.map((l, i) => ({
           ...l, taxable_value: money(computed[i]!.taxableValue), cgst: money(computed[i]!.cgst), sgst: money(computed[i]!.sgst),
-          igst: money(computed[i]!.igst), line_total: money(computed[i]!.lineTotal),
+          igst: money(computed[i]!.igst), cess: money(computed[i]!.cess), line_total: money(computed[i]!.lineTotal),
         })),
         totals: {
           taxable_total: money(totals.taxableTotal), cgst_total: money(totals.cgstTotal), sgst_total: money(totals.sgstTotal),
-          igst_total: money(totals.igstTotal), round_off: money(totals.roundOff), grand_total: money(totals.grandTotal),
+          igst_total: money(totals.igstTotal), cess_total: money(totals.cessTotal), round_off: money(totals.roundOff), grand_total: money(totals.grandTotal),
         },
         deliveries: await rows(db, sql`
           select d.id, d.delivery_no, d.delivered_at, l.name as location from deliveries d join locations l on l.id = d.location_id
@@ -853,7 +982,8 @@ export function salesRouter(db: DB) {
     res.json({ ok: true });
   });
 
-  r.post('/orders/:id/confirm', requirePerm('sales:write'), async (req, res) => {
+  // The owner can confirm an order too: that is how a price below cost or over a seller's discount limit is approved.
+  r.post('/orders/:id/confirm', requirePerm('sales:write', 'sales:approve_discount'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = z.object({ override_credit: z.boolean().default(false) }).parse(req.body ?? {});
     if (b.override_credit && !can(req.user!.role, 'sales:override_credit')) throw forbidden('Only Accounts or the owner can override a credit limit');
@@ -915,10 +1045,13 @@ export function salesRouter(db: DB) {
       })).max(5).default([]),
       location_id: emptyToNull(zId).optional(),
       notes: emptyToNull(z.string().trim().max(1000)).optional(),
+      override_credit: z.boolean().default(false),
     }).parse(req.body);
+    if (b.override_credit && !can(req.user!.role, 'sales:override_credit')) throw forbidden('Only Accounts or the owner can override a credit limit');
     const result = await inTx(db, req, (ctx) =>
       quickBill(ctx, {
         partyId: b.party_id, customer: b.customer, lines: b.lines.map(toLine), locationId: b.location_id, notes: b.notes,
+        overrideCredit: b.override_credit,
         payments: b.payments.map((p) => ({ mode: p.mode, amount: p.amount, accountId: p.account_id, reference: p.reference })),
       }));
     res.status(201).json({ data: result });
@@ -935,17 +1068,20 @@ export function salesRouter(db: DB) {
     const inter = isInterState(company.state_code, pos);
     const computed = lines.map((l) => computeLine(l, inter, taxInclusive));
     const totals = computeTotals(computed);
+    // What confirming would say about the prices, as this user would make the bill, so the screen can warn before saving.
+    const asIfOrder = { partyId: party?.id ?? null, createdBy: req.user!.id, placeOfSupply: pos, taxInclusive } as Order;
+    const priceChecks = await priceProblems(db, asIfOrder, lines, req.user!.id);
     res.json({
       data: {
-        tax_inclusive: taxInclusive, place_of_supply: pos, is_inter_state: inter,
+        tax_inclusive: taxInclusive, place_of_supply: pos, is_inter_state: inter, price_problems: priceChecks,
         lines: lines.map((l, i) => ({
-          item_id: l.itemId, qty: l.qty, rate: l.rate, discount: l.discount, gst_rate: l.gstRate,
+          item_id: l.itemId, qty: l.qty, rate: l.rate, discount: l.discount, gst_rate: l.gstRate, cess_rate: l.cessRate,
           taxable_value: money(computed[i]!.taxableValue), cgst: money(computed[i]!.cgst), sgst: money(computed[i]!.sgst),
-          igst: money(computed[i]!.igst), line_total: money(computed[i]!.lineTotal),
+          igst: money(computed[i]!.igst), cess: money(computed[i]!.cess), line_total: money(computed[i]!.lineTotal),
         })),
         totals: {
           taxable_total: money(totals.taxableTotal), cgst_total: money(totals.cgstTotal), sgst_total: money(totals.sgstTotal),
-          igst_total: money(totals.igstTotal), round_off: money(totals.roundOff), grand_total: money(totals.grandTotal),
+          igst_total: money(totals.igstTotal), cess_total: money(totals.cessTotal), round_off: money(totals.roundOff), grand_total: money(totals.grandTotal),
         },
       },
     });

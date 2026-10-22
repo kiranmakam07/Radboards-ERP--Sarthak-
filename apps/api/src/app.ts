@@ -6,6 +6,7 @@ import { config } from './config';
 import { authenticate, requireAuth } from './core/auth';
 import type { DB } from './db/client';
 import { AppError, errorHandler, forbidden } from './lib/errors';
+import { hideCosts } from './lib/http';
 import { readMailbox } from './lib/mailbox';
 import { accountingRouter } from './modules/accounting';
 import { authRouter, mastersRouter, settingsRouter, usersRouter } from './modules/admin';
@@ -157,6 +158,9 @@ export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   app.use('/api', requireAuth);
 
   // ---- 6. the modules ----
+  // Cost price only for costs:read (lib/http.ts hideCosts). On the stock screens a plain value is stock at cost.
+  app.use(['/api/items', '/api/sales', '/api/purchasing', '/api/masters'], hideCosts());
+  app.use('/api/stock', hideCosts(['value', 'total_value']));
   // Admin and masters
   app.use('/api/files', filesRouter(db));
   app.use('/api/users', usersRouter(db));

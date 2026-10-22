@@ -19,7 +19,8 @@ export const STATE_CODES: Record<string, string> = {
   '38': 'Ladakh', '97': 'Other Territory',
 };
 
-export const GST_RATES = [0, 5, 12, 18, 28] as const;
+/** The GST rates an item can carry: the slabs (40% since 22 Sep 2025) and the 0.25% and 3% special rates. */
+export const GST_RATES = [0, 0.25, 3, 5, 12, 18, 28, 40] as const;
 
 const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const B36 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -68,6 +69,8 @@ export type LineInput = {
   /** Absolute discount on the line (same tax basis as rate). */
   discount?: Num;
   gstRate: Num;
+  /** Compensation cess as a % of the taxable value, charged on top of GST. */
+  cessRate?: Num;
 };
 
 export type LineTax = {
@@ -75,19 +78,22 @@ export type LineTax = {
   cgst: Decimal;
   sgst: Decimal;
   igst: Decimal;
+  cess: Decimal;
   lineTotal: Decimal;
 };
 
 /**
  * Tax for one document line.
- * - Exclusive pricing: taxable = qty*rate - discount; tax is added on top.
- * - Inclusive pricing (retail/MRP): gross = qty*rate - discount; taxable is backed out.
+ * - Exclusive pricing: taxable = qty*rate - discount; GST and cess are added on top.
+ * - Inclusive pricing (retail/MRP): gross = qty*rate - discount; taxable is backed out of GST and cess together.
+ * Cess is the same whether the sale is within the state or not.
  */
 export function computeLine(line: LineInput, interState: boolean, taxInclusive = false): LineTax {
   const gross = round2(D(line.qty).times(D(line.rate)).minus(D(line.discount ?? 0)));
   const rate = D(line.gstRate);
+  const cessRate = D(line.cessRate ?? 0);
   let taxable: Decimal;
-  if (taxInclusive) taxable = round2(gross.times(100).div(rate.plus(100)));
+  if (taxInclusive) taxable = round2(gross.times(100).div(rate.plus(cessRate).plus(100)));
   else taxable = gross;
 
   let split: TaxSplit;
@@ -97,13 +103,14 @@ export function computeLine(line: LineInput, interState: boolean, taxInclusive =
     const half = round2(taxable.times(rate).div(200));
     split = { cgst: half, sgst: half, igst: D(0) };
   }
+  const cess = round2(taxable.times(cessRate).div(100));
   if (taxInclusive) {
     // Keep the customer-facing gross exact: absorb the rounding paisa into taxable value.
-    const tax = split.cgst.plus(split.sgst).plus(split.igst);
+    const tax = split.cgst.plus(split.sgst).plus(split.igst).plus(cess);
     taxable = gross.minus(tax);
   }
-  const lineTotal = taxable.plus(split.cgst).plus(split.sgst).plus(split.igst);
-  return { taxableValue: taxable, ...split, lineTotal };
+  const lineTotal = taxable.plus(split.cgst).plus(split.sgst).plus(split.igst).plus(cess);
+  return { taxableValue: taxable, ...split, cess, lineTotal };
 }
 
 export type DocTotals = {
@@ -111,6 +118,7 @@ export type DocTotals = {
   cgstTotal: Decimal;
   sgstTotal: Decimal;
   igstTotal: Decimal;
+  cessTotal: Decimal;
   roundOff: Decimal;
   grandTotal: Decimal;
 };
@@ -122,9 +130,10 @@ export function computeTotals(lines: LineTax[], roundToRupee = true): DocTotals 
   const cgstTotal = lines.reduce((a, l) => a.plus(l.cgst), zero);
   const sgstTotal = lines.reduce((a, l) => a.plus(l.sgst), zero);
   const igstTotal = lines.reduce((a, l) => a.plus(l.igst), zero);
-  const raw = taxableTotal.plus(cgstTotal).plus(sgstTotal).plus(igstTotal);
+  const cessTotal = lines.reduce((a, l) => a.plus(l.cess ?? 0), zero);
+  const raw = taxableTotal.plus(cgstTotal).plus(sgstTotal).plus(igstTotal).plus(cessTotal);
   const grandTotal = roundToRupee ? raw.toDecimalPlaces(0, Decimal.ROUND_HALF_UP) : raw;
-  return { taxableTotal, cgstTotal, sgstTotal, igstTotal, roundOff: grandTotal.minus(raw), grandTotal };
+  return { taxableTotal, cgstTotal, sgstTotal, igstTotal, cessTotal, roundOff: grandTotal.minus(raw), grandTotal };
 }
 
 const STATE_SHORT: Record<string, string> = {

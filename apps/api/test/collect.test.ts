@@ -10,11 +10,19 @@ let m: Awaited<ReturnType<typeof masters>>;
 const id: Record<string, string> = {};
 const today = istDate();
 
-/** Sell `qty` boards to a party on credit, invoiced on the given day. Returns the invoice. */
-const sellOnCredit = async (partyId: string, qty: number, invoiceDate: string) => {
+/**
+ * Sell `qty` boards to a party on credit, invoiced on the given day. Returns the invoice.
+ * With `overdue`, the party already has a bill past its due date, so only Accounts can let more credit through.
+ */
+const sellOnCredit = async (partyId: string, qty: number, invoiceDate: string, overdue = false) => {
   const sales = await w.as('sales');
   const order = (await sales.post('/api/sales/orders').send({ channel: 'dealer', party_id: partyId, order_date: invoiceDate, lines: [{ item_id: id.board, qty }] }).expect(201)).body.data;
-  await sales.post(`/api/sales/orders/${order.id}/confirm`).send({}).expect(200);
+  if (overdue) {
+    await sales.post(`/api/sales/orders/${order.id}/confirm`).send({}).expect(409);
+    await (await w.as('accounts')).post(`/api/sales/orders/${order.id}/confirm`).send({ override_credit: true }).expect(200);
+  } else {
+    await sales.post(`/api/sales/orders/${order.id}/confirm`).send({}).expect(200);
+  }
   await (await w.as('stores')).post(`/api/sales/orders/${order.id}/deliver`).send({ location_id: m.stores }).expect(201);
   return (await sales.post(`/api/sales/orders/${order.id}/invoice`).send({ invoice_date: invoiceDate }).expect(201)).body.data;
 };
@@ -39,7 +47,7 @@ afterAll(async () => {
 describe('who owes what, and reminding them', () => {
   it('lists each customer with what is pending and what is past its due date, the most overdue first', async () => {
     id.inv1 = (await sellOnCredit(id.late!, 10, addDays(today, -20))).id; // due 13 days ago
-    id.inv2 = (await sellOnCredit(id.late!, 2, addDays(today, -3))).id; // due in 4 days
+    id.inv2 = (await sellOnCredit(id.late!, 2, addDays(today, -3), true)).id; // due in 4 days; the first one is already late
     await sellOnCredit(id.notDue!, 5, addDays(today, -10)); // due in 20 days
     await sellOnCredit(id.noPhone!, 1, addDays(today, -1));
     // Part of the old invoice is paid: 11,800 billed, 5,000 received.
