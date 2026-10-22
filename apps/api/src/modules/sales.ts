@@ -16,7 +16,7 @@ import { locationByType, lockItems, stockIn, stockOut } from '../core/stock';
 import { cleanSerials, needsSerials, unitEvent, unitsIn, unitsOut } from '../core/units';
 import { rows, type DB } from '../db/client';
 import {
-  deliveries, deliveryLines, invoiceLines, invoiceLinks, invoices, items, locations, parties, salesOrderLines, salesOrders, units,
+  deliveries, deliveryLines, entities, invoiceLines, invoiceLinks, invoices, items, locations, parties, salesOrderLines, salesOrders, units,
 } from '../db/schema';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
 import {
@@ -55,6 +55,8 @@ export type OrderLineInput = {
 };
 export type OrderInput = {
   channel: Channel;
+  /** The legal entity selling; the default one when not given. */
+  entityId?: string | null;
   partyId: string | null;
   leadId?: string | null;
   externalOrderId?: string | null;
@@ -103,16 +105,21 @@ export async function createOrder(ctx: Ctx, input: OrderInput): Promise<Order> {
   const { tx } = ctx;
   const party = await loadParty(tx, input.partyId);
   if (!party && input.channel !== 'store') throw badRequest('Pick a party for this order');
-  const company = await getCompany(tx);
+  if (input.entityId) {
+    const [e] = await tx.select().from(entities).where(eq(entities.id, input.entityId));
+    if (!e?.active) throw badRequest('That company (legal entity) does not exist or is switched off');
+  }
+  const company = await getCompany(tx, input.entityId);
   const { lines, taxInclusive } = await buildLines(tx, party, input.lines, input.taxInclusive);
   const placeOfSupply = input.placeOfSupply ?? party?.stateCode ?? company.state_code;
   if (!STATE_CODES[placeOfSupply]) throw badRequest('Unknown place of supply');
 
-  const { number } = await nextNumber(tx, 'sales_order', input.orderDate);
+  const { number } = await nextNumber(tx, 'sales_order', input.orderDate, input.entityId);
   const [order] = await tx
     .insert(salesOrders)
     .values({
       orderNo: number,
+      ...(input.entityId ? { entityId: input.entityId } : {}),
       channel: input.channel,
       externalOrderId: input.externalOrderId ?? null,
       partyId: party?.id ?? null,
@@ -134,7 +141,7 @@ type TotalsLine = { qty: string; rate: string; discount: string; gstRate: string
 
 /** The tax and totals of an order as they stand now: the same sums the invoice will freeze. */
 export async function orderTotals(tx: DB, order: Order, lines: TotalsLine[]) {
-  const company = await getCompany(tx);
+  const company = await getCompany(tx, order.entityId);
   const inter = isInterState(company.state_code, order.placeOfSupply);
   const computed = lines.map((l) => computeLine({ qty: l.qty, rate: l.rate, discount: l.discount, gstRate: l.gstRate, cessRate: l.cessRate ?? 0 }, inter, order.taxInclusive));
   return { computed, totals: computeTotals(computed) };
@@ -363,7 +370,7 @@ export async function deliverOrder(
   await expireReservations(ctx);
   const itemRows = await lockItems(tx, want.map((w) => w.line.itemId));
   const itemById = new Map(itemRows.map((i) => [i.id, i]));
-  const { number } = await nextNumber(tx, 'delivery', date);
+  const { number } = await nextNumber(tx, 'delivery', date, order.entityId);
   const [delivery] = await tx
     .insert(deliveries)
     .values({ deliveryNo: number, orderId, locationId, notes: input.notes ?? null, createdBy: ctx.user?.id ?? null })
@@ -443,7 +450,7 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
   if (pending.length === 0) throw conflict('Nothing delivered is waiting to be invoiced');
 
   const party = await loadParty(tx, order.partyId);
-  const company = await getCompany(tx);
+  const company = await getCompany(tx, order.entityId);
   const inter = isInterState(company.state_code, order.placeOfSupply);
   const invoiceDate = input.invoiceDate ?? istDate();
   const itemRows = await tx.select().from(items).where(inArray(items.id, pending.map((p) => p.line.itemId)));
@@ -452,7 +459,7 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
   const [draft] = await tx
     .insert(invoices)
     .values({
-      docType: 'tax_invoice', invoiceDate, partyId: order.partyId, orderId, channel: order.channel,
+      docType: 'tax_invoice', invoiceDate, partyId: order.partyId, orderId, channel: order.channel, entityId: order.entityId,
       placeOfSupply: order.placeOfSupply, taxInclusive: order.taxInclusive, status: 'draft', notes: input.notes ?? null,
       createdBy: ctx.user?.id ?? null,
     })
@@ -494,7 +501,7 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
   }
 
   const totals = computeTotals(computed);
-  const { number, fy } = await nextNumber(tx, 'invoice', invoiceDate);
+  const { number, fy } = await nextNumber(tx, 'invoice', invoiceDate, order.entityId);
   const [issued] = await tx
     .update(invoices)
     .set({
@@ -513,6 +520,7 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
     refType: 'invoice',
     refId: issued!.id,
     narration: `Sales invoice ${number} - ${issued!.partyName}`,
+    entityId: order.entityId,
     lines: [
       { account: 'debtors', partyId: order.partyId, debit: totals.grandTotal },
       { account: 'sales', credit: totals.taxableTotal },
@@ -638,7 +646,7 @@ export async function createCreditNote(
   const [draft] = await tx
     .insert(invoices)
     .values({
-      docType: 'credit_note', invoiceDate: date, partyId: inv!.partyId, orderId: inv!.orderId, againstInvoiceId: invoiceId,
+      docType: 'credit_note', invoiceDate: date, partyId: inv!.partyId, orderId: inv!.orderId, againstInvoiceId: invoiceId, entityId: inv!.entityId,
       channel: inv!.channel, placeOfSupply: inv!.placeOfSupply, taxInclusive: inv!.taxInclusive, status: 'draft',
       reason: input.reason, createdBy: ctx.user?.id ?? null,
     })
@@ -697,7 +705,7 @@ export async function createCreditNote(
   }
   const grand = taxable.plus(cgst).plus(sgst).plus(igst).plus(cess).plus(roundOff);
 
-  const { number, fy } = await nextNumber(tx, 'credit_note', date);
+  const { number, fy } = await nextNumber(tx, 'credit_note', date, inv!.entityId);
   const [issued] = await tx
     .update(invoices)
     .set({
@@ -714,6 +722,7 @@ export async function createCreditNote(
     refType: 'credit_note',
     refId: issued!.id,
     narration: `Credit note ${number} against ${inv!.invoiceNo} - ${input.reason}`,
+    entityId: inv!.entityId,
     lines: [
       { account: 'sales', debit: taxable },
       { account: 'output_cgst', debit: cgst },
@@ -929,7 +938,7 @@ export async function invoiceDocument(tx: DB, id: string) {
   const hsn_summary = await rows(tx, sql`
     select hsn_sac, gst_rate, sum(taxable_value) as taxable_value, sum(cgst) as cgst, sum(sgst) as sgst, sum(igst) as igst, sum(cess) as cess
       from invoice_lines where invoice_id = ${id} group by hsn_sac, gst_rate order by hsn_sac`);
-  const company = await getCompany(tx);
+  const company = await getCompany(tx, inv!.entityId);
   return {
     ...inv!,
     lines,
@@ -1025,13 +1034,14 @@ export function salesRouter(db: DB) {
         invoices: await rows(db, sql`
           select id, doc_type, invoice_no, invoice_date, grand_total, status from invoices where order_id = ${id} order by created_at`),
         reservations: await reservationsOf(db, id),
-        company: await getCompany(db),
+        company: await getCompany(db, order!.entityId),
       },
     });
   });
 
   const zOrder = z.object({
     channel: z.enum(CHANNELS).default('dealer'),
+    entity_id: emptyToNull(zId).optional(),
     party_id: zId,
     lead_id: emptyToNull(zId).optional(),
     order_date: zDate.default(() => istDate()),
@@ -1046,7 +1056,7 @@ export function salesRouter(db: DB) {
     const b = zOrder.parse(req.body);
     const order = await inTx(db, req, (ctx) =>
       createOrder(ctx, {
-        channel: b.channel, partyId: b.party_id, leadId: b.lead_id, orderDate: b.order_date, placeOfSupply: b.place_of_supply,
+        channel: b.channel, entityId: b.entity_id, partyId: b.party_id, leadId: b.lead_id, orderDate: b.order_date, placeOfSupply: b.place_of_supply,
         taxInclusive: b.tax_inclusive, notes: b.notes, lines: b.lines.map(toLine),
       }));
     res.status(201).json({ data: order });
@@ -1108,7 +1118,7 @@ export function salesRouter(db: DB) {
   r.get('/deliveries/:id', requirePerm('sales:read'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const [delivery] = await rows(db, sql`
-      select d.*, l.name as location, o.order_no, o.party_id, p.name as party_name, p.phone as party_phone, p.gstin as party_gstin,
+      select d.*, l.name as location, o.order_no, o.party_id, o.entity_id, p.name as party_name, p.phone as party_phone, p.gstin as party_gstin,
              p.shipping_address, p.billing_address
         from deliveries d join locations l on l.id = d.location_id join sales_orders o on o.id = d.order_id
         left join parties p on p.id = o.party_id where d.id = ${id}`);
@@ -1116,7 +1126,7 @@ export function salesRouter(db: DB) {
     const lines = await rows(db, sql`
       select dl.id, dl.qty, dl.serials, i.sku, i.name as item_name, i.unit, i.hsn_sac
         from delivery_lines dl join items i on i.id = dl.item_id where dl.delivery_id = ${id}`);
-    res.json({ data: { ...delivery, lines, company: await getCompany(db) } });
+    res.json({ data: { ...delivery, lines, company: await getCompany(db, (delivery as any).entity_id) } });
   });
 
   // ---- quick bill ----

@@ -34,6 +34,7 @@ export default function AdminPage() {
   const priceLists = useGet<{ data: any[] }>('/masters/price-lists');
   const accounts = useGet<{ data: any[] }>('/accounting/accounts');
   const series = useGet<{ data: any[] }>('/settings/number-series');
+  const entities = useGet<{ data: any[] }>('/masters/entities');
   const s = settings.data?.data;
   if (!s) return <Page title="Setup"><Loading loading={settings.loading} error={settings.error} /></Page>;
   const c = s.company;
@@ -65,6 +66,27 @@ export default function AdminPage() {
             invoice_terms: v.invoice_terms,
           })}
           onDone={settings.reload} />
+      </Card>
+
+      <Card title="Companies (legal entities)">
+        <p className="muted">The company above is the first. Add another only for a separate company with its own GSTIN: its documents carry its name and are numbered on their own, with its letter in front (KINV/26-27/00001).</p>
+        <Table rows={entities.data?.data} columns={[
+          { key: 'legal_name', title: 'Company', render: (r) => <>{r.legal_name}{r.is_default ? <span className="muted small"> · the company profile</span> : null}</> },
+          { key: 'gstin', title: 'GSTIN' }, { key: 'state_code', title: 'State', render: (r) => STATE_CODES[r.state_code] ?? r.state_code },
+          { key: 'code', title: 'Number letter' },
+          { key: 'branches', title: 'Branches', render: (r) => r.branches.map((b: any) => b.name).join(', ') },
+        ]} />
+        {can('settings:manage') ? (
+          <Toggle label="Add a company">
+            <Form inline submit="Add company"
+              fields={[
+                { name: 'legal_name', label: 'Legal name', required: true }, { name: 'gstin', label: 'GSTIN' },
+                { name: 'state_code', label: 'State', type: 'select', required: true, options: Object.entries(STATE_CODES).map(([k, n]) => ({ value: k, label: `${k} ${n}` })) },
+                { name: 'code', label: 'Number letter', required: true, help: 'One letter, e.g. K' },
+              ]}
+              onSubmit={(v) => post('/masters/entities', v)} onDone={entities.reload} />
+          </Toggle>
+        ) : null}
       </Card>
 
       <div className="grid">
