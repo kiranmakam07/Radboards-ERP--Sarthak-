@@ -8,6 +8,7 @@ import {
   ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, PriceWarning, SmartButton, StatusBar, Table, Toggle, date, dateTime, inr, label, num, sub,
 } from '@/components/ui';
 import { EditLines, linesKey } from '@/components/edit-lines';
+import { SerialPicker } from '@/components/serials';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -26,6 +27,8 @@ export default function OrderPage() {
   const pendingDelivery = o.lines.some((l: any) => Number(l.delivered_qty) < Number(l.qty));
   const pendingInvoice = o.lines.some((l: any) => Number(l.invoiced_qty) < Number(l.delivered_qty));
   const delivered = o.lines.some((l: any) => Number(l.delivered_qty) > 0);
+  // Items kept by serial are delivered by naming the serials, in the delivery box below.
+  const bySerial = o.lines.some((l: any) => l.is_serialised && Number(l.delivered_qty) < Number(l.qty));
   const invoices = o.invoices.filter((i: any) => i.status !== 'draft');
   const billed = invoices.filter((i: any) => i.status === 'issued').reduce((t: number, i: any) => t + (i.doc_type === 'credit_note' ? -1 : 1) * Number(i.grand_total), 0);
 
@@ -57,7 +60,7 @@ export default function OrderPage() {
             )}
           </>
         )}
-        {write && o.status === 'confirmed' && pendingDelivery && (
+        {write && o.status === 'confirmed' && pendingDelivery && !bySerial && (
           <ActionButton kind="primary" confirm="Deliver everything still pending? Stock will be deducted." onClick={() => post(`/sales/orders/${id}/deliver`, {})} onDone={reload}>Deliver all pending</ActionButton>
         )}
         {write && pendingInvoice && ['confirmed', 'delivered'].includes(o.status) && (
@@ -108,7 +111,9 @@ export default function OrderPage() {
           priceKey={isTradeParty(o.party?.party_type) ? 'dealer_price' : 'retail_price'} filter={(i) => i.item_type !== 'raw_material'} />
       )}
       {write && o.status === 'confirmed' && pendingDelivery && (
-        <Toggle label="Deliver part of the order"><PartialDelivery order={o} onDone={reload} /></Toggle>
+        bySerial
+          ? <Card title="Deliver: pick the serials"><PartialDelivery order={o} onDone={reload} /></Card>
+          : <Toggle label="Deliver part of the order"><PartialDelivery order={o} onDone={reload} /></Toggle>
       )}
 
       <div className="grid no-print">
@@ -131,12 +136,24 @@ export default function OrderPage() {
 
 function PartialDelivery({ order, onDone }: { order: any; onDone: () => void }) {
   const [qty, setQty] = useState<Record<string, string>>({});
+  const [serials, setSerials] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const pending = order.lines.filter((l: any) => Number(l.delivered_qty) < Number(l.qty));
+  // Goods leave from the showroom for a counter order, from stores for any other.
+  const places = useGet<{ data: { id: string; type: string; active: boolean }[] }>('/masters/locations');
+  const from = places.data?.data.find((l) => l.active && l.type === (order.channel === 'store' ? 'showroom' : 'stores'))?.id ?? null;
   return (
     <div>
       <Table rows={pending} columns={[
-        { key: 'item_name', title: 'Item' },
+        { key: 'item_name', title: 'Item', render: (r) => (
+          <>
+            {r.item_name}
+            {r.is_serialised ? (
+              <SerialPicker itemId={r.item_id} locationId={from} qty={Number(qty[r.id] || 0)} value={serials[r.id] ?? []}
+                onChange={(s) => { setSerials({ ...serials, [r.id]: s }); setQty({ ...qty, [r.id]: String(s.length) }); }} />
+            ) : null}
+          </>
+        ) },
         { key: 'pending', title: 'Pending', align: 'right', render: (r) => num(sub(r.qty, r.delivered_qty)) },
         { key: 'now', title: 'Deliver now', align: 'right', render: (r) => (
           <input type="number" min="0" step="any" style={{ width: 90 }} value={qty[r.id] ?? ''} onChange={(e) => setQty({ ...qty, [r.id]: e.target.value })} />
@@ -146,7 +163,8 @@ function PartialDelivery({ order, onDone }: { order: any; onDone: () => void }) 
         <button type="button" className="primary" onClick={async () => {
           setError(null);
           try {
-            const lines = Object.entries(qty).filter(([, q]) => Number(q) > 0).map(([order_line_id, q]) => ({ order_line_id, qty: q }));
+            const lines = Object.entries(qty).filter(([, q]) => Number(q) > 0)
+              .map(([order_line_id, q]) => ({ order_line_id, qty: q, ...(serials[order_line_id]?.length ? { serials: serials[order_line_id] } : {}) }));
             await post(`/sales/orders/${order.id}/deliver`, { lines });
             setQty({});
             onDone();

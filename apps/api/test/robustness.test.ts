@@ -47,6 +47,10 @@ const ID = () => crypto.randomUUID();
 /** A path with each :param filled in. */
 const fill = (p: string, as: (name: string) => string) => p.replace(/:([A-Za-z_]+)/g, (_m, name: string) => as(name));
 
+// The sweeps below send one request per route (and per role): hundreds to thousands. They grow with
+// every route added, so they get more time than a single test needs.
+const SWEEP_MS = 240_000;
+
 let w: World;
 beforeAll(async () => { w = await setup(); });
 afterAll(() => w.close());
@@ -67,7 +71,7 @@ describe('every route, read from the code', () => {
     }
     if (leaks.length) console.log(`LEAKS:\n${leaks.join('\n')}`);
     expect(leaks).toEqual([]);
-  });
+  }, SWEEP_MS);
 
   it('refuses every role that does not hold the permission a route names', async () => {
     const leaks: string[] = [];
@@ -82,7 +86,7 @@ describe('every route, read from the code', () => {
     }
     if (leaks.length) console.log(`LEAKS:\n${leaks.join('\n')}`);
     expect(leaks).toEqual([]);
-  });
+  }, SWEEP_MS);
 
   it('never falls over, whatever is sent', async () => {
     const admin = await w.as('admin');
@@ -124,7 +128,7 @@ describe('every route, read from the code', () => {
     }
     if (crashes.length) console.log(`ROUTES THAT FELL OVER:\n${crashes.join('\n')}`);
     expect(crashes).toEqual([]);
-  });
+  }, SWEEP_MS);
 });
 
 describe('numbers too big to keep', () => {

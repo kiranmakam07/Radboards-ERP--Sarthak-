@@ -39,6 +39,7 @@ export const NAV: NavSection[] = [
     { href: '/purchasing/orders', label: 'Purchase orders', perm: 'purchasing:read' },
     { href: '/purchasing/receipts', label: 'Inward & QC', perm: 'purchasing:read' },
     { href: '/stock', label: 'Stock', perm: 'stock:read' },
+    { href: '/units', label: 'Units by serial', perm: 'units:read' },
     { href: '/jobwork', label: 'Job work', perm: 'jobwork:read' },
     { href: '/items', label: 'Products', perm: 'items:read' },
   ] },

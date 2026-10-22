@@ -55,7 +55,7 @@ export default function DeliveryChallanPage() {
           <thead><tr><th>#</th><th>Item</th><th>SKU</th><th>HSN/SAC</th><th className="right">Quantity</th></tr></thead>
           <tbody>
             {d.lines.map((l: any, i: number) => (
-              <tr key={l.id}><td>{i + 1}</td><td>{l.item_name}</td><td>{l.sku}</td><td>{l.hsn_sac}</td><td className="right">{num(l.qty)} {l.unit}</td></tr>
+              <tr key={l.id}><td>{i + 1}</td><td>{l.item_name}{l.serials?.length ? <><br /><span className="small">Serial: {l.serials.join(', ')}</span></> : null}</td><td>{l.sku}</td><td>{l.hsn_sac}</td><td className="right">{num(l.qty)} {l.unit}</td></tr>
             ))}
           </tbody>
         </table>

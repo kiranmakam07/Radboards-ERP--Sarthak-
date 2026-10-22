@@ -13,6 +13,9 @@ function QuickBill() {
   const router = useRouter();
   const params = useSearchParams();
   const items = useGet<{ data: ItemLite[] }>('/items?limit=2000');
+  // The counter sells from the showroom: serials are picked from what is there.
+  const places = useGet<{ data: { id: string; type: string; active: boolean }[] }>('/masters/locations');
+  const showroom = places.data?.data.find((l) => l.type === 'showroom' && l.active)?.id ?? null;
   const [partyId, setPartyId] = useState<string | null>(params.get('party_id'));
   const [party, setParty] = useState<{ name: string; phone: string | null } | null>(null);
   const [phone, setPhone] = useState('');
@@ -100,7 +103,7 @@ function QuickBill() {
       </Card>
 
       <Card title="2. Items">
-        <LineEditor items={items.data?.data ?? []} lines={lines} onChange={setLines} priceKey="retail_price"
+        <LineEditor items={items.data?.data ?? []} lines={lines} onChange={setLines} priceKey="retail_price" serialsFrom={showroom}
           stockKey="showroom_qty" stockLabel="in showroom" filter={(i) => i.item_type !== 'raw_material'} />
       </Card>
 

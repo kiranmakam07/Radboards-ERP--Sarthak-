@@ -74,6 +74,8 @@ export const zGstRate = z.union([z.string(), z.number()]).transform((v, c) => {
   }
   return n.toFixed(2);
 });
+/** Serial numbers typed or scanned for a serialised item, one per unit. */
+export const zSerials = z.array(z.string().trim().min(1, 'a serial cannot be blank').max(60)).max(1000);
 /** Compensation cess, % of the taxable value. */
 export const zCessRate = decimalString(2).refine(sized((d) => d.gte(0) && d.lte(500)), 'must be between 0 and 500');
 export const zDate = z.string().refine(isIsoDate, 'must be a date (YYYY-MM-DD)');

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { addDays, istDate } from '@radcore/shared';
 import { rows, sql } from '../src/db/client';
-import { gstin, openingStock, setup, type World } from './helpers';
+import { expectBooksHealthy, gstin, openingStock, setup, type World } from './helpers';
 
 /**
  * P1 of the founder's brief (21 Oct 2026): the schema foundations that get expensive once real
@@ -56,5 +57,207 @@ describe('0026 EV kinds of item, place and party', () => {
     expect(preview.body.data.lines[0].rate).toBe('900.00');
     const list = await admin.get('/api/parties?side=customers').expect(200);
     expect(list.body.data.map((p: any) => p.name)).toContain('Nashik EV Point');
+  });
+});
+
+describe('0027 unit serials and batches', () => {
+  const BPAN = 'IN0BAT48V20AH00000001';
+  const units = (itemId: string) => rows<{ serial_no: string; status: string; location: string | null; sold_invoice_line_id: string | null }>(w.db, sql`
+    select u.serial_no, u.status::text, l.name as location, u.sold_invoice_line_id from units u left join locations l on l.id = u.location_id
+     where u.item_id = ${itemId} order by u.serial_no`);
+  const stockAt = async (itemId: string, type: string) => Number((await rows<{ q: string }>(w.db, sql`
+    select coalesce(sum(m.qty), 0)::text as q from stock_movements m join locations l on l.id = m.location_id where m.item_id = ${itemId} and l.type = ${type}`))[0]!.q);
+  const unitsAt = async (itemId: string, type: string) => Number((await rows<{ n: string }>(w.db, sql`
+    select count(*)::text as n from units u join locations l on l.id = u.location_id where u.item_id = ${itemId} and l.type = ${type}`))[0]!.n);
+
+  beforeAll(async () => {
+    const admin = await w.as('admin');
+    const item = async (sku: string, type: string, extra: object = {}) =>
+      (await admin.post('/api/items').send({ sku, name: sku, item_type: type, hsn_sac: '871160', gst_rate: 5, is_serialised: true, ...extra }).expect(201)).body.data.id as string;
+    // Scooter: ₹84,000 retail with 5% GST (₹80,000 before GST), dealer ₹70,000, bought at ₹50,000.
+    id.ev = await item('EV-X1', 'vehicle', { retail_price: 84000, dealer_price: 70000, purchase_cost: 50000 });
+    id.bat = await item('BAT-X', 'sub_assembly', { retail_price: 21000, dealer_price: 18000, purchase_cost: 15000, charge_every_days: 30 });
+    id.ctrl = await item('CTRL-X', 'sub_assembly');
+    id.motor = await item('MTR-X', 'sub_assembly');
+    id.supplier = (await admin.post('/api/parties').send({ party_type: 'supplier', name: 'EV Works', phone: '9700000031', gstin: gstin('27', 'EVWRK1234E') }).expect(201)).body.data.id;
+    id.dealer = (await admin.post('/api/parties').send({ party_type: 'dealer', name: 'Pune EV Dealer', phone: '9700000032', gstin: gstin('27', 'EVDLR1234D') }).expect(201)).body.data.id;
+    const locs = await rows<{ id: string; type: string }>(w.db, sql`select id, type::text from locations`);
+    id.stores = locs.find((l) => l.type === 'stores')!.id;
+    id.showroom = locs.find((l) => l.type === 'showroom')!.id;
+  });
+
+  it('switches serial numbers on only while none is in stock', async () => {
+    const admin = await w.as('admin');
+    const res = await admin.patch(`/api/items/${id['EV-S1']}`).send({ is_serialised: true }).expect(400);
+    expect(res.body.error.message).toMatch(/only while none of this item is in stock/);
+  });
+
+  it('QC gives each accepted unit its serial; rejected ones go back as a quantity', async () => {
+    const stores = await w.as('stores');
+    const po = (await stores.post('/api/purchasing/orders').send({ supplier_id: id.supplier, lines: [{ item_id: id.ev, qty: 3, rate: 50000 }] }).expect(201)).body.data;
+    await stores.post(`/api/purchasing/orders/${po.id}/send`).send({}).expect(200);
+    const doc = (await stores.get(`/api/purchasing/orders/${po.id}`).expect(200)).body.data;
+    const grn = (await stores.post('/api/purchasing/receipts').send({ purchase_order_id: po.id, lines: [{ po_line_id: doc.lines[0].id, received_qty: 3 }] }).expect(201)).body.data;
+    const line = (await stores.get(`/api/purchasing/receipts/${grn.id}`).expect(200)).body.data.lines[0];
+    const qc = (serials: string[]) => stores.post(`/api/purchasing/receipts/${grn.id}/qc`).send({
+      lines: [{ grn_line_id: line.id, accepted_qty: 2, rejected_qty: 1, reject_reason: 'Scratched panel', serials, batch_no: 'b-oct-26', mfg_date: '2026-09-30' }],
+    });
+    expect((await qc(['EV001']).expect(400)).body.error.message).toMatch(/one serial for each of the 2 \(1 given\)/);
+    expect((await qc(['EV001', 'ev001']).expect(400)).body.error.message).toMatch(/EV001 of EV-X1 is listed twice/);
+    await qc(['ev001', 'EV002']).expect(200);
+    expect(await units(id.ev!)).toEqual([
+      expect.objectContaining({ serial_no: 'EV001', status: 'available', location: 'Stores' }),
+      expect.objectContaining({ serial_no: 'EV002', status: 'available', location: 'Stores' }),
+    ]);
+    // One ledger row per unit, and the batch on each.
+    const moves = await rows<{ qty: string; unit_id: string | null; batch_no: string | null }>(w.db, sql`
+      select m.qty::text, m.unit_id, b.batch_no from stock_movements m left join batches b on b.id = m.batch_id where m.item_id = ${id.ev} order by m.id`);
+    expect(moves.map((x) => [Number(x.qty), Boolean(x.unit_id), x.batch_no])).toEqual([[1, true, 'B-OCT-26'], [1, true, 'B-OCT-26'], [1, false, 'B-OCT-26']]);
+    expect([await stockAt(id.ev!, 'stores'), await stockAt(id.ev!, 'rejected')]).toEqual([2, 1]);
+  });
+
+  it('opening stock of a serialised item names its serials; a count is refused', async () => {
+    const stores = await w.as('stores');
+    const open = (serials?: string[]) => stores.post('/api/stock/adjustments').send({
+      kind: 'opening', location_id: id.stores, reason: 'Opening batteries', lines: [{ item_id: id.bat, qty_change: '2', unit_cost: '15000', serials }],
+    });
+    await open().expect(400);
+    const adj = (await open(['BP1', 'BP2']).expect(201)).body.data;
+    await (await w.as('admin')).post(`/api/stock/adjustments/${adj.id}/approve`).send({}).expect(200);
+    expect((await units(id.bat!)).map((u) => [u.serial_no, u.status, u.location])).toEqual([['BP1', 'available', 'Stores'], ['BP2', 'available', 'Stores']]);
+    const count = await stores.post('/api/stock/counts').send({ location_id: id.stores, reason: 'Month end', lines: [{ item_id: id.bat, counted_qty: 1 }] }).expect(400);
+    expect(count.body.error.message).toMatch(/adjustment naming the serials, not a count/);
+    // The same serial cannot come in twice.
+    const again = (await open(['BP1', 'BP3']).expect(201)).body.data;
+    const refused = await (await w.as('admin')).post(`/api/stock/adjustments/${again.id}/approve`).send({}).expect(409);
+    expect(refused.body.error.message).toMatch(/BAT-X BP1 is already in stock/);
+  });
+
+  it('a transfer moves named units', async () => {
+    const stores = await w.as('stores');
+    const move = (serials: string[], from = id.stores) => stores.post('/api/stock/transfers').send({
+      from_location_id: from, to_location_id: id.showroom, reason: 'For the floor', lines: [{ item_id: id.ev, qty: 1, serials }],
+    });
+    await move(['EV001', 'EV002']).expect(400);
+    expect((await move(['EV009']).expect(400)).body.error.message).toMatch(/no EV-X1 with serial EV009/);
+    await move(['EV001']).expect(201);
+    expect((await move(['EV001']).expect(409)).body.error.message).toMatch(/not at the place it is being moved from/);
+    expect((await units(id.ev!)).map((u) => [u.serial_no, u.location])).toEqual([['EV001', 'Showroom'], ['EV002', 'Stores']]);
+    expect([await stockAt(id.ev!, 'showroom'), await unitsAt(id.ev!, 'showroom')]).toEqual([1, 1]);
+  });
+
+  it('the quick bill sells by serial, and the serial goes on the bill', async () => {
+    const store = await w.as('store');
+    const bill = (serials?: string[]) => store.post('/api/sales/quick-bill').send({
+      customer: { phone: '9811000099', name: 'Kiran' }, lines: [{ item_id: id.ev, qty: 1, serials }], payments: [{ mode: 'upi', amount: 84000 }],
+    });
+    expect((await bill().expect(400)).body.error.message).toMatch(/give one serial for each of the 1 \(0 given\)/);
+    expect((await bill(['EV002']).expect(409)).body.error.message).toMatch(/EV-X1 EV002 is not at this place/);
+    const res = (await bill(['EV001']).expect(201)).body.data;
+    id.evInvoice = res.invoice.id;
+    const doc = (await store.get(`/api/sales/invoices/${res.invoice.id}`).expect(200)).body.data;
+    expect(doc.lines[0].serials).toEqual(['EV001']);
+    const [ev001] = await units(id.ev!);
+    expect(ev001).toMatchObject({ serial_no: 'EV001', status: 'sold', location: null, sold_invoice_line_id: doc.lines[0].id });
+  });
+
+  it('a delivery picks serials; without them it is refused', async () => {
+    const sales = await w.as('sales');
+    const order = (await sales.post('/api/sales/orders').send({ channel: 'dealer', party_id: id.dealer, lines: [{ item_id: id.ev, qty: 1 }] }).expect(201)).body.data;
+    await sales.post(`/api/sales/orders/${order.id}/confirm`).send({}).expect(200);
+    await sales.post(`/api/sales/orders/${order.id}/deliver`).send({}).expect(400);
+    const lineId = (await sales.get(`/api/sales/orders/${order.id}`).expect(200)).body.data.lines[0].id;
+    const d = (await sales.post(`/api/sales/orders/${order.id}/deliver`).send({ lines: [{ order_line_id: lineId, qty: 1, serials: ['EV002'] }] }).expect(201)).body.data;
+    expect((await sales.get(`/api/sales/deliveries/${d.delivery.id}`).expect(200)).body.data.lines[0].serials).toEqual(['EV002']);
+    const inv = (await sales.post(`/api/sales/orders/${order.id}/invoice`).send({}).expect(201)).body.data;
+    id.dealerInvoice = inv.id;
+    expect((await sales.get(`/api/sales/invoices/${inv.id}`).expect(200)).body.data.lines[0].serials).toEqual(['EV002']);
+  });
+
+  it('a credit note brings a sold unit back by serial', async () => {
+    const accounts = await w.as('accounts');
+    const doc = (await accounts.get(`/api/sales/invoices/${id.evInvoice}`).expect(200)).body.data;
+    const back = (serials: string[]) => accounts.post(`/api/sales/invoices/${id.evInvoice}/credit-note`).send({
+      lines: [{ invoice_line_id: doc.lines[0].id, qty: 1, serials }], restock: true, reason: 'Changed mind',
+    });
+    expect((await back(['EV002']).expect(400)).body.error.message).toMatch(/EV002 was not sold on this invoice line/);
+    await back(['EV001']).expect(201);
+    expect((await units(id.ev!))[0]).toMatchObject({ serial_no: 'EV001', status: 'available', location: 'Showroom' });
+  });
+
+  it('cancelling a bill with restock brings its units back too', async () => {
+    const cancelled = await (await w.as('accounts')).post(`/api/sales/invoices/${id.dealerInvoice}/cancel`).send({ reason: 'Wrong dealer', restock: true });
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    expect((await units(id.ev!))[1]).toMatchObject({ serial_no: 'EV002', status: 'available', location: 'Showroom' });
+    expect([await stockAt(id.ev!, 'showroom'), await unitsAt(id.ev!, 'showroom')]).toEqual([2, 2]);
+  });
+
+  it('records what a vehicle is made of, and walks it both ways', async () => {
+    const stores = await w.as('stores');
+    const ev001 = (await stores.get('/api/units?q=EV001').expect(200)).body.data[0];
+    const add = async (parentId: string, itemId: string, serial: string, extra: object = {}) =>
+      (await stores.post(`/api/units/${parentId}/components`).send({ item_id: itemId, serial_no: serial, ...extra }).expect(201)).body.data;
+    const pack = await add(ev001.id, id.bat!, 'bp-in-1', { bpan: BPAN.toLowerCase(), batch_no: 'CELLS-7' });
+    const ctrl = await add(pack.id, id.ctrl!, 'CT-1', { firmware_version: '2.4.1' });
+    const motor = await add(ctrl.id, id.motor!, 'MT-1');
+    expect(pack).toMatchObject({ serial_no: 'BP-IN-1', bpan: BPAN, status: 'available', location_id: null });
+
+    const up = (await stores.get('/api/units/mt-1/genealogy').expect(200)).body.data;
+    expect(up.ancestors.map((a: any) => [a.serial_no, a.depth])).toEqual([['CT-1', 1], ['BP-IN-1', 2], ['EV001', 3]]);
+    const down = (await stores.get('/api/units/EV001/genealogy').expect(200)).body.data;
+    expect(down.descendants.map((d: any) => [d.serial_no, d.depth])).toEqual([['BP-IN-1', 1], ['CT-1', 2], ['MT-1', 3]]);
+
+    // A battery on the shelf is stock of its own: it is not "fitted" by a note.
+    const bp1 = (await stores.get('/api/units?q=BP1').expect(200)).body.data[0];
+    expect((await stores.patch(`/api/units/${bp1.id}`).send({ parent_unit_id: ev001.id }).expect(409)).body.error.message).toMatch(/on the shelf as stock of its own/);
+    // No unit inside one of its own parts.
+    await stores.patch(`/api/units/${pack.id}`).send({ parent_unit_id: motor.id }).expect(400);
+    // Sales can look units up but not change them.
+    await (await w.as('sales')).patch(`/api/units/${pack.id}`).send({ firmware_version: 'x' }).expect(403);
+
+    // Where the vehicle goes, its parts go: to the demo fleet, all of them demo.
+    await stores.post('/api/stock/transfers').send({ from_location_id: id.showroom, to_location_id: id.demo, reason: 'Test rides', lines: [{ item_id: id.ev, qty: 1, serials: ['EV001'] }] }).expect(201);
+    const statuses = await rows<{ serial_no: string; status: string }>(w.db, sql`select serial_no, status::text from units where serial_no in ('EV001', 'BP-IN-1', 'CT-1', 'MT-1') order by serial_no`);
+    expect(statuses.map((s) => s.status)).toEqual(['demo', 'demo', 'demo', 'demo']);
+    const unit = (await stores.get(`/api/units/${ev001.id}`).expect(200)).body.data;
+    expect(unit.events.map((e: any) => e.event)).toEqual(['moved', 'returned', 'sold', 'moved', 'received']);
+  });
+
+  it('tells the owner which batteries are late for their storage charge', async () => {
+    const stores = await w.as('stores');
+    const bp1 = (await stores.get('/api/units?q=BP1').expect(200)).body.data[0];
+    await stores.post(`/api/units/${bp1.id}/charged`).send({ charged_on: addDays(istDate(), -31) }).expect(200);
+    const due = (await (await w.as('owner')).get('/api/units/charge-due').expect(200)).body.data;
+    expect(due.map((d: any) => [d.serial_no, d.days_late])).toEqual([['BP1', 1]]);
+    expect((await (await w.as('owner')).get('/api/dashboards/overview').expect(200)).body.data.units).toEqual({ charge_due: 1 });
+    await stores.post(`/api/units/${bp1.id}/charged`).send({}).expect(200);
+    expect((await stores.get('/api/units/charge-due').expect(200)).body.data).toEqual([]);
+  });
+
+  it('a write-off scraps the named unit', async () => {
+    const stores = await w.as('stores');
+    const adj = (await stores.post('/api/stock/adjustments').send({
+      kind: 'adjustment', location_id: id.stores, reason: 'Cell swelling', lines: [{ item_id: id.bat, qty_change: '-1', serials: ['BP2'] }],
+    }).expect(201)).body.data;
+    await (await w.as('admin')).post(`/api/stock/adjustments/${adj.id}/approve`).send({}).expect(200);
+    expect((await units(id.bat!)).find((u) => u.serial_no === 'BP2')).toMatchObject({ status: 'scrapped', location: null });
+  });
+
+  it('keeps the history append-only, one unit per ledger row, units equal to stock, and the books balanced', async () => {
+    await expect(w.db.execute(sql`update unit_events set note = 'x'`)).rejects.toThrow();
+    await expect(w.db.execute(sql`delete from unit_events`)).rejects.toThrow();
+    const [u] = await rows<{ id: string; item_id: string; location_id: string }>(w.db, sql`select id, item_id, location_id from units where serial_no = 'BP1'`);
+    await expect(w.db.execute(sql`insert into stock_movements (item_id, location_id, qty, unit_cost, value, movement_type, ref_type, ref_id, unit_id)
+      values (${u!.item_id}, ${u!.location_id}, 2, 1, 2, 'adjustment', 'test', gen_random_uuid(), ${u!.id})`)).rejects.toThrow();
+    // Outside Rejected, the units at each place are exactly the stock there.
+    const mismatch = await rows(w.db, sql`
+      select m.item_id, m.location_id, sum(m.qty) as qty,
+             (select count(*) from units x where x.item_id = m.item_id and x.location_id = m.location_id) as units
+        from stock_movements m join items i on i.id = m.item_id join locations l on l.id = m.location_id
+       where i.is_serialised and l.type <> 'rejected'
+       group by m.item_id, m.location_id
+      having sum(m.qty) <> (select count(*) from units x where x.item_id = m.item_id and x.location_id = m.location_id)`);
+    expect(mismatch).toEqual([]);
+    await expectBooksHealthy(w);
   });
 });

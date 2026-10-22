@@ -7,6 +7,7 @@ import { rows, type DB } from '../db/client';
 import { zDate } from '../lib/http';
 import { gstSummary } from './gst';
 import { LATE, ensureTasks } from './ops';
+import { chargeDue } from './units';
 
 /**
  * Dashboards. Read-only: every figure is worked out from the records at the moment it is asked for,
@@ -96,6 +97,12 @@ export function dashboardsRouter(db: DB) {
                               where l.type in ('stores', 'showroom') group by m.item_id) s on s.item_id = i.id
                  where i.is_stock_item and i.active and i.reorder_level is not null and coalesce(s.qty, 0) < i.reorder_level)::int as low_stock,
                (select count(*) from stock_adjustments where status = 'pending')::int as adjustments_pending`);
+    }
+    // The daily battery alert: units waiting for their storage charge. No scheduler is needed: it is on the
+    // home screen every day for as long as one is late, and not there at all when none is.
+    if (can(role, 'units:read')) {
+      const due = (await chargeDue(db)).length;
+      if (due > 0) data.units = { charge_due: due };
     }
     if (money) {
       data.bank = await one(sql`select count(*)::int as unreconciled from bank_statement_lines where status = 'unmatched'`);

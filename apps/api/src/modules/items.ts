@@ -67,6 +67,8 @@ const zItem = z.object({
   dealer_price: zMoney.default('0'),
   reorder_level: emptyToNull(zQtyNonNeg).optional(),
   barcode: emptyToNull(z.string().trim().max(60)).optional(),
+  is_serialised: z.boolean().optional(),
+  charge_every_days: emptyToNull(z.coerce.number().int().min(1).max(3650)).optional(),
   active: z.boolean().optional(),
 });
 
@@ -74,7 +76,7 @@ function toRow(b: Partial<z.infer<typeof zItem>>) {
   return {
     sku: b.sku, name: b.name, itemType: b.item_type, categoryId: b.category_id, hsnSac: b.hsn_sac, gstRate: b.gst_rate, cessRate: b.cess_rate,
     unit: b.unit, purchaseCost: b.purchase_cost, mrp: b.mrp, retailPrice: b.retail_price, dealerPrice: b.dealer_price,
-    reorderLevel: b.reorder_level, barcode: b.barcode, active: b.active,
+    reorderLevel: b.reorder_level, barcode: b.barcode, active: b.active, isSerialised: b.is_serialised, chargeEveryDays: b.charge_every_days,
     // Services are never stock items (PRD 8.4).
     ...(b.item_type ? { isStockItem: b.item_type !== 'service' } : {}),
   };
@@ -189,6 +191,11 @@ export function itemsRouter(db: DB) {
       if (body.item_type && (body.item_type === 'service') !== (before!.itemType === 'service')) {
         const [moved] = await rows(ctx.tx, sql`select 1 as x from stock_movements where item_id = ${id} limit 1`);
         if (moved) throw badRequest('This item has stock history, so it cannot switch between goods and service');
+      }
+      // Kept by serial or not: switched only while none is in stock, so every unit on the shelf has a serial (or none has).
+      if (body.is_serialised !== undefined && body.is_serialised !== before!.isSerialised) {
+        const [held] = await rows<{ q: string }>(ctx.tx, sql`select coalesce(sum(qty), 0)::text as q from stock_movements where item_id = ${id}`);
+        if (Number(held?.q ?? 0) !== 0) throw badRequest('Serial numbers can be switched on or off only while none of this item is in stock');
       }
       const patch = Object.fromEntries(Object.entries(toRow(body)).filter(([, v]) => v !== undefined));
       const [row] = await ctx.tx.update(items).set({ ...patch, updatedAt: new Date() }).where(eq(items.id, id)).returning();

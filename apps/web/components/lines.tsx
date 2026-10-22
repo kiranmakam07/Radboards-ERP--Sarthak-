@@ -1,19 +1,22 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
+import { SerialPicker } from '@/components/serials';
 import { api } from '@/lib/api';
 
-export type Line = { item_id: string; qty: string; rate: string; discount: string };
+export type Line = { item_id: string; qty: string; rate: string; discount: string; serials?: string[] };
 export type ItemLite = {
   id: string; sku: string; name: string; unit: string; gst_rate: string; retail_price: string; dealer_price: string;
-  purchase_cost: string; on_hand?: string; showroom_qty?: string; stores_qty?: string; item_type: string; is_stock_item: boolean;
+  purchase_cost?: string; on_hand?: string; showroom_qty?: string; stores_qty?: string; item_type: string; is_stock_item: boolean;
+  is_serialised?: boolean;
 };
 
-/** Lines for the API: blank rate/discount means "use the price list" / "no discount". */
+/** Lines for the API: blank rate/discount means "use the price list" / "no discount"; serials only where picked. */
 export const toApiLines = (lines: Line[], withDiscount = true) =>
   lines.map((l) => ({
     item_id: l.item_id, qty: l.qty, rate: l.rate === '' ? null : l.rate,
     ...(withDiscount ? { discount: l.discount === '' ? null : l.discount } : {}),
+    ...(l.serials?.length ? { serials: l.serials } : {}),
   }));
 
 /**
@@ -22,7 +25,7 @@ export const toApiLines = (lines: Line[], withDiscount = true) =>
  * only sends a value when someone overrides it.
  */
 export function LineEditor({
-  items, lines, onChange, priceKey, showDiscount = true, showStock = true, filter, stockKey = 'on_hand', stockLabel = 'in stock',
+  items, lines, onChange, priceKey, showDiscount = true, showStock = true, filter, stockKey = 'on_hand', stockLabel = 'in stock', serialsFrom,
 }: {
   items: ItemLite[];
   lines: Line[];
@@ -34,6 +37,8 @@ export function LineEditor({
   /** Which stock figure to show beside each item: the location this document draws from. */
   stockKey?: 'on_hand' | 'showroom_qty' | 'stores_qty';
   stockLabel?: string;
+  /** Goods leave from here now (the quick bill): items kept by serial get a row to pick their serials. */
+  serialsFrom?: string | null;
 }) {
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -90,8 +95,10 @@ export function LineEditor({
             <tbody>
               {lines.map((l, i) => {
                 const item = byId.get(l.item_id);
+                const picks = serialsFrom !== undefined && item?.is_serialised;
                 return (
-                  <tr key={l.item_id}>
+                  <Fragment key={l.item_id}>
+                  <tr>
                     <td data-label="Item">{item ? `${item.sku} — ${item.name}` : l.item_id}</td>
                     <td className="right" data-label="Qty"><input type="number" inputMode="decimal" min="0" step="any" value={l.qty} style={{ width: 80 }} onChange={(e) => update(i, { qty: e.target.value })} /></td>
                     <td className="right" data-label="Rate"><input type="number" inputMode="decimal" min="0" step="any" value={l.rate} placeholder={item ? String(Number(item[priceKey])) : ''} style={{ width: 110 }} onChange={(e) => update(i, { rate: e.target.value })} /></td>
@@ -99,6 +106,15 @@ export function LineEditor({
                     <td className="right" data-label="GST %">{item ? Number(item.gst_rate) : ''}</td>
                     <td data-label=""><button type="button" onClick={() => onChange(lines.filter((_, idx) => idx !== i))}>Remove</button></td>
                   </tr>
+                  {picks ? (
+                    <tr className="serial-row">
+                      <td colSpan={showDiscount ? 6 : 5}>
+                        <SerialPicker itemId={l.item_id} locationId={serialsFrom ?? null} qty={Number(l.qty) || 0} value={l.serials ?? []}
+                          onChange={(serials) => update(i, { serials, qty: serials.length > Number(l.qty || 0) ? String(serials.length) : l.qty })} />
+                      </td>
+                    </tr>
+                  ) : null}
+                  </Fragment>
                 );
               })}
             </tbody>

@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import { D, MOVEMENT_TYPES, istDate, money, qty as fmtQty, round2 } from '@radcore/shared';
@@ -7,12 +7,15 @@ import { requirePerm } from '../core/auth';
 import { postJournal } from '../core/journal';
 import { nextNumber } from '../core/numbering';
 import { lockItems, onHand, stockIn, stockOut, valuation } from '../core/stock';
+import { cleanSerials, needsSerials, unitsBySerial, unitsIn, unitsMove, unitsOut } from '../core/units';
 import { rows, type DB } from '../db/client';
 import {
-  locations, stockAdjustmentLines, stockAdjustments, stockMovements, stockTransferLines, stockTransfers,
+  items, locations, stockAdjustmentLines, stockAdjustments, stockMovements, stockTransferLines, stockTransfers,
 } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
-import { type Ctx, emptyToNull, inTx, sendList, sized, wantsFile, zDate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSignedQty, zText } from '../lib/http';
+import {
+  type Ctx, emptyToNull, inTx, sendList, sized, wantsFile, zDate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSerials, zSignedQty, zText,
+} from '../lib/http';
 
 /**
  * Stock as the stores see it: what is on hand and where, what is running low, what it is worth,
@@ -35,11 +38,12 @@ async function activeLocation(tx: DB, id: string) {
 
 /**
  * Transfer between locations (e.g. Stores -> Showroom). Two ledger rows at the same value,
- * so total stock value does not change and no journal entry is needed.
+ * so total stock value does not change and no journal entry is needed. A serialised item moves
+ * named units, two rows for each.
  */
 export async function createTransfer(
   ctx: Ctx,
-  input: { fromLocationId: string; toLocationId: string; reason: string; lines: { itemId: string; qty: string }[] },
+  input: { fromLocationId: string; toLocationId: string; reason: string; lines: { itemId: string; qty: string; serials?: string[] | null }[] },
 ) {
   const { tx } = ctx;
   if (input.fromLocationId === input.toLocationId) throw badRequest('Pick two different locations');
@@ -65,11 +69,21 @@ export async function createTransfer(
     const unitCost = v.qty.gt(0) ? round2(v.value.div(v.qty)) : D(item.purchaseCost);
     const value = round2(q.times(unitCost));
     const base = { itemId: item.id, unitCost: money(unitCost), movementType: 'transfer' as const, refType: 'stock_transfer', refId: transfer!.id, reason: input.reason, createdBy: ctx.user?.id ?? null };
-    await tx.insert(stockMovements).values([
-      { ...base, locationId: from.id, qty: fmtQty(q.neg()), value: money(value.neg()) },
-      { ...base, locationId: to.id, qty: fmtQty(q), value: money(value) },
-    ]);
-    await tx.insert(stockTransferLines).values({ transferId: transfer!.id, itemId: item.id, qty: fmtQty(q) });
+    const serials = needsSerials(item) ? cleanSerials(item, q, l.serials) : null;
+    if (serials) {
+      const moved = await unitsMove(ctx, { item, fromLocationId: from.id, toLocationId: to.id, serials, refType: 'stock_transfer', refId: transfer!.id, reason: input.reason });
+      const each = money(unitCost);
+      await tx.insert(stockMovements).values(moved.flatMap((u) => [
+        { ...base, locationId: from.id, qty: '-1', value: money(D(each).neg()), unitId: u.id, batchId: u.batchId },
+        { ...base, locationId: to.id, qty: '1', value: each, unitId: u.id, batchId: u.batchId },
+      ]));
+    } else {
+      await tx.insert(stockMovements).values([
+        { ...base, locationId: from.id, qty: fmtQty(q.neg()), value: money(value.neg()) },
+        { ...base, locationId: to.id, qty: fmtQty(q), value: money(value) },
+      ]);
+    }
+    await tx.insert(stockTransferLines).values({ transferId: transfer!.id, itemId: item.id, qty: fmtQty(q), serials });
   }
   await audit(ctx, 'stock_transfer', transfer!.id, 'create', null, { ...transfer, lines: input.lines });
   return transfer!;
@@ -78,7 +92,11 @@ export async function createTransfer(
 // ---------------------------------------------------------------------------
 // Adjustments, counts and opening stock
 // ---------------------------------------------------------------------------
-type AdjLine = { itemId: string; qtyChange: string; unitCost?: string | null; systemQty?: string | null; countedQty?: string | null };
+type AdjLine = {
+  itemId: string; qtyChange: string; unitCost?: string | null; systemQty?: string | null; countedQty?: string | null;
+  /** A serialised item: the serials coming in (opening stock, found) or going out (written off), one per unit. */
+  serials?: string[] | null;
+};
 
 /**
  * Adjustment / physical count / opening stock. Saved as Pending: nothing touches the stock
@@ -92,6 +110,22 @@ export async function createAdjustment(
   const where = await activeLocation(tx, input.locationId);
   if (where.type === 'job_work') throw badRequest('Stock that is with job workers is put right on its job work challan (record it as come back, used or lost)');
   if (input.lines.length === 0) throw badRequest('Add at least one item');
+  const found = await tx.select().from(items).where(inArray(items.id, input.lines.map((l) => l.itemId)));
+  const serials = new Map<AdjLine, string[] | null>();
+  for (const l of input.lines) {
+    const item = found.find((i) => i.id === l.itemId);
+    if (!item) throw badRequest('Item not found');
+    if (!needsSerials(item)) { serials.set(l, null); continue; }
+    if (input.kind === 'count') throw badRequest(`${item.name} has serial numbers: put it right with an adjustment naming the serials, not a count`);
+    const list = cleanSerials(item, D(l.qtyChange).abs(), l.serials);
+    // Going out: the units must be here now (checked again when it is approved).
+    if (D(l.qtyChange).lt(0)) {
+      for (const u of await unitsBySerial(tx, item, list)) {
+        if (u.locationId !== input.locationId) throw conflict(`${item.name} ${u.serialNo} is not at ${where.name}`);
+      }
+    }
+    serials.set(l, list);
+  }
   const { number } = await nextNumber(tx, 'stock_adjustment', istDate());
   const [adj] = await tx
     .insert(stockAdjustments)
@@ -100,7 +134,7 @@ export async function createAdjustment(
   await tx.insert(stockAdjustmentLines).values(
     input.lines.map((l) => ({
       adjustmentId: adj!.id, itemId: l.itemId, qtyChange: fmtQty(l.qtyChange), unitCost: l.unitCost ? money(l.unitCost) : null,
-      systemQty: l.systemQty ?? null, countedQty: l.countedQty ?? null,
+      systemQty: l.systemQty ?? null, countedQty: l.countedQty ?? null, serials: serials.get(l) ?? null,
     })),
   );
   await audit(ctx, 'stock_adjustment', adj!.id, 'create', null, { ...adj, lines: input.lines });
@@ -126,13 +160,27 @@ export async function decideAdjustment(ctx: Ctx, id: string, approve: boolean, n
       const change = D(l.qtyChange);
       if (change.isZero()) continue;
       const movementType = adj!.kind === 'opening' ? 'opening' : 'adjustment';
+      if (needsSerials(item) && !l.serials?.length) throw badRequest(`${item.name} now has serial numbers: raise this adjustment again with the serials`);
       if (change.gt(0)) {
         const v = await valuation(tx, item.id);
         const cost = l.unitCost ?? (v.qty.gt(0) ? money(v.value.div(v.qty)) : item.purchaseCost);
-        gain = gain.plus(await stockIn(ctx, {
-          itemId: item.id, locationId: adj!.locationId, qty: change, unitCost: cost, movementType,
-          refType: 'stock_adjustment', refId: id, reason: adj!.reason,
-        }));
+        gain = gain.plus(needsSerials(item)
+          ? await unitsIn(ctx, {
+              item, locationId: adj!.locationId, serials: l.serials!, unitCost: cost, movementType,
+              refType: 'stock_adjustment', refId: id, event: adj!.kind === 'opening' ? 'opening' : 'found', reason: adj!.reason,
+            })
+          : await stockIn(ctx, {
+              itemId: item.id, locationId: adj!.locationId, qty: change, unitCost: cost, movementType,
+              refType: 'stock_adjustment', refId: id, reason: adj!.reason,
+            }));
+      } else if (needsSerials(item)) {
+        // Written off, whatever state it was in: the unit is gone.
+        const out = await unitsOut(ctx, {
+          item, locationId: adj!.locationId, serials: l.serials!, movementType, refType: 'stock_adjustment', refId: id,
+          event: 'written_off', status: 'scrapped', reason: adj!.reason,
+          fromStatuses: ['available', 'demo', 'under_repair', 'quarantine', 'damaged'],
+        });
+        loss = loss.plus(out.value);
       } else {
         const out = await stockOut(ctx, {
           itemId: item.id, locationId: adj!.locationId, qty: change.neg(), movementType,
@@ -246,12 +294,12 @@ export function inventoryRouter(db: DB) {
   r.post('/transfers', requirePerm('stock:write'), async (req, res) => {
     const b = z.object({
       from_location_id: zId, to_location_id: zId, reason: zText(300),
-      lines: z.array(z.object({ item_id: zId, qty: zQty })).min(1).max(200),
+      lines: z.array(z.object({ item_id: zId, qty: zQty, serials: zSerials.optional() })).min(1).max(200),
     }).parse(req.body);
     const transfer = await inTx(db, req, (ctx) =>
       createTransfer(ctx, {
         fromLocationId: b.from_location_id, toLocationId: b.to_location_id, reason: b.reason,
-        lines: b.lines.map((l) => ({ itemId: l.item_id, qty: l.qty })),
+        lines: b.lines.map((l) => ({ itemId: l.item_id, qty: l.qty, serials: l.serials })),
       }));
     res.status(201).json({ data: transfer });
   });
@@ -289,6 +337,7 @@ export function inventoryRouter(db: DB) {
         item_id: zId,
         qty_change: zSignedQty.refine(sized((d) => !d.isZero()), 'cannot be 0'),
         unit_cost: emptyToNull(zMoney).optional(),
+        serials: zSerials.optional(),
       })).min(1).max(500),
     }).parse(req.body);
     if (b.kind === 'opening' && b.lines.some((l) => D(l.qty_change).lte(0) || !l.unit_cost)) {
@@ -297,7 +346,7 @@ export function inventoryRouter(db: DB) {
     const adj = await inTx(db, req, (ctx) =>
       createAdjustment(ctx, {
         kind: b.kind, locationId: b.location_id, reason: b.reason,
-        lines: b.lines.map((l) => ({ itemId: l.item_id, qtyChange: l.qty_change, unitCost: l.unit_cost })),
+        lines: b.lines.map((l) => ({ itemId: l.item_id, qtyChange: l.qty_change, unitCost: l.unit_cost, serials: l.serials })),
       }));
     res.status(201).json({ data: adj });
   });
