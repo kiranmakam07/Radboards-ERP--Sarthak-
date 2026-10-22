@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { D, PAYMENT_DIRECTIONS, PAYMENT_MODES, istDate, money, type PaymentMode } from '@radcore/shared';
+import { D, PAYMENT_DIRECTIONS, PAYMENT_MODES, istDate, money, round2, type PaymentMode } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { assertMoneyAccount, defaultMoneyAccount, postJournal, reverseJournals, type SystemAccount } from '../core/journal';
@@ -9,7 +9,9 @@ import { nextNumber } from '../core/numbering';
 import { rows, type DB } from '../db/client';
 import { invoices, parties, paymentAllocations, payments, purchaseBills, tdsRates } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zMoneyPos, zText, type Ctx } from '../lib/http';
+import {
+  emptyToNull, fxOf, inTx, sendList, zCurrency, zDate, zFxRate, zId, zListQuery, zMoney, zMoneyPos, zText, type Ctx,
+} from '../lib/http';
 import { assertCreditsCovered } from './credits';
 
 /**
@@ -39,6 +41,9 @@ export type PaymentInput = {
   tdsRateId?: string | null;
   /** What the tax was worked out on; the whole settlement when not given. */
   tdsBase?: string | null;
+  /** Paid in a foreign currency (to a supplier): which, and its rate in rupees today. */
+  currency?: string;
+  fxRate?: string | null;
 };
 
 /** What a payment settles on the party's account: the money that moved plus any tax held back. */
@@ -55,11 +60,13 @@ function controlAccount(partyType: string | null): SystemAccount {
  */
 async function allocate(ctx: Ctx, payment: Payment, allocations: AllocationInput[]): Promise<void> {
   const { tx } = ctx;
+  let fxTotal = D(0);
   for (const a of allocations) {
     const amount = D(a.amount);
     if (amount.lte(0)) throw badRequest('Allocation amount must be more than 0');
     if (a.invoiceId) {
       if (payment.direction !== 'in') throw badRequest('Only money received can be allocated to a sales invoice');
+      if (payment.currency !== 'INR') throw badRequest('Sales invoices are in rupees: record the receipt in INR');
       const [inv] = await tx.select().from(invoices).where(eq(invoices.id, a.invoiceId)).for('update');
       if (!inv || inv.docType !== 'tax_invoice' || inv.status !== 'issued') throw badRequest('Invoice is not an issued tax invoice');
       if ((inv.partyId ?? null) !== (payment.partyId ?? null)) throw badRequest(`Invoice ${inv.invoiceNo} belongs to a different party`);
@@ -73,16 +80,35 @@ async function allocate(ctx: Ctx, payment: Payment, allocations: AllocationInput
       const [bill] = await tx.select().from(purchaseBills).where(eq(purchaseBills.id, a.purchaseBillId)).for('update');
       if (!bill || bill.docType !== 'bill' || bill.status !== 'posted') throw badRequest('Purchase bill is not a posted bill');
       if (bill.supplierId !== payment.partyId) throw badRequest(`Bill ${bill.billNo} belongs to a different supplier`);
+      if (bill.currency !== payment.currency) throw badRequest(`Bill ${bill.billNo} is in ${bill.currency}: pay it in ${bill.currency}`);
       const [o] = await rows<{ outstanding: string }>(tx, sql`select outstanding from v_bill_outstanding where bill_id = ${bill.id}`);
-      if (amount.gt(D(o?.outstanding ?? 0))) {
-        throw conflict(`Bill ${bill.billNo} has only ${money(o?.outstanding ?? 0)} outstanding`);
+      const outstanding = D(o?.outstanding ?? 0);
+      // A foreign bill is cleared by the foreign sum paid, at the bill's own rate; the rupees paid were at today's.
+      // The difference is the exchange gain (+) or loss (-). A paisa or so of rounding on the last payment is absorbed.
+      let cleared = bill.currency === 'INR' ? amount : round2(amount.div(payment.fxRate).times(bill.fxRate));
+      if (cleared.gt(outstanding) && cleared.minus(outstanding).lte(1) && bill.currency !== 'INR') cleared = outstanding;
+      if (cleared.gt(outstanding)) {
+        throw conflict(`Bill ${bill.billNo} has only ${money(outstanding)} outstanding`);
       }
-      await tx.insert(paymentAllocations).values({ paymentId: payment.id, purchaseBillId: bill.id, amount: money(amount), createdBy: ctx.user?.id ?? null });
+      const fxDifference = cleared.minus(amount);
+      fxTotal = fxTotal.plus(fxDifference);
+      await tx.insert(paymentAllocations).values({
+        paymentId: payment.id, purchaseBillId: bill.id, amount: money(amount), fxDifference: money(fxDifference), createdBy: ctx.user?.id ?? null,
+      });
     } else throw badRequest('Each allocation needs an invoice or a purchase bill');
   }
   const [t] = await rows<{ total: string }>(tx, sql`
     select coalesce(sum(amount), 0)::text as total from payment_allocations where payment_id = ${payment.id}`);
   if (D(t?.total ?? 0).gt(settles(payment))) throw badRequest('Allocations add up to more than the payment');
+  // The exchange difference settles the supplier for more (a gain) or less (a loss) than the rupees paid.
+  // Booked under the payment, so cancelling the payment reverses it with the rest.
+  if (!fxTotal.isZero()) {
+    await postJournal(ctx, {
+      date: payment.paidOn, refType: 'payment', refId: payment.id, entityId: payment.entityId,
+      narration: `Exchange ${fxTotal.gt(0) ? 'gain' : 'loss'} on ${payment.paymentNo} (${payment.currency} at ${D(payment.fxRate).toString()})`,
+      lines: [{ account: 'creditors', partyId: payment.partyId, debit: fxTotal }, { account: 'forex_gain_loss', credit: fxTotal }],
+    });
+  }
 }
 
 /**
@@ -127,6 +153,8 @@ export async function createPayment(ctx: Ctx, input: PaymentInput): Promise<Paym
   if (tdsBase && (tdsBase.lte(0) || tds.gte(tdsBase))) throw badRequest('The TDS must be less than the amount it is worked out on');
   const accountId = input.accountId ?? (await defaultMoneyAccount(tx, input.mode));
   await assertMoneyAccount(tx, accountId);
+  const fx = fxOf(input.currency ?? 'INR', input.fxRate);
+  if (fx.currency !== 'INR' && input.direction !== 'out') throw badRequest('Money received is recorded in rupees');
 
   const { number } = await nextNumber(tx, input.direction === 'in' ? 'receipt' : 'payment_out', input.paidOn);
   const [payment] = await tx
@@ -138,6 +166,8 @@ export async function createPayment(ctx: Ctx, input: PaymentInput): Promise<Paym
       mode: input.mode,
       accountId,
       amount: money(input.amount),
+      currency: fx.currency,
+      fxRate: fx.fxRate,
       tdsAmount: money(tds),
       tdsRateId: tds.gt(0) ? (tdsRate?.id ?? null) : null,
       tdsBase: tdsBase ? money(tdsBase) : null,
@@ -219,7 +249,7 @@ export function paymentsRouter(db: DB) {
        where p.id = ${id}`);
     must(payment, 'Payment');
     const allocations = await rows(db, sql`
-      select pa.id, pa.amount, pa.invoice_id, i.invoice_no, pa.purchase_bill_id, b.bill_no, b.supplier_invoice_no
+      select pa.id, pa.amount, pa.fx_difference, pa.invoice_id, i.invoice_no, pa.purchase_bill_id, b.bill_no, b.supplier_invoice_no
         from payment_allocations pa
         left join invoices i on i.id = pa.invoice_id
         left join purchase_bills b on b.id = pa.purchase_bill_id
@@ -248,12 +278,13 @@ export function paymentsRouter(db: DB) {
       tds_amount: emptyToNull(zMoney).optional(),
       tds_rate_id: emptyToNull(zId).optional(),
       tds_base: emptyToNull(zMoneyPos).optional(),
+      currency: zCurrency, fx_rate: emptyToNull(zFxRate).optional(),
     }).parse(req.body);
     const payment = await inTx(db, req, (ctx) =>
       createPayment(ctx, {
         direction: b.direction, partyId: b.party_id, mode: b.mode, accountId: b.account_id, amount: b.amount,
         reference: b.reference, paidOn: b.paid_on, notes: b.notes, allocations: b.allocations.map(toAlloc),
-        tdsAmount: b.tds_amount, tdsRateId: b.tds_rate_id, tdsBase: b.tds_base,
+        tdsAmount: b.tds_amount, tdsRateId: b.tds_rate_id, tdsBase: b.tds_base, currency: b.currency, fxRate: b.fx_rate,
       }));
     res.status(201).json({ data: payment });
   });

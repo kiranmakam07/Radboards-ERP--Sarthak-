@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
-  ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, SmartButton, StatusBar, Table, Toggle, date, dateTime, inr, num, sub,
+  ActionButton, Badge, Card, CurrencyFields, ErrorBox, KV, Loading, Page, SmartButton, StatusBar, Table, Toggle, currencyBody, date, dateTime, inr, num, sub,
 } from '@/components/ui';
 import { EditLines, linesKey } from '@/components/edit-lines';
 import { post, useGet } from '@/lib/api';
@@ -150,17 +150,21 @@ function LinesForm({
 
 function BillForm({ po, onDone }: { po: any; onDone: (bill: any) => void }) {
   const [head, setHead] = useState({ supplier_invoice_no: '', bill_date: istDate(), round_off: '' });
+  // A foreign supplier's invoice is entered in its own currency (the PO's, unless it says otherwise).
+  const [money, setMoney] = useState({ currency: po.currency ?? 'INR', fx_rate: po.currency && po.currency !== 'INR' ? String(Number(po.fx_rate)) : '' });
   return (
     <div>
       <div className="form" style={{ marginBottom: 10 }}>
         <label><span>Supplier invoice no *</span><input value={head.supplier_invoice_no} onChange={(e) => setHead({ ...head, supplier_invoice_no: e.target.value })} /></label>
         <label><span>Invoice date *</span><input type="date" value={head.bill_date} onChange={(e) => setHead({ ...head, bill_date: e.target.value })} /></label>
         <label><span>Round off on bill (+/-)</span><input type="number" step="any" value={head.round_off} onChange={(e) => setHead({ ...head, round_off: e.target.value })} /></label>
+        <CurrencyFields value={money} onChange={setMoney} />
       </div>
       <LinesForm lines={po.lines.filter((l: any) => Number(l.billed_qty) < Number(l.qty))} qtyTitle="Qty on bill" withRate
         defaultQty={(l) => String(sub(l.qty, l.billed_qty))} submit="Save bill"
         onSubmit={async (rows) => {
           const res = await post('/purchasing/bills', {
+            ...currencyBody(money),
             supplier_id: po.supplier_id, purchase_order_id: po.id, ...head,
             lines: rows.map((r) => ({ po_line_id: r.id, qty: r.qty, rate: r.rate })),
           });

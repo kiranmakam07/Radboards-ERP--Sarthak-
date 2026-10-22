@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import { can, D, type Decimal, GST_RATES, isIsoDate, isValidGstin, normaliseGstin, normalisePhone, type Permission, type Role } from '@radcore/shared';
 import type { DB } from '../db/client';
+import { AppError } from './errors';
 import { toXlsx } from './xlsx';
 
 /**
@@ -74,6 +75,24 @@ export const zGstRate = z.union([z.string(), z.number()]).transform((v, c) => {
   }
   return n.toFixed(2);
 });
+/** A currency code (ISO 4217, three letters), rupees unless given. */
+export const zCurrency = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, 'must be a 3-letter currency code like USD').default('INR');
+/** Rupees for one unit of a foreign currency, up to 6 decimals. */
+export const zFxRate = decimalString(6).refine(sized((d) => d.gt(0) && d.lt(1000000)), 'must be more than 0');
+
+/**
+ * The currency and rate a document is in: rupees at 1, or a foreign currency at the rate given
+ * (required then). Returns the rate as text, ready to store.
+ */
+export function fxOf(currency: string, fxRate: string | null | undefined): { currency: string; fxRate: string } {
+  if (currency === 'INR') {
+    if (fxRate && !D(fxRate).eq(1)) throw new AppError(400, 'bad_request', 'A rupee amount has an exchange rate of 1');
+    return { currency, fxRate: '1' };
+  }
+  if (!fxRate) throw new AppError(400, 'bad_request', `Give the exchange rate: rupees for one ${currency}`);
+  return { currency, fxRate };
+}
+
 /** Serial numbers typed or scanned for a serialised item, one per unit. */
 export const zSerials = z.array(z.string().trim().min(1, 'a serial cannot be blank').max(60)).max(1000);
 /** Compensation cess, % of the taxable value. */

@@ -407,3 +407,70 @@ describe('0030 GST rate history', () => {
     expect((await admin.get('/api/masters/tax-rates').expect(200)).body.data.map((r: any) => [r.hsn, Number(r.gst_rate)])).toEqual([['8711', 18], ['871160', 12]]);
   });
 });
+
+describe('0031 currency and exchange differences', () => {
+  const forex = async () => Number((await rows<{ b: string }>(w.db, sql`
+    select coalesce(sum(l.debit) - sum(l.credit), 0)::text as b from journal_lines l join accounts a on a.id = l.account_id where a.system_key = 'forex_gain_loss'`))[0]!.b);
+  const outstanding = async (billId: string) => Number((await rows<{ o: string }>(w.db, sql`select outstanding::text as o from v_bill_outstanding where bill_id = ${billId}`))[0]!.o);
+
+  it('a PO and a bill in dollars are kept in rupees at their own rates', async () => {
+    const admin = await w.as('admin');
+    const stores = await w.as('stores');
+    const accounts = await w.as('accounts');
+    id.cell = (await admin.post('/api/items').send({ sku: 'CELL-21700', name: 'Cell 21700', item_type: 'raw_material', hsn_sac: '850760', gst_rate: 0 }).expect(201)).body.data.id;
+    id.importer = (await admin.post('/api/parties').send({ party_type: 'supplier', name: 'Shenzhen Cells', phone: '9700000041' }).expect(201)).body.data.id;
+    await stores.post('/api/purchasing/orders').send({ supplier_id: id.importer, currency: 'USD', lines: [{ item_id: id.cell, qty: 10, rate: 100 }] }).expect(400);
+    // $100 a cell at ₹83 = ₹8,300.
+    const po = (await stores.post('/api/purchasing/orders').send({ supplier_id: id.importer, currency: 'usd', fx_rate: '83', lines: [{ item_id: id.cell, qty: 10, rate: 100 }] }).expect(201)).body.data;
+    expect(po).toMatchObject({ currency: 'USD', fx_rate: '83.000000' });
+    await stores.post(`/api/purchasing/orders/${po.id}/send`).send({}).expect(200);
+    const poDoc = (await stores.get(`/api/purchasing/orders/${po.id}`).expect(200)).body.data;
+    expect(poDoc.lines[0].rate).toBe('8300.00');
+    id.importPo = po.id; id.importPoLine = poDoc.lines[0].id;
+    // The supplier's invoice: $1,000 for the 10, booked on its day at ₹84 = ₹84,000.
+    const bill = (await accounts.post('/api/purchasing/bills').send({
+      supplier_id: id.importer, purchase_order_id: po.id, supplier_invoice_no: 'SZ-001', bill_date: istDate(), currency: 'USD', fx_rate: '84',
+      lines: [{ po_line_id: id.importPoLine, qty: 10, rate: 100 }],
+    }).expect(201)).body.data;
+    expect(bill).toMatchObject({ currency: 'USD', grand_total: '84000.00' });
+    id.usdBill = bill.id;
+  });
+
+  it('paying it at another rate books the difference to Foreign Exchange Gain / Loss', async () => {
+    const accounts = await w.as('accounts');
+    const pay = (body: object) => accounts.post('/api/payments').send({ direction: 'out', party_id: id.importer, mode: 'bank_transfer', paid_on: istDate(), ...body });
+    expect((await pay({ amount: 85000, allocations: [{ purchase_bill_id: id.usdBill, amount: 85000 }] }).expect(400)).body.error.message).toMatch(/is in USD: pay it in USD/);
+    await accounts.post('/api/payments').send({ direction: 'in', party_id: id.franchisee, mode: 'bank_transfer', amount: 100, currency: 'USD', fx_rate: '84' }).expect(400);
+    // $1,000 paid at ₹85 = ₹85,000 from the bank; the bill was ₹84,000: a ₹1,000 loss.
+    const p = (await pay({ amount: 85000, currency: 'USD', fx_rate: '85', allocations: [{ purchase_bill_id: id.usdBill, amount: 85000 }] }).expect(201)).body.data;
+    expect(await outstanding(id.usdBill!)).toBe(0);
+    expect(await forex()).toBe(1000);
+    const doc = (await accounts.get(`/api/payments/${p.id}`).expect(200)).body.data;
+    expect(doc.allocations[0]).toMatchObject({ amount: '85000.00', fx_difference: '-1000.00' });
+    // The supplier is square: billed ₹84,000, settled ₹84,000.
+    const [bal] = await rows<{ b: string }>(w.db, sql`select coalesce(sum(debit) - sum(credit), 0)::text as b from journal_lines where party_id = ${id.importer}`);
+    expect(Number(bal!.b)).toBe(0);
+  });
+
+  it('a part payment at a better rate is a gain, and cancelling it takes the gain back', async () => {
+    const accounts = await w.as('accounts');
+    const stores = await w.as('stores');
+    const po = (await stores.post('/api/purchasing/orders').send({ supplier_id: id.importer, currency: 'USD', fx_rate: '84', lines: [{ item_id: id.cell, qty: 5, rate: 100 }] }).expect(201)).body.data;
+    await stores.post(`/api/purchasing/orders/${po.id}/send`).send({}).expect(200);
+    const line = (await stores.get(`/api/purchasing/orders/${po.id}`).expect(200)).body.data.lines[0];
+    const bill = (await accounts.post('/api/purchasing/bills').send({
+      supplier_id: id.importer, purchase_order_id: po.id, supplier_invoice_no: 'SZ-002', bill_date: istDate(), currency: 'USD', fx_rate: '84',
+      lines: [{ po_line_id: line.id, qty: 5, rate: 100 }],
+    }).expect(201)).body.data;
+    // $200 at ₹82 = ₹16,400 paid; it clears $200 of the bill at ₹84 = ₹16,800: ₹400 gained.
+    const p = (await accounts.post('/api/payments').send({
+      direction: 'out', party_id: id.importer, mode: 'bank_transfer', amount: 16400, currency: 'USD', fx_rate: '82', allocations: [{ purchase_bill_id: bill.id, amount: 16400 }],
+    }).expect(201)).body.data;
+    expect(await outstanding(bill.id)).toBe(42000 - 16800);
+    expect(await forex()).toBe(1000 - 400);
+    await accounts.post(`/api/payments/${p.id}/cancel`).send({ reason: 'Wrong rate' }).expect(200);
+    expect(await outstanding(bill.id)).toBe(42000);
+    expect(await forex()).toBe(1000);
+    await expectBooksHealthy(w);
+  });
+});

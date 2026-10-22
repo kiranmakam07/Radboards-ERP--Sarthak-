@@ -144,6 +144,29 @@ export function Notice({ children }: { children: ReactNode }) {
   return children ? <div className="notice">{children}</div> : null;
 }
 
+/**
+ * Currency and exchange rate for a supplier's document or a payment: rupees unless a foreign code is
+ * typed, and then the rupees for one unit of it that day. Amounts on the form are in that currency.
+ */
+export function CurrencyFields({ value, onChange }: { value: { currency: string; fx_rate: string }; onChange: (v: { currency: string; fx_rate: string }) => void }) {
+  const foreign = value.currency.trim().toUpperCase() !== 'INR' && value.currency.trim() !== '';
+  return (
+    <>
+      <label><span>Currency</span>
+        <input value={value.currency} maxLength={3} style={{ textTransform: 'uppercase', width: 90 }} onChange={(e) => onChange({ ...value, currency: e.target.value.toUpperCase() })} />
+      </label>
+      {foreign ? (
+        <label><span>₹ for 1 {value.currency.toUpperCase()} *</span>
+          <input type="number" min="0" step="any" value={value.fx_rate} onChange={(e) => onChange({ ...value, fx_rate: e.target.value })} />
+        </label>
+      ) : null}
+    </>
+  );
+}
+/** The currency fields for the API: nothing for rupees. */
+export const currencyBody = (v: { currency: string; fx_rate: string }) =>
+  (v.currency.trim() && v.currency.trim().toUpperCase() !== 'INR' ? { currency: v.currency.trim().toUpperCase(), fx_rate: v.fx_rate } : {});
+
 /** A line priced below cost, or discounted more than the seller may give (from the API's price check). */
 export type PriceProblem = { item_id: string; item: string; unit_price: string; list_price: string; discount_pct: string; limit_pct: number | null; below_cost: boolean; over_limit: boolean };
 
