@@ -1,7 +1,8 @@
 import { and, eq } from 'drizzle-orm';
 import { fyOf, fyShort } from '@radcore/shared';
 import type { DB } from '../db/client';
-import { numberSeries } from '../db/schema';
+import { entities, numberSeries } from '../db/schema';
+import { defaultEntityId } from './settings';
 
 /**
  * Document numbers. Each kind of document has its own series; nextNumber hands out the next one
@@ -48,17 +49,22 @@ export type SeriesKey = keyof typeof SERIES;
  * inside the caller's transaction, so two bills saved at the same moment queue up, and a
  * rolled-back transaction hands its number back.
  */
-export async function nextNumber(tx: DB, docType: SeriesKey, date: string): Promise<{ number: string; fy: string }> {
+export async function nextNumber(tx: DB, docType: SeriesKey, date: string, entityId?: string | null): Promise<{ number: string; fy: string }> {
   const def: SeriesDef = SERIES[docType];
   const fy = def.perFy ? fyOf(date) : 'ALL';
+  // Each legal entity numbers its own documents. The first one keeps the plain prefixes; another one
+  // puts its letter in front (BINV/26-27/00001), so the numbers never clash and stay within 16 characters.
+  const entity = entityId ?? (await defaultEntityId(tx));
+  const [owner] = await tx.select({ code: entities.code, isDefault: entities.isDefault }).from(entities).where(eq(entities.id, entity));
+  const letter = owner && !owner.isDefault ? (owner.code ?? '') : '';
   await tx
     .insert(numberSeries)
-    .values({ docType, fy, prefix: def.prefix(fyShort(date)), nextValue: def.start ?? 1 })
+    .values({ docType, fy, prefix: `${letter}${def.prefix(fyShort(date))}`, nextValue: def.start ?? 1, entityId: entity })
     .onConflictDoNothing();
   const [series] = await tx
     .select()
     .from(numberSeries)
-    .where(and(eq(numberSeries.docType, docType), eq(numberSeries.fy, fy)))
+    .where(and(eq(numberSeries.docType, docType), eq(numberSeries.fy, fy), eq(numberSeries.entityId, entity)))
     .for('update');
   if (!series) throw new Error(`number series missing for ${docType} ${fy}`);
   await tx

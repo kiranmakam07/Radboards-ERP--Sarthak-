@@ -13,7 +13,7 @@ import {
 import { getSetting, loadPermissionOverrides, setSetting, type CompanyProfile } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import {
-  campaigns, expenseCategories, itemCategories, leadSources, locations, lostReasons, numberSeries, priceListItems,
+  branches, campaigns, entities, expenseCategories, itemCategories, leadSources, locations, lostReasons, numberSeries, priceListItems,
   priceLists, users,
 } from '../db/schema';
 import { badRequest, forbidden, must } from '../lib/errors';
@@ -360,6 +360,49 @@ export function mastersRouter(db: DB) {
     const [row] = await db.update(itemCategories).set({ ...body, updatedAt: new Date() })
       .where(eq(itemCategories.id, zId.parse(req.params.id))).returning();
     res.json({ data: must(row, 'Category') });
+  });
+
+  // ---- legal entities and branches ----
+  /** The companies RadCore keeps books for (the first is the company profile), each with its branches. */
+  r.get('/entities', requireAuth, async (req, res) => {
+    const list = await db.select().from(entities).orderBy(desc(entities.isDefault), asc(entities.createdAt));
+    const all = await db.select().from(branches).orderBy(asc(branches.name));
+    sendList(req, res, list.map((e) => ({ ...e, branches: all.filter((b) => b.entityId === e.id) })), 'entities');
+  });
+  const zEntity = z.object({
+    legal_name: zText(200), gstin: emptyToNull(zGstin).optional(),
+    state_code: zStateCode.refine((c) => Boolean(STATE_CODES[c]), 'unknown state code'), address: zAddress.default({}),
+    code: z.string().trim().toUpperCase().regex(/^[A-Z]$/, 'one letter, put in front of its document numbers'),
+  });
+  r.post('/entities', requirePerm('settings:manage'), async (req, res) => {
+    const b = zEntity.parse(req.body);
+    const fromGstin = b.gstin ? stateCodeFromGstin(b.gstin) : null;
+    if (fromGstin && fromGstin !== b.state_code) throw badRequest(`State code ${b.state_code} does not match the GSTIN (${fromGstin})`);
+    const row = await inTx(db, req, async (ctx) => {
+      const [e] = await ctx.tx.insert(entities).values({
+        legalName: b.legal_name, gstin: b.gstin ?? null, stateCode: b.state_code, address: b.address, code: b.code, createdBy: ctx.user!.id,
+      }).returning();
+      await audit(ctx, 'entity', e!.id, 'create', null, e);
+      return e;
+    });
+    res.status(201).json({ data: row });
+  });
+  r.post('/entities/:id/branches', requirePerm('settings:manage'), async (req, res) => {
+    const entityId = zId.parse(req.params.id);
+    const b = z.object({
+      name: zText(120), gstin: emptyToNull(zGstin).optional(),
+      state_code: zStateCode.refine((c) => Boolean(STATE_CODES[c]), 'unknown state code'), address: zAddress.default({}),
+    }).parse(req.body);
+    const row = await inTx(db, req, async (ctx) => {
+      const [e] = await ctx.tx.select().from(entities).where(eq(entities.id, entityId));
+      must(e, 'Legal entity');
+      const [made] = await ctx.tx.insert(branches).values({
+        entityId, name: b.name, gstin: b.gstin ?? null, stateCode: b.state_code, address: b.address, createdBy: ctx.user!.id,
+      }).returning();
+      await audit(ctx, 'branch', made!.id, 'create', null, made);
+      return made;
+    });
+    res.status(201).json({ data: row });
   });
 
   // ---- locations ----

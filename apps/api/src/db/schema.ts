@@ -94,14 +94,51 @@ export const auditLog = pgTable('audit_log', {
   at: ts('at').notNull().defaultNow(),
 }, (t) => [index('audit_entity_idx').on(t.entity, t.entityId)]);
 
+// ----------------------------------------------------------------------------
+// Legal entities and their branches
+// ----------------------------------------------------------------------------
+/**
+ * A legal entity: one company, one PAN, one GSTIN per state it is registered in. RadCore starts with
+ * one (made from the company profile, and kept in step with it); documents, numbers, journals and
+ * places each belong to one entity, so a second company can be added without mixing the books.
+ */
+export const entities = pgTable('entities', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  legalName: text('legal_name').notNull(),
+  gstin: text('gstin'),
+  stateCode: char('state_code', { length: 2 }).notNull(),
+  address: jsonb('address').notNull().default({}),
+  /** One letter put in front of its document numbers (B -> BINV/26-27/00001); empty for the first entity. */
+  code: char('code', { length: 1 }).unique(),
+  isDefault: boolean('is_default').notNull().default(false),
+  active: boolean('active').notNull().default(true),
+  ...stamps,
+}, (t) => [uniqueIndex('entities_one_default').on(t.isDefault).where(sql`${t.isDefault}`)]);
+
+/** A branch of an entity: a shop or a warehouse, with its own GSTIN where it is registered in another state. */
+export const branches = pgTable('branches', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  entityId: uuid('entity_id').notNull().references(() => entities.id),
+  name: text('name').notNull(),
+  gstin: text('gstin'),
+  stateCode: char('state_code', { length: 2 }).notNull(),
+  address: jsonb('address').notNull().default({}),
+  active: boolean('active').notNull().default(true),
+  ...stamps,
+}, (t) => [unique('branches_entity_name_uq').on(t.entityId, t.name)]);
+
+/** Every row belongs to an entity; until a second one exists, the default one (rc_default_entity()). */
+const entityId = () => uuid('entity_id').notNull().default(sql`rc_default_entity()`).references((): AnyPgColumn => entities.id);
+
 export const numberSeries = pgTable('number_series', {
   id: uuid('id').primaryKey().defaultRandom(),
   docType: text('doc_type').notNull(),
   fy: text('fy').notNull(),
   prefix: text('prefix').notNull(),
   nextValue: integer('next_value').notNull().default(1),
+  entityId: entityId(),
   ...stamps,
-}, (t) => [unique('number_series_doc_fy').on(t.docType, t.fy)]);
+}, (t) => [unique('number_series_doc_fy').on(t.docType, t.fy, t.entityId)]);
 
 // ----------------------------------------------------------------------------
 // Masters
@@ -144,6 +181,7 @@ export const locations = pgTable('locations', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull().unique(),
   type: locationTypeEnum('type').notNull(),
+  entityId: entityId(),
   active: boolean('active').notNull().default(true),
   ...stamps,
 });
@@ -570,6 +608,7 @@ export const jobWorkReceiptLines = pgTable('job_work_receipt_lines', {
 export const salesOrders = pgTable('sales_orders', {
   id: uuid('id').primaryKey().defaultRandom(),
   orderNo: text('order_no').notNull().unique(),
+  entityId: entityId(),
   channel: channelEnum('channel').notNull(),
   externalOrderId: text('external_order_id'),
   partyId: uuid('party_id').references(() => parties.id),
@@ -658,6 +697,7 @@ export const stockReservations = pgTable('stock_reservations', {
 export const invoices = pgTable('invoices', {
   id: uuid('id').primaryKey().defaultRandom(),
   docType: invoiceDocTypeEnum('doc_type').notNull(),
+  entityId: entityId(),
   invoiceNo: text('invoice_no'),
   fy: text('fy'),
   invoiceDate: date('invoice_date').notNull(),
@@ -734,6 +774,7 @@ export const invoiceLines = pgTable('invoice_lines', {
 export const purchaseOrders = pgTable('purchase_orders', {
   id: uuid('id').primaryKey().defaultRandom(),
   poNo: text('po_no').notNull().unique(),
+  entityId: entityId(),
   supplierId: uuid('supplier_id').notNull().references(() => parties.id),
   status: poStatusEnum('status').notNull().default('draft'),
   orderDate: date('order_date').notNull(),
@@ -757,6 +798,7 @@ export const purchaseOrderLines = pgTable('purchase_order_lines', {
 export const purchaseBills = pgTable('purchase_bills', {
   id: uuid('id').primaryKey().defaultRandom(),
   docType: billDocTypeEnum('doc_type').notNull(),
+  entityId: entityId(),
   /** Our own number: PB/.. for bills, DN/.. (GST debit-note series) for debit notes. */
   billNo: text('bill_no').notNull(),
   fy: text('fy').notNull(),
@@ -892,6 +934,7 @@ export const tdsRates = pgTable('tds_rates', {
 export const payments = pgTable('payments', {
   id: uuid('id').primaryKey().defaultRandom(),
   paymentNo: text('payment_no').notNull().unique(),
+  entityId: entityId(),
   direction: paymentDirectionEnum('direction').notNull(),
   partyId: uuid('party_id').references(() => parties.id),
   mode: paymentModeEnum('mode').notNull(),
@@ -987,6 +1030,7 @@ export const journalEntries = pgTable('journal_entries', {
   id: uuid('id').primaryKey().defaultRandom(),
   entryNo: bigserial('entry_no', { mode: 'number' }).notNull(),
   entryDate: date('entry_date').notNull(),
+  entityId: entityId(),
   refType: text('ref_type').notNull(),
   refId: uuid('ref_id'),
   narration: text('narration'),

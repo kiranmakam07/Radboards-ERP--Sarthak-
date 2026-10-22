@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { PAYROLL_RULES_DEFAULT, PERMISSIONS, ROLES, setPermissionOverrides, type PayrollRules, type Permission, type PermissionOverrides, type Role } from '@radcore/shared';
 import type { DB } from '../db/client';
-import { settings } from '../db/schema';
+import { entities, settings } from '../db/schema';
 import { badRequest } from '../lib/errors';
 
 /**
@@ -103,6 +103,13 @@ export async function setSetting<K extends keyof SettingsMap>(
     .insert(settings)
     .values({ key, value: value as unknown as object, updatedBy })
     .onConflictDoUpdate({ target: settings.key, set: { value: value as unknown as object, updatedBy, updatedAt: new Date() } });
+  // The company profile is the first (default) legal entity: keep the two the same.
+  if (key === 'company') {
+    const c = value as CompanyProfile;
+    await tx.update(entities).set({
+      legalName: c.legal_name || c.name, gstin: c.gstin ?? null, stateCode: c.state_code, address: c.address ?? {}, updatedAt: new Date(),
+    }).where(eq(entities.isDefault, true));
+  }
 }
 
 /** Apply the admin's saved permission changes. Called when the API starts and after each change. */
@@ -117,8 +124,25 @@ export async function loadPermissionOverrides(tx: DB): Promise<void> {
 }
 
 /** The company profile, for anything that prints it or works out tax from its state. */
-export async function getCompany(tx: DB): Promise<CompanyProfile> {
+/**
+ * The company a document is issued by: the profile on the Setup screen, or for a document of another
+ * legal entity, that entity's name, GSTIN, state and address (bank details and terms stay the profile's).
+ */
+export async function getCompany(tx: DB, entityId?: string | null): Promise<CompanyProfile> {
   const company = await getSetting(tx, 'company');
+  if (entityId) {
+    const [e] = await tx.select().from(entities).where(eq(entities.id, entityId));
+    if (e && !e.isDefault) {
+      return { ...company, name: e.legalName, legal_name: e.legalName, gstin: e.gstin, state_code: e.stateCode, address: (e.address ?? {}) as CompanyProfile['address'] };
+    }
+  }
   if (!company.state_code) throw badRequest('Company state is not set. Ask an admin to fill in the company profile.');
   return company;
+}
+
+/** The first legal entity, the one everything belongs to unless it names another. */
+export async function defaultEntityId(tx: DB): Promise<string> {
+  const [e] = await tx.select({ id: entities.id }).from(entities).where(eq(entities.isDefault, true));
+  if (!e) throw new Error('The default legal entity is missing');
+  return e.id;
 }

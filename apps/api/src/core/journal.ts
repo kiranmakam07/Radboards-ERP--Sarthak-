@@ -42,6 +42,8 @@ export type JournalInput = {
   narration: string;
   lines: JLine[];
   reversesEntryId?: string | null;
+  /** The legal entity whose books this is in; the default entity when not given. */
+  entityId?: string | null;
 };
 
 /** Refuse a date on or before the period lock (set on the Setup screen when a month is closed). */
@@ -105,6 +107,7 @@ export async function postJournal(ctx: Ctx, input: JournalInput): Promise<string
       refId: input.refId,
       narration: input.narration,
       reversesEntryId: input.reversesEntryId ?? null,
+      ...(input.entityId ? { entityId: input.entityId } : {}),
       createdBy: ctx.user?.id ?? null,
     })
     .returning({ id: journalEntries.id });
@@ -135,8 +138,8 @@ export async function reverseJournals(
   narration: string,
 ): Promise<number> {
   const { tx } = ctx;
-  const live = await rows<{ id: string }>(tx, sql`
-    select e.id from journal_entries e
+  const live = await rows<{ id: string; entity_id: string }>(tx, sql`
+    select e.id, e.entity_id from journal_entries e
      where e.ref_type = ${refType} and e.ref_id = ${refId}
        and e.reverses_entry_id is null
        and not exists (select 1 from journal_entries r where r.reverses_entry_id = e.id)`);
@@ -148,6 +151,7 @@ export async function reverseJournals(
       refId,
       narration,
       reversesEntryId: e.id,
+      entityId: e.entity_id,
       lines: lines.map((l) => ({ account: { id: l.accountId }, partyId: l.partyId, debit: l.credit, credit: l.debit, memo: l.memo ?? undefined })),
     });
     // A cancelled entry no longer explains the bank statement line it was reconciled with. If that line was

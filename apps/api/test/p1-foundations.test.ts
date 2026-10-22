@@ -328,3 +328,49 @@ describe('0028 stock reservations', () => {
     expect((await rows<{ status: string }>(w.db, sql`select status::text from units where serial_no = 'EV002'`))[0]!.status).toBe('available');
   });
 });
+
+describe('0029 legal entities and branches', () => {
+  it('starts with one entity, the company profile, and keeps the two the same', async () => {
+    const admin = await w.as('admin');
+    const list = (await admin.get('/api/masters/entities').expect(200)).body.data;
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ legal_name: 'Radboards Pvt Ltd', state_code: '27', is_default: true, code: null });
+    await admin.put('/api/settings/company').send({
+      name: 'Radboards', legal_name: 'Radboards Private Limited', gstin: gstin('27', 'AAPFU0939F'), state_code: '27', address: { line1: '1 Test Road', city: 'Pune' },
+    }).expect(200);
+    expect((await admin.get('/api/masters/entities').expect(200)).body.data[0]).toMatchObject({ legal_name: 'Radboards Private Limited', gstin: gstin('27', 'AAPFU0939F') });
+    // Every existing document belongs to it.
+    const strays = await rows(w.db, sql`
+      select 'invoices' as t from invoices where entity_id <> rc_default_entity() union all
+      select 'journal' from journal_entries where entity_id <> rc_default_entity() union all
+      select 'orders' from sales_orders where entity_id <> rc_default_entity()`);
+    expect(strays).toEqual([]);
+  });
+
+  it('a second entity sells under its own name, state and numbers, in its own books', async () => {
+    const admin = await w.as('admin');
+    await admin.post('/api/masters/entities').send({ legal_name: 'Radboards EV Karnataka LLP', state_code: '29', gstin: gstin('29', 'RBKAR1234K'), code: 'bb' }).expect(400);
+    const ka = (await admin.post('/api/masters/entities').send({ legal_name: 'Radboards EV Karnataka LLP', state_code: '29', gstin: gstin('29', 'RBKAR1234K'), code: 'k' }).expect(201)).body.data;
+    await admin.post(`/api/masters/entities/${ka.id}/branches`).send({ name: 'Bengaluru showroom', state_code: '29' }).expect(201);
+    expect((await admin.get('/api/masters/entities').expect(200)).body.data[1].branches.map((b: any) => b.name)).toEqual(['Bengaluru showroom']);
+
+    // The Karnataka company sells to the Maharashtra franchisee: that is inter-state for it (IGST).
+    const sales = await w.as('sales');
+    const order = (await sales.post('/api/sales/orders').send({ channel: 'dealer', entity_id: ka.id, party_id: id.franchisee, lines: [{ item_id: id['GRS-1'], qty: 1 }] }).expect(201)).body.data;
+    expect(order.order_no).toMatch(/^KSO\/\d\d-\d\d\/00001$/);
+    await sales.post(`/api/sales/orders/${order.id}/confirm`).send({}).expect(200);
+    await openingStock(w, id.stores!, [{ item_id: id['GRS-1']!, qty_change: '5', unit_cost: '700' }]);
+    await sales.post(`/api/sales/orders/${order.id}/deliver`).send({}).expect(201);
+    const inv = (await sales.post(`/api/sales/orders/${order.id}/invoice`).send({}).expect(201)).body.data;
+    expect(inv.invoice_no).toMatch(/^KINV\/\d\d-\d\d\/00001$/);
+    expect(inv.invoice_no.length).toBeLessThanOrEqual(16);
+    expect(Number(inv.igst_total)).toBeGreaterThan(0);
+    const doc = (await sales.get(`/api/sales/invoices/${inv.id}`).expect(200)).body.data;
+    expect(doc.company).toMatchObject({ name: 'Radboards EV Karnataka LLP', state_code: '29', gstin: gstin('29', 'RBKAR1234K') });
+    const [je] = await rows<{ entity_id: string }>(w.db, sql`select entity_id from journal_entries where ref_type = 'invoice' and ref_id = ${inv.id}`);
+    expect(je!.entity_id).toBe(ka.id);
+    // The first company's numbering carries on by itself.
+    const series = await rows<{ doc_type: string; prefix: string }>(w.db, sql`select doc_type, prefix from number_series where doc_type = 'invoice' order by prefix`);
+    expect(series.map((s) => s.prefix.split('/')[0])).toEqual(['INV', 'KINV']);
+  });
+});
