@@ -9,6 +9,7 @@ import {
   INTERVAL_UNITS, INTERVIEW_MODES, INTERVIEW_RESULTS, INTERVIEW_STATUSES, INVOICE_DOC_TYPES, INVOICE_STATUSES, ITEM_TYPES,
   LEAD_ACTIVITY_TYPES, LEAD_STAGES, LOCATION_TYPES, MOVEMENT_TYPES, OPENING_STATUSES, ORDER_STATUSES, PARTY_TYPES,
   PAYMENT_DIRECTIONS, PAYMENT_MODES, PO_STATUSES, PROJECT_STATUSES, REJECT_REASONS, ROLES, TASK_FREQUENCIES, TASK_STATUSES,
+  UNIT_STATUSES,
 } from '@radcore/shared';
 
 // Money is numeric(12,2) in INR, quantities numeric(12,3) (PRD section 8).
@@ -25,6 +26,7 @@ const stamps = {
 };
 
 export const roleEnum = pgEnum('user_role', ROLES);
+export const unitStatusEnum = pgEnum('unit_status', UNIT_STATUSES);
 export const partyTypeEnum = pgEnum('party_type', PARTY_TYPES);
 export const itemTypeEnum = pgEnum('item_type', ITEM_TYPES);
 export const locationTypeEnum = pgEnum('location_type', LOCATION_TYPES);
@@ -302,6 +304,10 @@ export const items = pgTable('items', {
   reorderLevel: qty('reorder_level'),
   barcode: text('barcode').unique(),
   isStockItem: boolean('is_stock_item').notNull().default(true),
+  /** Every unit has its own serial (a vehicle, a battery pack): it is received, moved and sold by serial. */
+  isSerialised: boolean('is_serialised').notNull().default(false),
+  /** Batteries: a storage charge is due this many days after the last one (the owner is told when it is late). */
+  chargeEveryDays: integer('charge_every_days'),
   active: boolean('active').notNull().default(true),
   ...stamps,
 }, (t) => [
@@ -350,13 +356,81 @@ export const stockMovements = pgTable('stock_movements', {
   refType: text('ref_type').notNull(),
   refId: uuid('ref_id').notNull(),
   reason: text('reason'),
+  /** For a serialised item: the one unit this row moves (qty is then 1 or -1). */
+  unitId: uuid('unit_id').references((): AnyPgColumn => units.id),
+  batchId: uuid('batch_id').references((): AnyPgColumn => batches.id),
   postedAt: ts('posted_at').notNull().defaultNow(),
   createdBy: uuid('created_by'),
 }, (t) => [
   index('stock_movements_item_loc_idx').on(t.itemId, t.locationId),
+  index('stock_movements_unit_idx').on(t.unitId),
   index('stock_movements_ref_idx').on(t.refType, t.refId),
   check('stock_movements_qty_nonzero', sql`${t.qty} <> 0`),
+  check('stock_movements_unit_qty_chk', sql`${t.unitId} is null or abs(${t.qty}) = 1`),
 ]);
+
+// ----------------------------------------------------------------------------
+// Units: one row per serialised unit, and what happened to it
+// ----------------------------------------------------------------------------
+/** A production or supplier batch (battery cells): its chemistry and weight follow every unit made from it. */
+export const batches = pgTable('batches', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  itemId: uuid('item_id').notNull().references(() => items.id),
+  batchNo: text('batch_no').notNull(),
+  mfgDate: date('mfg_date'),
+  chemistry: text('chemistry'),
+  weightKg: numeric('weight_kg', { precision: 10, scale: 3 }),
+  supplierId: uuid('supplier_id').references(() => parties.id),
+  ...stamps,
+}, (t) => [unique('batches_item_no_uq').on(t.itemId, t.batchNo)]);
+
+/**
+ * One serialised unit. Units fit inside each other (vehicle -> battery pack -> controller -> motor)
+ * through parent_unit_id. Status and place are its current state; unit_events is its history, and
+ * the quantity ledger (stock_movements, one row per unit) stays the source of truth for value.
+ */
+export const units = pgTable('units', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  itemId: uuid('item_id').notNull().references(() => items.id),
+  serialNo: text('serial_no').notNull(),
+  parentUnitId: uuid('parent_unit_id').references((): AnyPgColumn => units.id),
+  /** Battery Pack Aadhaar Number (21 characters) from the battery pack's label. */
+  bpan: char('bpan', { length: 21 }).unique(),
+  firmwareVersion: text('firmware_version'),
+  batchId: uuid('batch_id').references(() => batches.id),
+  mfgDate: date('mfg_date'),
+  status: unitStatusEnum('status').notNull().default('available'),
+  /** Where it is now; empty once it has left us (sold, returned to the supplier, scrapped). */
+  locationId: uuid('location_id').references(() => locations.id),
+  soldDeliveryLineId: uuid('sold_delivery_line_id').references((): AnyPgColumn => deliveryLines.id),
+  soldInvoiceLineId: uuid('sold_invoice_line_id').references((): AnyPgColumn => invoiceLines.id),
+  soldOn: date('sold_on'),
+  /** Batteries in storage: when it last had its storage charge. */
+  lastChargedOn: date('last_charged_on'),
+  ...stamps,
+}, (t) => [
+  unique('units_item_serial_uq').on(t.itemId, t.serialNo),
+  index('units_serial_idx').on(t.serialNo),
+  index('units_parent_idx').on(t.parentUnitId),
+  index('units_location_idx').on(t.locationId),
+  check('units_not_own_parent', sql`${t.parentUnitId} is null or ${t.parentUnitId} <> ${t.id}`),
+]);
+
+/** A unit's history: received, moved, sold, returned, fitted into or taken out of another, charged. Append-only. */
+export const unitEvents = pgTable('unit_events', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  unitId: uuid('unit_id').notNull().references(() => units.id),
+  event: text('event').notNull(),
+  fromLocationId: uuid('from_location_id').references(() => locations.id),
+  toLocationId: uuid('to_location_id').references(() => locations.id),
+  fromStatus: unitStatusEnum('from_status'),
+  toStatus: unitStatusEnum('to_status'),
+  refType: text('ref_type'),
+  refId: uuid('ref_id'),
+  note: text('note'),
+  at: ts('at').notNull().defaultNow(),
+  createdBy: uuid('created_by'),
+}, (t) => [index('unit_events_unit_idx').on(t.unitId)]);
 
 export const stockTransfers = pgTable('stock_transfers', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -373,6 +447,8 @@ export const stockTransferLines = pgTable('stock_transfer_lines', {
   transferId: uuid('transfer_id').notNull().references(() => stockTransfers.id),
   itemId: uuid('item_id').notNull().references(() => items.id),
   qty: qty('qty').notNull(),
+  /** The serials moved, for a serialised item. */
+  serials: jsonb('serials').$type<string[]>(),
 }, (t) => [index('stock_transfer_lines_transfer_idx').on(t.transferId), check('stock_transfer_lines_qty_pos', sql`${t.qty} > 0`)]);
 
 /** Adjustments, physical counts and opening stock. Posts to the ledger only when approved. */
@@ -398,6 +474,8 @@ export const stockAdjustmentLines = pgTable('stock_adjustment_lines', {
   qtyChange: qty('qty_change').notNull(),
   /** Cost for stock coming in; null means use the current valuation rate. */
   unitCost: money('unit_cost'),
+  /** For a serialised item: the serials coming in or going out, one per unit. */
+  serials: jsonb('serials').$type<string[]>(),
 }, (t) => [index('stock_adjustment_lines_adjustment_idx').on(t.adjustmentId)]);
 
 // ----------------------------------------------------------------------------
@@ -545,6 +623,8 @@ export const deliveryLines = pgTable('delivery_lines', {
   qty: qty('qty').notNull(),
   /** Valuation rate at the moment of delivery (drives COGS). */
   unitCost: money('unit_cost').notNull(),
+  /** The serials handed over, for a serialised item (printed on the challan). */
+  serials: jsonb('serials').$type<string[]>(),
 }, (t) => [index('delivery_lines_delivery_idx').on(t.deliveryId), check('delivery_lines_qty_pos', sql`${t.qty} > 0`)]);
 
 // ----------------------------------------------------------------------------
@@ -618,6 +698,8 @@ export const invoiceLines = pgTable('invoice_lines', {
   lineTotal: money('line_total').notNull(),
   /** Cost of the goods on this line (from the delivery) - used when a return restocks. */
   unitCost: money('unit_cost').notNull().default('0'),
+  /** The serials sold on this line (a vehicle's frame number goes on its bill). */
+  serials: jsonb('serials').$type<string[]>(),
   sort: integer('sort').notNull().default(0),
 }, (t) => [index('invoice_lines_invoice_idx').on(t.invoiceId), index('invoice_lines_against_idx').on(t.againstLineId)]);
 
@@ -728,6 +810,8 @@ export const goodsReceiptLines = pgTable('goods_receipt_lines', {
   rejectReason: text('reject_reason'),
   /** Rate from the PO: accepted stock is valued at this. */
   rate: money('rate').notNull(),
+  /** The batch it came in (battery cells): recorded at QC. */
+  batchId: uuid('batch_id').references((): AnyPgColumn => batches.id),
   /** Rejected quantity already sent back to the supplier. */
   returnedQty: qty('returned_qty').notNull().default('0'),
   qcBy: uuid('qc_by').references(() => users.id),

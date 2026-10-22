@@ -34,6 +34,7 @@ import { purchasingRouter } from './modules/purchasing';
 import { salesRouter } from './modules/sales';
 import { publicSharesRouter, sharesRouter } from './modules/shares';
 import { tdsRouter } from './modules/tds';
+import { unitsRouter } from './modules/units';
 
 /**
  * The API's front door. createApp builds the Express app: every router in the system is mounted
@@ -180,6 +181,7 @@ export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   app.use('/api/purchasing', purchasingRouter(db));
   app.use('/api/stock', inventoryRouter(db));
   app.use('/api/jobwork', jobWorkRouter(db));
+  app.use('/api/units', unitsRouter(db));
   // Accounts
   app.use('/api/payments', collectRouter(db));
   app.use('/api/payments', paymentsRouter(db));

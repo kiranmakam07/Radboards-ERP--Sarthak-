@@ -53,7 +53,7 @@ export function InvoiceDocument({ inv, thermal = false }: { inv: any; thermal?: 
         <tbody>
           {inv.lines.map((l: any, i: number) => (
             <tr key={l.id}>
-              <td>{i + 1}</td><td>{l.description}</td><td className="hide-thermal">{l.hsn_sac}</td>
+              <td>{i + 1}</td><td>{l.description}{l.serials?.length ? <><br /><span className="small">Serial: {l.serials.join(', ')}</span></> : null}</td><td className="hide-thermal">{l.hsn_sac}</td>
               <td className="right">{num(l.qty)} {l.unit}</td><td className="right">{inr(l.rate)}</td>
               <td className="right hide-thermal">{Number(l.discount) ? inr(l.discount) : ''}</td>
               <td className="right hide-thermal">{inr(l.taxable_value)}</td><td className="right hide-thermal">{num(l.gst_rate)}</td>

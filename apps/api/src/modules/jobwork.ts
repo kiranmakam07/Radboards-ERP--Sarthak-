@@ -111,6 +111,8 @@ export async function createJobWork(ctx: Ctx, input: JobWorkInput): Promise<JobW
   for (const l of input.lines) {
     const item = byId.get(l.itemId)!;
     if (!item.isStockItem) throw badRequest(`${item.name} is a service and has no stock to send`);
+    // Units by serial do not go on a challan yet (repairs of serialised units come with the service module).
+    if (item.isSerialised) throw badRequest(`${item.name} is kept by serial number and cannot go on a job work challan yet`);
     const q = D(l.qty);
     const available = await onHand(tx, item.id, from.id);
     // Only what is physically there can be sent: this never goes negative.

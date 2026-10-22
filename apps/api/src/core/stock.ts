@@ -81,6 +81,9 @@ type MoveBase = {
   refType: string;
   refId: string;
   reason?: string | null;
+  /** A serialised item moves one unit per row (core/units.ts). */
+  unitId?: string | null;
+  batchId?: string | null;
 };
 
 /** Stock in at a known unit cost. Returns the value added (what the GL should debit). */
@@ -99,6 +102,8 @@ export async function stockIn(ctx: Ctx, m: MoveBase & { unitCost: Num }): Promis
     refType: m.refType,
     refId: m.refId,
     reason: m.reason ?? null,
+    unitId: m.unitId ?? null,
+    batchId: m.batchId ?? null,
     createdBy: ctx.user?.id ?? null,
   });
   return value;
@@ -157,6 +162,8 @@ export async function stockOut(
     refType: m.refType,
     refId: m.refId,
     reason: m.reason ?? null,
+    unitId: m.unitId ?? null,
+    batchId: m.batchId ?? null,
     createdBy: ctx.user?.id ?? null,
   });
   return { unitCost, value };

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
+import { SerialEntry, SerialPicker } from '@/components/serials';
 import { ActionButton, Badge, CsvLink, ErrorBox, Loading, Page, Table, Toggle, dateTime, inr, label, num } from '@/components/ui';
 import { post, qs, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -120,7 +121,7 @@ export default function StockPage() {
   );
 }
 
-type Row = { item_id: string; qty: string; unit_cost: string };
+type Row = { item_id: string; qty: string; unit_cost: string; serials: string[] };
 
 /** One small form for the four stock actions; they differ only in which numbers they need. */
 function MoveForm({ kind, items, locations, onDone }: { kind: 'transfer' | 'adjustment' | 'count' | 'opening'; items: any[]; locations: any[]; onDone: () => void }) {
@@ -135,14 +136,15 @@ function MoveForm({ kind, items, locations, onDone }: { kind: 'transfer' | 'adju
     setError(null);
     try {
       const valid = rows.filter((r) => r.item_id && r.qty !== '');
+      const withSerials = (r: Row) => (r.serials.length ? { serials: r.serials } : {});
       if (kind === 'transfer') {
-        await post('/stock/transfers', { from_location_id: from, to_location_id: to, reason, lines: valid.map((r) => ({ item_id: r.item_id, qty: r.qty })) });
+        await post('/stock/transfers', { from_location_id: from, to_location_id: to, reason, lines: valid.map((r) => ({ item_id: r.item_id, qty: r.qty, ...withSerials(r) })) });
       } else if (kind === 'count') {
         await post('/stock/counts', { location_id: from, reason, lines: valid.map((r) => ({ item_id: r.item_id, counted_qty: r.qty })) });
       } else {
         await post('/stock/adjustments', {
           kind, location_id: from, reason,
-          lines: valid.map((r) => ({ item_id: r.item_id, qty_change: r.qty, unit_cost: r.unit_cost === '' ? null : r.unit_cost })),
+          lines: valid.map((r) => ({ item_id: r.item_id, qty_change: r.qty, unit_cost: r.unit_cost === '' ? null : r.unit_cost, ...withSerials(r) })),
         });
       }
       setRows([]); setReason(kind === 'opening' ? 'Opening stock' : '');
@@ -166,18 +168,25 @@ function MoveForm({ kind, items, locations, onDone }: { kind: 'transfer' | 'adju
         <label className="wide"><span>Reason *</span><input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
       </div>
       <div className="filters" style={{ marginTop: 10 }}>
-        <select value="" onChange={(e) => e.target.value && !rows.some((r) => r.item_id === e.target.value) && setRows([...rows, { item_id: e.target.value, qty: '', unit_cost: '' }])}>
+        <select value="" onChange={(e) => e.target.value && !rows.some((r) => r.item_id === e.target.value) && setRows([...rows, { item_id: e.target.value, qty: '', unit_cost: '', serials: [] }])}>
           <option value="">+ Add item…</option>
-          {items.map((i) => <option key={i.id} value={i.id}>{i.sku} — {i.name} ({num(i.on_hand)} in stock)</option>)}
+          {/* Items kept by serial are put right with an adjustment naming the serials, not counted. */}
+          {items.filter((i) => kind !== 'count' || !i.is_serialised).map((i) => <option key={i.id} value={i.id}>{i.sku} — {i.name} ({num(i.on_hand)} in stock)</option>)}
         </select>
       </div>
       {rows.length > 0 && (
         <table>
           <thead><tr><th>Item</th><th className="right">{qtyLabel}</th>{(kind === 'opening' || kind === 'adjustment') && <th className="right">Unit cost ₹{kind === 'opening' ? ' *' : ''}</th>}<th /></tr></thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={r.item_id}>
-                <td>{items.find((x) => x.id === r.item_id)?.name}</td>
+            {rows.map((r, i) => {
+              const item = items.find((x) => x.id === r.item_id);
+              const setSerials = (serials: string[]) => setRows(rows.map((x, j) => (j === i ? { ...x, serials, qty: kind === 'adjustment' && Number(x.qty) < 0 ? String(-serials.length) : String(serials.length) } : x)));
+              // Going out (a transfer, a write-off): pick from what is there. Coming in: type or scan them.
+              const out = kind === 'transfer' || (kind === 'adjustment' && Number(r.qty) < 0);
+              return (
+              <Fragment key={r.item_id}>
+              <tr>
+                <td>{item?.name}</td>
                 <td className="right"><input type="number" step="any" style={{ width: 100 }} value={r.qty} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))} /></td>
                 {(kind === 'opening' || kind === 'adjustment') && (
                   <td className="right"><input type="number" step="any" min="0" style={{ width: 110 }} value={r.unit_cost} placeholder={kind === 'adjustment' ? 'current avg' : ''}
@@ -185,7 +194,16 @@ function MoveForm({ kind, items, locations, onDone }: { kind: 'transfer' | 'adju
                 )}
                 <td><button type="button" onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button></td>
               </tr>
-            ))}
+              {item?.is_serialised ? (
+                <tr className="serial-row"><td colSpan={4}>
+                  {out
+                    ? <SerialPicker itemId={r.item_id} locationId={from || null} qty={Math.abs(Number(r.qty) || 0)} value={r.serials} onChange={setSerials} />
+                    : <SerialEntry qty={Math.abs(Number(r.qty) || 0)} value={r.serials} onChange={(serials) => setRows(rows.map((x, j) => (j === i ? { ...x, serials } : x)))} />}
+                </td></tr>
+              ) : null}
+              </Fragment>
+              );
+            })}
           </tbody>
         </table>
       )}

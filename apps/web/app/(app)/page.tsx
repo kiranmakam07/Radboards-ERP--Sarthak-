@@ -72,6 +72,10 @@ export default function Home() {
       attention.push({ label: 'Stock changes to approve', value: o.stock.adjustments_pending, href: '/stock', alert: o.stock.adjustments_pending > 0 });
     }
   }
+  // Only there while a battery is late for its storage charge: the owner's daily reminder.
+  if (o?.units?.charge_due) {
+    attention.push({ label: 'Batteries due a storage charge', value: o.units.charge_due, href: '/units?charge=1', alert: true });
+  }
   if (o?.bank) attention.push({ label: 'Bank lines to reconcile', value: o.bank.unreconciled, href: '/accounts/bank', alert: o.bank.unreconciled > 0 });
   if (o?.ops) {
     attention.push({ label: 'Late tasks, everyone', value: o.ops.tasks_overdue, note: `${o.ops.tasks_open_today} still open today`, href: '/ops/tasks?view=overdue', alert: o.ops.tasks_overdue > 0 });

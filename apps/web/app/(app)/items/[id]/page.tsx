@@ -80,7 +80,7 @@ export default function ProductPage() {
                 : <span className="product-pic" style={{ width: 110, height: 110, fontSize: 28 }} aria-hidden="true">{initials(p.name)}</span>}
               <KV rows={[
                 ['Code (SKU)', p.sku], ['Kind', label(p.item_type)], ['Category', category],
-                ['Unit', p.unit], ['HSN / SAC', p.hsn_sac], ['GST', `${num(p.gst_rate)}%${Number(p.cess_rate) ? ` + ${num(p.cess_rate)}% cess` : ''}`], ['Barcode', p.barcode],
+                ['Unit', p.is_serialised ? `${p.unit}, by serial number` : p.unit], ['HSN / SAC', p.hsn_sac], ['GST', `${num(p.gst_rate)}%${Number(p.cess_rate) ? ` + ${num(p.cess_rate)}% cess` : ''}`], ['Barcode', p.barcode],
               ]} />
             </div>
           </Card>
@@ -156,7 +156,7 @@ export default function ProductPage() {
         <FormModal title={`Edit ${p.name}`} submit="Save" wide onClose={() => setEditing(false)}
           initial={{
             ...p, gst_rate: String(Number(p.gst_rate)), cess_rate: String(Number(p.cess_rate ?? 0)), category_id: p.category_id ?? '', hsn_sac: p.hsn_sac ?? '',
-            reorder_level: p.reorder_level ?? '', barcode: p.barcode ?? '',
+            reorder_level: p.reorder_level ?? '', barcode: p.barcode ?? '', charge_every_days: p.charge_every_days ?? '',
           }}
           fields={productFields(cats, { costs })}
           onSubmit={(v) => patch(`/items/${id}`, Object.fromEntries(productFields([], { costs }).map((x) => [x.name, v[x.name]])))}

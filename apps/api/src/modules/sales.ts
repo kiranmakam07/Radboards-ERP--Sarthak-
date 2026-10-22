@@ -13,13 +13,14 @@ import { postJournal, reverseJournals } from '../core/journal';
 import { nextNumber } from '../core/numbering';
 import { getCompany, getSetting } from '../core/settings';
 import { locationByType, lockItems, stockIn, stockOut } from '../core/stock';
+import { cleanSerials, needsSerials, unitEvent, unitsIn, unitsOut } from '../core/units';
 import { rows, type DB } from '../db/client';
 import {
-  deliveries, deliveryLines, invoiceLines, invoiceLinks, invoices, items, locations, parties, salesOrderLines, salesOrders,
+  deliveries, deliveryLines, invoiceLines, invoiceLinks, invoices, items, locations, parties, salesOrderLines, salesOrders, units,
 } from '../db/schema';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
 import {
-  emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zMoneyPos, zPhone, zQty, zStateCode, zText, type Ctx,
+  emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zMoneyPos, zPhone, zQty, zSerials, zStateCode, zText, type Ctx,
 } from '../lib/http';
 import { priceFor, priceListFor } from './items';
 import { captureLead, convertLead, sourceIdByName } from './leads';
@@ -46,7 +47,11 @@ export type Order = typeof salesOrders.$inferSelect;
 export type OrderLine = typeof salesOrderLines.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 
-export type OrderLineInput = { itemId: string; qty: string; rate?: string | null; discount?: string | null };
+export type OrderLineInput = {
+  itemId: string; qty: string; rate?: string | null; discount?: string | null;
+  /** The quick bill hands over at once: for a serialised item, the serials sold. */
+  serials?: string[] | null;
+};
 export type OrderInput = {
   channel: Channel;
   partyId: string | null;
@@ -321,17 +326,23 @@ export async function cancelOrder(ctx: Ctx, id: string, reason: string): Promise
 export async function deliverOrder(
   ctx: Ctx,
   orderId: string,
-  input: { locationId?: string | null; lines?: { orderLineId: string; qty: string }[]; notes?: string | null; date?: string },
+  input: {
+    locationId?: string | null;
+    /** Partial delivery, or a serialised item: which lines, how much, and which serials. */
+    lines?: { orderLineId: string; qty: string; serials?: string[] | null }[];
+    notes?: string | null;
+    date?: string;
+  },
 ) {
   const { tx } = ctx;
   const { order, lines } = await lockOrder(tx, orderId);
   if (order.status !== 'confirmed') throw conflict(`Order ${order.orderNo} is ${order.status}; only a confirmed order can be delivered`);
 
-  const want = input.lines
+  const want: { line: OrderLine; qty: Decimal; serials?: string[] | null }[] = input.lines
     ? input.lines.map((l) => {
         const line = lines.find((x) => x.id === l.orderLineId);
         if (!line) throw badRequest('Line does not belong to this order');
-        return { line, qty: D(l.qty) };
+        return { line, qty: D(l.qty), serials: l.serials };
       })
     : lines.map((line) => ({ line, qty: D(line.qty).minus(line.deliveredQty) })).filter((x) => x.qty.gt(0));
   if (want.length === 0) throw conflict('Nothing left to deliver on this order');
@@ -359,7 +370,17 @@ export async function deliverOrder(
   for (const w of want) {
     const item = itemById.get(w.line.itemId)!;
     let unitCost = D(0);
-    if (item.isStockItem) {
+    // A serialised item is handed over by serial: each named unit leaves the shelf and is marked sold.
+    const serials = needsSerials(item) ? cleanSerials(item, w.qty, w.serials) : null;
+    let soldUnits: string[] = [];
+    if (serials) {
+      const out = await unitsOut(ctx, {
+        item, locationId, serials, movementType: 'sale_out', refType: 'delivery', refId: delivery!.id, event: 'sold', status: 'sold', soldOn: date,
+      });
+      cogs = cogs.plus(out.value);
+      unitCost = out.value.div(w.qty).toDecimalPlaces(2);
+      soldUnits = out.units.map((u) => u.id);
+    } else if (item.isStockItem) {
       const out = await stockOut(ctx, {
         itemId: item.id, locationId, qty: w.qty, movementType: 'sale_out', refType: 'delivery', refId: delivery!.id,
         itemName: item.name, fallbackCost: item.purchaseCost,
@@ -367,9 +388,13 @@ export async function deliverOrder(
       cogs = cogs.plus(out.value);
       unitCost = out.value.div(w.qty).toDecimalPlaces(2);
     }
-    await tx.insert(deliveryLines).values({
-      deliveryId: delivery!.id, orderLineId: w.line.id, itemId: item.id, qty: fmtQty(w.qty), unitCost: money(unitCost),
-    });
+    const [dl] = await tx.insert(deliveryLines).values({
+      deliveryId: delivery!.id, orderLineId: w.line.id, itemId: item.id, qty: fmtQty(w.qty), unitCost: money(unitCost), serials,
+    }).returning();
+    // The invoice for this line picks these units up and prints their serials.
+    if (soldUnits.length) {
+      await tx.update(units).set({ soldDeliveryLineId: dl!.id, soldInvoiceLineId: null }).where(inArray(units.id, soldUnits));
+    }
     await tx
       .update(salesOrderLines)
       .set({ deliveredQty: fmtQty(D(w.line.deliveredQty).plus(w.qty)) })
@@ -440,13 +465,19 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
       select (sum(qty * unit_cost) / nullif(sum(qty), 0))::numeric(12,2)::text as c from delivery_lines where order_line_id = ${p.line.id}`);
     const tax = computeLine({ qty: p.qty, rate: p.line.rate, discount, gstRate: p.line.gstRate, cessRate: p.line.cessRate }, inter, order.taxInclusive);
     computed.push(tax);
-    await tx.insert(invoiceLines).values({
+    // The serials delivered on this order line and not billed yet go on the bill (a vehicle's frame number must).
+    const billed = await rows<{ id: string; serial_no: string }>(tx, sql`
+      select u.id, u.serial_no from units u join delivery_lines dl on dl.id = u.sold_delivery_line_id
+       where dl.order_line_id = ${p.line.id} and u.sold_invoice_line_id is null and u.status = 'sold' order by u.serial_no`);
+    const [invLine] = await tx.insert(invoiceLines).values({
       invoiceId: draft!.id, orderLineId: p.line.id, itemId: item.id, description: item.name, hsnSac: item.hsnSac, unit: item.unit,
       qty: fmtQty(p.qty), rate: p.line.rate, discount: money(discount), taxableValue: money(tax.taxableValue),
       gstRate: p.line.gstRate, cgst: money(tax.cgst), sgst: money(tax.sgst), igst: money(tax.igst),
       cessRate: p.line.cessRate, cess: money(tax.cess),
       lineTotal: money(tax.lineTotal), unitCost: money(cost?.c ?? 0), sort: idx,
-    });
+      serials: billed.length ? billed.map((u) => u.serial_no) : null,
+    }).returning();
+    if (billed.length) await tx.update(units).set({ soldInvoiceLineId: invLine!.id }).where(inArray(units.id, billed.map((u) => u.id)));
     await tx.update(salesOrderLines).set({ invoicedQty: fmtQty(D(p.line.invoicedQty).plus(p.qty)) }).where(eq(salesOrderLines.id, p.line.id));
   }
 
@@ -536,7 +567,12 @@ export async function quickBill(ctx: Ctx, input: QuickBillInput) {
   // paid in full skips the credit check, and a part-paid one is checked on the unpaid part.
   const paid = input.payments.reduce((a, p) => a.plus(p.amount), D(0));
   await confirmOrder(ctx, order.id, { paidNow: paid, overrideCredit: input.overrideCredit, quickBill: true });
-  await deliverOrder(ctx, order.id, { locationId: input.locationId ?? (await locationByType(tx, 'showroom')), date: today });
+  // The lines are delivered in full, each with the serials picked at the counter (order lines keep the bill's order).
+  const orderLines = await tx.select().from(salesOrderLines).where(eq(salesOrderLines.orderId, order.id)).orderBy(asc(salesOrderLines.sort));
+  await deliverOrder(ctx, order.id, {
+    locationId: input.locationId ?? (await locationByType(tx, 'showroom')), date: today,
+    lines: orderLines.map((l, i) => ({ orderLineId: l.id, qty: l.qty, serials: input.lines[i]?.serials })),
+  });
   const invoice = await invoiceOrder(ctx, order.id, { invoiceDate: today, notes: input.notes });
 
   if (paid.gt(invoice.grandTotal)) {
@@ -568,7 +604,7 @@ export async function quickBill(ctx: Ctx, input: QuickBillInput) {
 export async function createCreditNote(
   ctx: Ctx,
   invoiceId: string,
-  input: { lines: { invoiceLineId: string; qty: string }[]; restock: boolean; locationId?: string | null; reason: string; date?: string },
+  input: { lines: { invoiceLineId: string; qty: string; serials?: string[] | null }[]; restock: boolean; locationId?: string | null; reason: string; date?: string },
 ): Promise<Invoice> {
   const { tx } = ctx;
   const [inv] = await tx.select().from(invoices).where(eq(invoices.id, invoiceId)).for('update');
@@ -597,7 +633,8 @@ export async function createCreditNote(
     .returning();
 
   let taxable = D(0), cgst = D(0), sgst = D(0), igst = D(0), cess = D(0);
-  const restockLines: { itemId: string; qty: Decimal; unitCost: string }[] = [];
+  const restockLines: { itemId: string; qty: Decimal; unitCost: string; serials: string[] | null }[] = [];
+  const serialised = new Map((await tx.select().from(items).where(inArray(items.id, origLines.map((o) => o.itemId)))).map((i) => [i.id, i]));
   const seen = new Set<string>();
   for (const [idx, l] of input.lines.entries()) {
     const orig = origLines.find((o) => o.id === l.invoiceLineId);
@@ -613,6 +650,15 @@ export async function createCreditNote(
       completes ? D(total).minus(already ?? 0) : D(total).times(q).div(orig.qty).toDecimalPlaces(2);
     const lt = part(orig.taxableValue, p?.taxable), lc = part(orig.cgst, p?.cgst), ls = part(orig.sgst, p?.sgst), li = part(orig.igst, p?.igst);
     const lx = part(orig.cess, p?.cess);
+    // A serialised item coming back on the shelf comes back by serial: units sold on this very line.
+    const item = serialised.get(orig.itemId)!;
+    const back = input.restock && needsSerials(item) ? cleanSerials(item, q, l.serials) : null;
+    if (back) {
+      const mine = await tx.select({ serialNo: units.serialNo }).from(units)
+        .where(and(eq(units.soldInvoiceLineId, orig.id), eq(units.status, 'sold'), inArray(units.serialNo, back)));
+      const stranger = back.find((s) => !mine.some((u) => u.serialNo === s));
+      if (stranger) throw badRequest(`${item.name} ${stranger} was not sold on this invoice line`);
+    }
     taxable = taxable.plus(lt); cgst = cgst.plus(lc); sgst = sgst.plus(ls); igst = igst.plus(li); cess = cess.plus(lx);
     await tx.insert(invoiceLines).values({
       invoiceId: draft!.id, againstLineId: orig.id, orderLineId: orig.orderLineId, itemId: orig.itemId, description: orig.description,
@@ -620,9 +666,9 @@ export async function createCreditNote(
       discount: money(D(orig.discount).times(q).div(orig.qty)), taxableValue: money(lt), gstRate: orig.gstRate,
       cgst: money(lc), sgst: money(ls), igst: money(li), cessRate: orig.cessRate, cess: money(lx),
       lineTotal: money(lt.plus(lc).plus(ls).plus(li).plus(lx)),
-      unitCost: orig.unitCost, sort: idx,
+      unitCost: orig.unitCost, sort: idx, serials: back ?? (l.serials?.length ? l.serials : null),
     });
-    restockLines.push({ itemId: orig.itemId, qty: q, unitCost: orig.unitCost });
+    restockLines.push({ itemId: orig.itemId, qty: q, unitCost: orig.unitCost, serials: back });
   }
 
   // If this note finishes off the whole invoice, give back the rupee round-off too.
@@ -674,10 +720,15 @@ export async function createCreditNote(
     let value = D(0);
     for (const l of restockLines) {
       if (!stockIds.has(l.itemId)) continue;
-      value = value.plus(await stockIn(ctx, {
-        itemId: l.itemId, locationId, qty: l.qty, unitCost: l.unitCost, movementType: 'sales_return_in',
-        refType: 'credit_note', refId: issued!.id, reason: input.reason,
-      }));
+      value = value.plus(l.serials
+        ? await unitsIn(ctx, {
+            item: itemRows.find((i) => i.id === l.itemId)!, locationId, serials: l.serials, unitCost: l.unitCost, movementType: 'sales_return_in',
+            refType: 'credit_note', refId: issued!.id, event: 'returned', reason: input.reason, returning: true,
+          })
+        : await stockIn(ctx, {
+            itemId: l.itemId, locationId, qty: l.qty, unitCost: l.unitCost, movementType: 'sales_return_in',
+            refType: 'credit_note', refId: issued!.id, reason: input.reason,
+          }));
     }
     await postJournal(ctx, {
       date, refType: 'credit_note', refId: issued!.id, narration: `Goods returned to stock, ${number}`,
@@ -753,15 +804,22 @@ export async function cancelInvoice(
   const lines = await tx.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
   if (inv!.docType === 'credit_note') {
     // Undo a restock: the journal reversal above already moved the value, so take the goods back out.
-    const moved = await rows<{ item_id: string; location_id: string; qty: string; unit_cost: string }>(tx, sql`
-      select item_id, location_id, qty::text, unit_cost::text from stock_movements where ref_type = 'credit_note' and ref_id = ${id}`);
+    const moved = await rows<{ item_id: string; location_id: string; qty: string; unit_cost: string; unit_id: string | null }>(tx, sql`
+      select item_id, location_id, qty::text, unit_cost::text, unit_id from stock_movements where ref_type = 'credit_note' and ref_id = ${id}`);
     if (moved.length) {
       await lockItems(tx, moved.map((m) => m.item_id));
       for (const m of moved) {
         await stockOut(ctx, {
           itemId: m.item_id, locationId: m.location_id, qty: m.qty, unitCostOverride: m.unit_cost,
-          movementType: 'sales_return_in', refType: 'credit_note_cancel', refId: id, reason: input.reason,
+          movementType: 'sales_return_in', refType: 'credit_note_cancel', refId: id, reason: input.reason, unitId: m.unit_id,
         });
+        // The return did not happen after all: the unit is the customer's again.
+        if (m.unit_id) {
+          const [u] = await tx.select().from(units).where(eq(units.id, m.unit_id)).for('update');
+          if (u?.locationId !== m.location_id) throw conflict(`${u?.serialNo ?? 'A unit'} from this return has moved since; bring it back first`);
+          await tx.update(units).set({ status: 'sold', locationId: null, updatedAt: new Date() }).where(eq(units.id, m.unit_id));
+          await unitEvent(ctx, { unitId: m.unit_id, event: 'return_cancelled', from: { locationId: u.locationId, status: u.status }, to: { locationId: null, status: 'sold' }, refType: 'credit_note_cancel', refId: id, note: input.reason });
+        }
       }
     }
   } else if (inv!.orderId) {
@@ -777,12 +835,23 @@ export async function cancelInvoice(
       if (input.restock) {
         // The sale is void: the goods never really left, so put them back at the cost they went out at.
         patch.deliveredQty = fmtQty(D(ol.deliveredQty).minus(l.qty));
-        if (isStock.has(l.itemId)) {
+        const item = stockItems.find((i) => i.id === l.itemId);
+        if (item && needsSerials(item)) {
+          // The units billed on this line come back by serial.
+          const sold = await rows<{ serial_no: string }>(tx, sql`select serial_no from units where sold_invoice_line_id = ${l.id} and status = 'sold' order by serial_no`);
+          value = value.plus(await unitsIn(ctx, {
+            item, locationId: locationId!, serials: sold.map((u) => u.serial_no), unitCost: l.unitCost, movementType: 'sales_return_in',
+            refType: 'invoice_cancel', refId: id, event: 'sale_cancelled', reason: input.reason, returning: true,
+          }));
+        } else if (isStock.has(l.itemId)) {
           value = value.plus(await stockIn(ctx, {
             itemId: l.itemId, locationId: locationId!, qty: l.qty, unitCost: l.unitCost, movementType: 'sales_return_in',
             refType: 'invoice_cancel', refId: id, reason: input.reason,
           }));
         }
+      } else {
+        // Billed again later: the units sold stay sold, waiting for the next invoice of this order line.
+        await tx.update(units).set({ soldInvoiceLineId: null }).where(eq(units.soldInvoiceLineId, l.id));
       }
       await tx.update(salesOrderLines).set(patch).where(eq(salesOrderLines.id, ol.id));
     }
@@ -874,8 +943,11 @@ const zLine = z.object({
   qty: zQty,
   rate: emptyToNull(zMoney).optional(),
   discount: emptyToNull(zMoney).optional(),
+  serials: zSerials.optional(),
 });
-const toLine = (l: z.infer<typeof zLine>): OrderLineInput => ({ itemId: l.item_id, qty: l.qty, rate: l.rate ?? null, discount: l.discount ?? null });
+const toLine = (l: z.infer<typeof zLine>): OrderLineInput => ({
+  itemId: l.item_id, qty: l.qty, rate: l.rate ?? null, discount: l.discount ?? null, serials: l.serials ?? null,
+});
 
 export function salesRouter(db: DB) {
   const r = Router();
@@ -914,7 +986,7 @@ export function salesRouter(db: DB) {
     const [order] = await db.select().from(salesOrders).where(eq(salesOrders.id, id));
     must(order, 'Sales order');
     const lines = await rows<TotalsLine & { gst_rate: string }>(db, sql`
-      select l.*, i.sku, i.name as item_name, i.unit, i.hsn_sac
+      select l.*, i.sku, i.name as item_name, i.unit, i.hsn_sac, i.is_serialised
         from sales_order_lines l join items i on i.id = l.item_id where l.order_id = ${id} order by l.sort`);
     const { computed, totals } = await orderTotals(db, order!, lines.map((l: any) => ({ ...l, gstRate: l.gst_rate, cessRate: l.cess_rate })));
     const [party] = order!.partyId ? await db.select().from(parties).where(eq(parties.id, order!.partyId)) : [];
@@ -1002,13 +1074,13 @@ export function salesRouter(db: DB) {
     const id = zId.parse(req.params.id);
     const b = z.object({
       location_id: emptyToNull(zId).optional(),
-      lines: z.array(z.object({ order_line_id: zId, qty: zQty })).min(1).optional(),
+      lines: z.array(z.object({ order_line_id: zId, qty: zQty, serials: zSerials.optional() })).min(1).optional(),
       notes: emptyToNull(z.string().trim().max(1000)).optional(),
     }).parse(req.body ?? {});
     const result = await inTx(db, req, (ctx) =>
       deliverOrder(ctx, id, {
         locationId: b.location_id, notes: b.notes,
-        lines: b.lines?.map((l) => ({ orderLineId: l.order_line_id, qty: l.qty })),
+        lines: b.lines?.map((l) => ({ orderLineId: l.order_line_id, qty: l.qty, serials: l.serials })),
       }));
     res.status(201).json({ data: result });
   });
@@ -1029,7 +1101,7 @@ export function salesRouter(db: DB) {
         left join parties p on p.id = o.party_id where d.id = ${id}`);
     must(delivery, 'Delivery');
     const lines = await rows(db, sql`
-      select dl.id, dl.qty, i.sku, i.name as item_name, i.unit, i.hsn_sac
+      select dl.id, dl.qty, dl.serials, i.sku, i.name as item_name, i.unit, i.hsn_sac
         from delivery_lines dl join items i on i.id = dl.item_id where dl.delivery_id = ${id}`);
     res.json({ data: { ...delivery, lines, company: await getCompany(db) } });
   });
@@ -1131,7 +1203,7 @@ export function salesRouter(db: DB) {
   r.post('/invoices/:id/credit-note', requirePerm('invoices:adjust'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = z.object({
-      lines: z.array(z.object({ invoice_line_id: zId, qty: zQty })).min(1),
+      lines: z.array(z.object({ invoice_line_id: zId, qty: zQty, serials: zSerials.optional() })).min(1),
       restock: z.boolean().default(true),
       location_id: emptyToNull(zId).optional(),
       reason: zText(500),
@@ -1139,7 +1211,7 @@ export function salesRouter(db: DB) {
     }).parse(req.body);
     const cn = await inTx(db, req, (ctx) =>
       createCreditNote(ctx, id, {
-        lines: b.lines.map((l) => ({ invoiceLineId: l.invoice_line_id, qty: l.qty })), restock: b.restock,
+        lines: b.lines.map((l) => ({ invoiceLineId: l.invoice_line_id, qty: l.qty, serials: l.serials })), restock: b.restock,
         locationId: b.location_id, reason: b.reason, date: b.date,
       }));
     res.status(201).json({ data: cn });

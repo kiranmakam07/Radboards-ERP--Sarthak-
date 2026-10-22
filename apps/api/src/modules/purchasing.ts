@@ -11,6 +11,7 @@ import { postJournal, reverseJournals, type JLine } from '../core/journal';
 import { nextNumber } from '../core/numbering';
 import { getCompany } from '../core/settings';
 import { locationByType, lockItems, stockIn, stockOut } from '../core/stock';
+import { batchFor, cleanSerials, needsSerials, unitsIn } from '../core/units';
 import { rows, type DB } from '../db/client';
 import {
   goodsReceiptLines, goodsReceipts, items, jobWorks, parties, purchaseBillLines, purchaseBills, purchaseOrderLines, purchaseOrders,
@@ -18,7 +19,7 @@ import {
 } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
 import {
-  emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSignedMoney, zText, type Ctx,
+  emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSerials, zSignedMoney, zText, type Ctx,
 } from '../lib/http';
 
 import { chargeState } from './jobwork';
@@ -144,17 +145,22 @@ export async function createGoodsReceipt(
   return grn!;
 }
 
+/** The QC result for one receipt line. A serialised item needs one serial per accepted unit; a batch number is optional. */
+export type QcLine = {
+  grnLineId: string; acceptedQty: string; rejectedQty: string; rejectReason?: string | null;
+  serials?: string[] | null;
+  batch?: { batchNo: string; mfgDate?: string | null; chemistry?: string | null; weightKg?: string | null } | null;
+};
+
 /**
  * QC check + inward (PRD 6.2 / 7.7), in one transaction:
  * - each line splits into accepted + rejected (= received), with a reason for rejects
  * - accepted quantity enters Stores at the PO rate; rejected goes to the Rejected location
+ * - a serialised item's accepted units are each given their serial here (rejected ones are not:
+ *   they go back to the supplier as a quantity); a batch number, if given, follows the stock
  * - Dr Stock in Hand / Cr Goods Received Not Billed for the goods now held
  */
-export async function qcGoodsReceipt(
-  ctx: Ctx,
-  grnId: string,
-  input: { lines: { grnLineId: string; acceptedQty: string; rejectedQty: string; rejectReason?: string | null }[] },
-) {
+export async function qcGoodsReceipt(ctx: Ctx, grnId: string, input: { lines: QcLine[] }) {
   const { tx } = ctx;
   const [grn] = await tx.select().from(goodsReceipts).where(eq(goodsReceipts.id, grnId)).for('update');
   must(grn, 'Goods receipt');
@@ -165,11 +171,12 @@ export async function qcGoodsReceipt(
   }
   const storesId = await locationByType(tx, 'stores');
   const rejectedId = await locationByType(tx, 'rejected');
-  await lockItems(tx, lines.map((l) => l.itemId));
+  const itemById = new Map((await lockItems(tx, lines.map((l) => l.itemId))).map((i) => [i.id, i]));
   const today = istDate();
   const now = new Date();
   let value = D(0);
   for (const line of lines) {
+    const item = itemById.get(line.itemId)!;
     const qc = input.lines.find((x) => x.grnLineId === line.id)!;
     const accepted = D(qc.acceptedQty);
     const rejected = D(qc.rejectedQty);
@@ -178,22 +185,30 @@ export async function qcGoodsReceipt(
     }
     const reason = qc.rejectReason?.trim() || null;
     if (rejected.gt(0) && !reason) throw badRequest('Give a reason for the rejected quantity');
+    const serials = needsSerials(item) ? cleanSerials(item, accepted, qc.serials) : null;
+    if (!needsSerials(item) && qc.serials?.length) throw badRequest(`${item.name} is not kept by serial number`);
+    const batchId = qc.batch?.batchNo?.trim() ? await batchFor(ctx, item.id, { ...qc.batch, supplierId: grn!.supplierId }) : null;
     await tx
       .update(goodsReceiptLines)
-      .set({ acceptedQty: fmtQty(accepted), rejectedQty: fmtQty(rejected), rejectReason: rejected.gt(0) ? reason : null, qcBy: ctx.user?.id ?? null, qcAt: now })
+      .set({ acceptedQty: fmtQty(accepted), rejectedQty: fmtQty(rejected), rejectReason: rejected.gt(0) ? reason : null, qcBy: ctx.user?.id ?? null, qcAt: now, batchId })
       .where(eq(goodsReceiptLines.id, line.id));
     if (accepted.gt(0)) {
-      value = value.plus(await stockIn(ctx, {
-        itemId: line.itemId, locationId: storesId, qty: accepted, unitCost: line.rate, movementType: 'purchase_in',
-        refType: 'goods_receipt', refId: grnId,
-      }));
+      value = value.plus(serials
+        ? await unitsIn(ctx, {
+            item, locationId: storesId, serials, unitCost: line.rate, movementType: 'purchase_in', refType: 'goods_receipt', refId: grnId,
+            event: 'received', batchId, mfgDate: qc.batch?.mfgDate ?? null,
+          })
+        : await stockIn(ctx, {
+            itemId: line.itemId, locationId: storesId, qty: accepted, unitCost: line.rate, movementType: 'purchase_in',
+            refType: 'goods_receipt', refId: grnId, batchId,
+          }));
       // Last purchase cost follows the latest inward.
       await tx.update(items).set({ purchaseCost: line.rate, updatedAt: now }).where(eq(items.id, line.itemId));
     }
     if (rejected.gt(0)) {
       value = value.plus(await stockIn(ctx, {
         itemId: line.itemId, locationId: rejectedId, qty: rejected, unitCost: line.rate, movementType: 'purchase_in',
-        refType: 'goods_receipt', refId: grnId, reason: `QC rejected: ${reason}`,
+        refType: 'goods_receipt', refId: grnId, reason: `QC rejected: ${reason}`, batchId,
       }));
     }
   }
@@ -592,7 +607,11 @@ export function purchasingRouter(db: DB) {
         join parties s on s.id = g.supplier_id join purchase_orders po on po.id = g.purchase_order_id where g.id = ${id}`);
     must(grn, 'Goods receipt');
     const lines = await rows(db, sql`
-      select l.*, i.sku, i.name as item_name, i.unit, u.name as qc_by_name
+      select l.*, i.sku, i.name as item_name, i.unit, i.is_serialised, u.name as qc_by_name,
+             (select b.batch_no from batches b where b.id = l.batch_id) as batch_no,
+             -- the serials this line brought in (named at QC)
+             (select json_agg(u2.serial_no order by u2.serial_no) from unit_events e join units u2 on u2.id = e.unit_id
+               where e.ref_type = 'goods_receipt' and e.ref_id = l.grn_id and e.event = 'received' and u2.item_id = l.item_id) as serials
         from goods_receipt_lines l join items i on i.id = l.item_id left join users u on u.id = l.qc_by
        where l.grn_id = ${id} order by i.name`);
     const returns = await rows(db, sql`
@@ -617,11 +636,19 @@ export function purchasingRouter(db: DB) {
       lines: z.array(z.object({
         grn_line_id: zId, accepted_qty: zQtyNonNeg, rejected_qty: zQtyNonNeg.default('0'),
         reject_reason: emptyToNull(z.string().trim().max(500)).optional(),
+        serials: zSerials.optional(),
+        batch_no: emptyToNull(z.string().trim().max(60)).optional(),
+        mfg_date: emptyToNull(zDate).optional(),
+        chemistry: emptyToNull(z.string().trim().max(60)).optional(),
+        weight_kg: emptyToNull(zQtyNonNeg).optional(),
       })).min(1),
     }).parse(req.body);
     const grn = await inTx(db, req, (ctx) =>
       qcGoodsReceipt(ctx, id, {
-        lines: b.lines.map((l) => ({ grnLineId: l.grn_line_id, acceptedQty: l.accepted_qty, rejectedQty: l.rejected_qty, rejectReason: l.reject_reason })),
+        lines: b.lines.map((l) => ({
+          grnLineId: l.grn_line_id, acceptedQty: l.accepted_qty, rejectedQty: l.rejected_qty, rejectReason: l.reject_reason, serials: l.serials,
+          batch: l.batch_no ? { batchNo: l.batch_no, mfgDate: l.mfg_date, chemistry: l.chemistry, weightKg: l.weight_kg } : null,
+        })),
       }));
     res.json({ data: grn });
   });

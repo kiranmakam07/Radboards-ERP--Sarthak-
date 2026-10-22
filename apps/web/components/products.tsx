@@ -34,6 +34,8 @@ export const productFields = (categories: { id: string; name: string }[], { cost
   ...(costs ? [{ name: 'purchase_cost', label: 'Purchase cost ₹', type: 'number' } as Field] : []),
   { name: 'reorder_level', label: 'Reorder level', type: 'number', help: 'Below this, it shows as low on stock' },
   { name: 'barcode', label: 'Barcode' },
+  { name: 'is_serialised', label: 'Kept by serial number (vehicles, battery packs): each unit is received, moved and sold by its serial', type: 'checkbox' },
+  { name: 'charge_every_days', label: 'Storage charge every (days)', type: 'number', help: 'Batteries: the owner is told when one is due' },
 ];
 
 /** The first letters of a product's name, shown where it has no picture yet. */

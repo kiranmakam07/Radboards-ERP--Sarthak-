@@ -34,8 +34,8 @@ export type ItemType = (typeof ITEM_TYPES)[number];
 // Only stores and showroom count as stock that can be sold today.
 export const LOCATION_TYPES = ['stores', 'showroom', 'rejected', 'job_work', 'service_bay', 'demo', 'franchise', 'in_transit'] as const;
 export type LocationType = (typeof LOCATION_TYPES)[number];
-/** Places goods cannot be delivered to a customer from. */
-export const UNSELLABLE_LOCATION_TYPES = ['rejected', 'job_work', 'service_bay', 'in_transit'] as const satisfies readonly LocationType[];
+/** Places goods cannot be delivered to a customer from (job work has its own rule: only its challan moves that stock). */
+export const UNSELLABLE_LOCATION_TYPES = ['rejected', 'service_bay', 'in_transit'] as const satisfies readonly LocationType[];
 
 export const LEAD_STAGES = ['new', 'contacted', 'interested', 'meeting_booked', 'converted', 'lost'] as const;
 export type LeadStage = (typeof LEAD_STAGES)[number];
@@ -96,6 +96,16 @@ export const MOVEMENT_TYPES = [
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
 
 export const ADJUSTMENT_STATUSES = ['pending', 'approved', 'rejected'] as const;
+
+/**
+ * Where one serialised unit (a vehicle, a battery pack, a motor) stands. available, demo and reserved
+ * are on our shelves; under_repair, quarantine and damaged are ours but not for sale; rtv went back
+ * to the supplier, sold to a customer, scrapped is written off.
+ */
+export const UNIT_STATUSES = ['available', 'reserved', 'demo', 'under_repair', 'quarantine', 'damaged', 'rtv', 'sold', 'scrapped'] as const;
+export type UnitStatus = (typeof UNIT_STATUSES)[number];
+/** The statuses a unit can be sold from. */
+export const SELLABLE_UNIT_STATUSES = ['available', 'demo'] as const satisfies readonly UnitStatus[];
 
 export const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'income', 'expense'] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
@@ -231,6 +241,10 @@ export const PERMISSIONS = {
   'stock:read': ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin'],
   'stock:write': ['stores', 'admin'],
   'stock:approve': ['owner', 'admin'],
+  // Serialised units: looking them up (the counter and sales pick serials when they sell), and describing
+  // them (fitting a component, a battery's BPAN, firmware, its storage charge).
+  'units:read': ['owner', 'store', 'sales', 'stores', 'accounts', 'operations', 'admin'],
+  'units:write': ['stores', 'operations', 'admin'],
   // Job work: material sent to an outside worker on a challan, and what comes back.
   'jobwork:read': ['owner', 'stores', 'accounts', 'operations', 'admin'],
   'jobwork:write': ['stores', 'operations', 'admin'],
