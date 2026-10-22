@@ -754,8 +754,18 @@ export const invoices = pgTable('invoices', {
   cancelledAt: ts('cancelled_at'),
   cancelReason: text('cancel_reason'),
   reason: text('reason'),
+  /**
+   * E-invoice and e-way bill references, filled in after the invoice is issued (from the GST portal,
+   * later through a GSP). They, and cancellation, are all that may change on an issued invoice (RC004).
+   */
   irn: text('irn'),
+  irnAckNo: text('irn_ack_no'),
+  irnAckDate: ts('irn_ack_date'),
+  signedQr: text('signed_qr'),
+  irnStatus: text('irn_status'),
+  irnCancelledAt: ts('irn_cancelled_at'),
   ewayBillNo: text('eway_bill_no'),
+  ewayValidUntil: ts('eway_valid_until'),
   notes: text('notes'),
   ...stamps,
 }, (t) => [
@@ -766,6 +776,7 @@ export const invoices = pgTable('invoices', {
   index('invoices_against_idx').on(t.againstInvoiceId),
   check('invoices_no_len_chk', sql`${t.invoiceNo} is null or char_length(${t.invoiceNo}) <= 16`),
   check('invoices_issued_no_chk', sql`${t.status} = 'draft' or ${t.invoiceNo} is not null`),
+  check('invoices_irn_status_chk', sql`${t.irnStatus} is null or ${t.irnStatus} in ('generated', 'cancelled', 'failed')`),
 ]);
 
 export const invoiceLines = pgTable('invoice_lines', {
