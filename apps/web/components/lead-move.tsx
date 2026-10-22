@@ -47,7 +47,7 @@ export function LeadMoveDialog({ lead, to, reasons, onClose, onDone }: {
         intro={<p className="muted small">The lead becomes a customer or a dealer, ready for a quote or a bill. Nothing is typed twice.</p>}
         initial={{ party_type: 'customer', name: lead.name }}
         fields={[
-          { name: 'party_type', label: 'As', type: 'select', required: true, options: [{ value: 'customer', label: 'Customer' }, { value: 'dealer', label: 'Dealer' }] },
+          { name: 'party_type', label: 'As', type: 'select', required: true, options: [{ value: 'customer', label: 'Customer' }, { value: 'dealer', label: 'Dealer' }, { value: 'franchisee', label: 'Franchisee' }] },
           { name: 'name', label: 'Name on bills', required: true },
           { name: 'gstin', label: 'GSTIN', help: 'For a business that claims GST' },
         ]}

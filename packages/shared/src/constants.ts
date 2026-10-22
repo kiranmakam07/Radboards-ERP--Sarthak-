@@ -13,16 +13,29 @@
 export const ROLES = ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin', 'hr', 'operations'] as const;
 export type Role = (typeof ROLES)[number];
 
-export const PARTY_TYPES = ['customer', 'dealer', 'supplier'] as const;
+// A franchisee buys from us like a dealer does (the dealer price list, credit terms), under its own name.
+// New kinds are added at the end: the database enums only ever grow.
+export const PARTY_TYPES = ['customer', 'dealer', 'supplier', 'franchisee'] as const;
 export type PartyType = (typeof PARTY_TYPES)[number];
+/** Who we sell to. */
+export const SELLING_PARTY_TYPES = ['customer', 'dealer', 'franchisee'] as const satisfies readonly PartyType[];
+/** Who buys at the dealer price (trade) rather than retail. */
+export const TRADE_PARTY_TYPES = ['dealer', 'franchisee'] as const satisfies readonly PartyType[];
+export const isTradeParty = (t: string | null | undefined): boolean => (TRADE_PARTY_TYPES as readonly string[]).includes(t ?? '');
 
-export const ITEM_TYPES = ['raw_material', 'finished_good', 'spare_part', 'service'] as const;
+// EV kinds: a vehicle is built from sub-assemblies (battery pack, controller, motor); accessories are
+// sold alongside; consumables are used up in the workshop.
+export const ITEM_TYPES = ['raw_material', 'finished_good', 'spare_part', 'service', 'vehicle', 'sub_assembly', 'accessory', 'consumable'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
 // 'job_work' is where our material lies while an outside worker has it: still ours, not on our shelves.
-// New kinds are added at the end: the database enum only ever grows.
-export const LOCATION_TYPES = ['stores', 'showroom', 'rejected', 'job_work'] as const;
+// 'service_bay' is the workshop, 'demo' the test-ride and display units, 'franchise' stock kept at a
+// franchisee's store that is still ours, 'in_transit' goods on the road between two of our places.
+// Only stores and showroom count as stock that can be sold today.
+export const LOCATION_TYPES = ['stores', 'showroom', 'rejected', 'job_work', 'service_bay', 'demo', 'franchise', 'in_transit'] as const;
 export type LocationType = (typeof LOCATION_TYPES)[number];
+/** Places goods cannot be delivered to a customer from. */
+export const UNSELLABLE_LOCATION_TYPES = ['rejected', 'job_work', 'service_bay', 'in_transit'] as const satisfies readonly LocationType[];
 
 export const LEAD_STAGES = ['new', 'contacted', 'interested', 'meeting_booked', 'converted', 'lost'] as const;
 export type LeadStage = (typeof LEAD_STAGES)[number];

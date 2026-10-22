@@ -197,13 +197,13 @@ export function dashboardsRouter(db: DB) {
           select p.id as party_id, p.name,
                  sum(case when i.doc_type = 'credit_note' then -i.grand_total else i.grand_total end) as revenue
             from invoices i join parties p on p.id = i.party_id
-           where i.status = 'issued' and p.party_type = 'dealer' and i.invoice_date between ${from}::date and ${to}::date
+           where i.status = 'issued' and p.party_type in ('dealer', 'franchisee') and i.invoice_date between ${from}::date and ${to}::date
            group by p.id, p.name order by 3 desc limit 10`),
         dealer_outstanding: await rows(db, sql`
           select p.id as party_id, p.name, p.credit_limit, coalesce(b.balance, 0) as outstanding,
                  case when p.credit_limit > 0 then round(100.0 * coalesce(b.balance, 0) / p.credit_limit, 1) end as used_pct
             from parties p left join v_party_balances b on b.party_id = p.id
-           where p.party_type = 'dealer' and p.active and (coalesce(b.balance, 0) <> 0 or p.credit_limit is not null)
+           where p.party_type in ('dealer', 'franchisee') and p.active and (coalesce(b.balance, 0) <> 0 or p.credit_limit is not null)
            order by coalesce(b.balance, 0) desc limit 50`),
       },
     });

@@ -181,6 +181,8 @@ export function inventoryRouter(db: DB) {
              coalesce(sum(s.qty) filter (where l.type = 'showroom'), 0) as showroom_qty,
              coalesce(sum(s.qty) filter (where l.type = 'rejected'), 0) as rejected_qty,
              coalesce(sum(s.qty) filter (where l.type = 'job_work'), 0) as job_work_qty,
+             -- demo units, the workshop, a franchisee's store, on the road: ours, but not on the shelf to sell
+             coalesce(sum(s.qty) filter (where l.type in ('service_bay', 'demo', 'franchise', 'in_transit')), 0) as elsewhere_qty,
              coalesce(sum(s.qty) filter (where l.type in ('stores', 'showroom')), 0) as available_qty,
              coalesce(max(v.value), 0) as value, max(v.avg_cost) as avg_cost
         from items i

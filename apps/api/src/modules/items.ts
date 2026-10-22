@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { CHANNELS, ITEM_TYPES, addDays, istDate } from '@radcore/shared';
+import { CHANNELS, ITEM_TYPES, addDays, isTradeParty, istDate } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { rows, type DB } from '../db/client';
@@ -28,7 +28,7 @@ export async function priceListFor(tx: DB, party: { priceListId: string | null; 
     const [pl] = await tx.select().from(priceLists).where(eq(priceLists.id, party.priceListId));
     if (pl) return pl;
   }
-  const base = party?.partyType === 'dealer' ? 'dealer' : 'retail';
+  const base = isTradeParty(party?.partyType) ? 'dealer' : 'retail';
   const [pl] = await tx
     .select()
     .from(priceLists)

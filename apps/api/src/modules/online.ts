@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { D, STATE_CODES, formatINR, istDate, money, normalisePhone, stateCodeFor, type Channel } from '@radcore/shared';
+import { D, SELLING_PARTY_TYPES, STATE_CODES, formatINR, istDate, money, normalisePhone, stateCodeFor, type Channel } from '@radcore/shared';
 import { getCompany } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { channelEvents, items, leads, parties, salesOrderLines, salesOrders } from '../db/schema';
@@ -212,11 +212,11 @@ async function partyFor(ctx: Ctx, o: OnlineOrder, stateCode: string): Promise<st
     // One at a time per phone, so two orders from the same new customer cannot both add them.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`party:${phone}`}, 0))`);
     const [found] = await tx.select({ id: parties.id }).from(parties)
-      .where(and(eq(parties.phone, phone), inArray(parties.partyType, ['customer', 'dealer']))).orderBy(asc(parties.createdAt)).limit(1);
+      .where(and(eq(parties.phone, phone), inArray(parties.partyType, [...SELLING_PARTY_TYPES]))).orderBy(asc(parties.createdAt)).limit(1);
     if (found) return found.id;
   } else if (email) {
     const [found] = await tx.select({ id: parties.id }).from(parties)
-      .where(and(sql`lower(${parties.email}) = ${email}`, inArray(parties.partyType, ['customer', 'dealer']))).orderBy(asc(parties.createdAt)).limit(1);
+      .where(and(sql`lower(${parties.email}) = ${email}`, inArray(parties.partyType, [...SELLING_PARTY_TYPES]))).orderBy(asc(parties.createdAt)).limit(1);
     if (found) return found.id;
   }
   // If this phone enquired before, the sale is credited to where that enquiry came from.

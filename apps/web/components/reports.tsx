@@ -103,7 +103,7 @@ export function PartyProfit() {
           </div>
           <Table rows={data.data} empty="No bills in these dates." rowHref={(r) => (r.party_id ? `/parties/${r.party_id}` : null)}
             chart={{ kind: 'bar', name: 'Profit', label: (r) => r.party_name, value: (r) => Number(r.profit), format: rupees }} columns={[
-            { key: 'party_name', title: 'Customer', render: (r) => <>{r.party_name}{r.party_type === 'dealer' ? <span className="muted small"> · dealer</span> : null}</> },
+            { key: 'party_name', title: 'Customer', render: (r) => <>{r.party_name}{r.party_type === 'dealer' || r.party_type === 'franchisee' ? <span className="muted small"> · {r.party_type}</span> : null}</> },
             { key: 'bills', title: 'Bills', align: 'right', render: (r) => <>{r.bills}{r.returns ? <span className="muted small"> · {r.returns} returned</span> : null}</> },
             { key: 'sale', title: 'Sold for', align: 'right', render: (r) => inr(r.sale) },
             { key: 'cost', title: 'Cost', align: 'right', render: (r) => inr(r.cost) },

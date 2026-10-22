@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { isTradeParty } from '@radcore/shared';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import {
@@ -104,7 +105,7 @@ export default function OrderPage() {
 
       {write && o.status === 'draft' && (
         <EditLines key={linesKey(o.lines)} path={`/sales/orders/${id}/lines`} lines={o.lines} onDone={reload}
-          priceKey={o.party?.party_type === 'dealer' ? 'dealer_price' : 'retail_price'} filter={(i) => i.item_type !== 'raw_material'} />
+          priceKey={isTradeParty(o.party?.party_type) ? 'dealer_price' : 'retail_price'} filter={(i) => i.item_type !== 'raw_material'} />
       )}
       {write && o.status === 'confirmed' && pendingDelivery && (
         <Toggle label="Deliver part of the order"><PartialDelivery order={o} onDone={reload} /></Toggle>
