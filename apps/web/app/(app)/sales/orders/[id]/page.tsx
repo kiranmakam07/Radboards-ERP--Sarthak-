@@ -72,7 +72,7 @@ export default function OrderPage() {
         )}
       </>
     }>
-      {o.status === 'draft' ? <PriceWarning problems={o.price_problems} canApprove={approver} action="Confirming the order" /> : null}
+      {o.status === 'draft' ? <PriceWarning problems={o.price_problems} canApprove={approver} approves="Confirming the order" ask="confirm this order" /> : null}
       <Card>
         <KV rows={[
           ['Status', <Badge value={o.status} />],
@@ -157,11 +157,20 @@ function PartialDelivery({ order, onDone }: { order: any; onDone: () => void }) 
   const [serials, setSerials] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const pending = order.lines.filter((l: any) => Number(l.delivered_qty) < Number(l.qty));
-  // Goods leave from the showroom for a counter order, from stores for any other.
-  const places = useGet<{ data: { id: string; type: string; active: boolean }[] }>('/masters/locations');
-  const from = places.data?.data.find((l) => l.active && l.type === (order.channel === 'store' ? 'showroom' : 'stores'))?.id ?? null;
+  // Goods leave from the showroom for a counter order, from stores for any other, unless another place is picked.
+  const places = useGet<{ data: { id: string; name: string; type: string; active: boolean }[] }>('/masters/locations');
+  const sellFrom = (places.data?.data ?? []).filter((l) => l.active && ['stores', 'showroom', 'demo', 'franchise'].includes(l.type));
+  const [picked, setPicked] = useState('');
+  const from = picked || sellFrom.find((l) => l.type === (order.channel === 'store' ? 'showroom' : 'stores'))?.id || null;
   return (
     <div>
+      <div className="form" style={{ marginBottom: 8 }}>
+        <label><span>Deliver from</span>
+          <select value={from ?? ''} onChange={(e) => { setPicked(e.target.value); setSerials({}); }}>
+            {sellFrom.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        </label>
+      </div>
       <Table rows={pending} columns={[
         { key: 'item_name', title: 'Item', render: (r) => (
           <>
@@ -183,7 +192,7 @@ function PartialDelivery({ order, onDone }: { order: any; onDone: () => void }) 
           try {
             const lines = Object.entries(qty).filter(([, q]) => Number(q) > 0)
               .map(([order_line_id, q]) => ({ order_line_id, qty: q, ...(serials[order_line_id]?.length ? { serials: serials[order_line_id] } : {}) }));
-            await post(`/sales/orders/${order.id}/deliver`, { lines });
+            await post(`/sales/orders/${order.id}/deliver`, { lines, location_id: from });
             setQty({});
             onDone();
           } catch (e) {

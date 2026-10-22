@@ -14,7 +14,8 @@ export const parseSerials = (text: string): string[] =>
   [...new Set(text.split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean))];
 
 const countNote = (have: number, need: number) =>
-  have === need ? <span className="muted small">{have} of {need} ✓</span> : <span className="error small">{have} of {need}</span>;
+  need === 0 && have === 0 ? <span className="muted small">pick one for each unit</span>
+    : have === need ? <span className="muted small">{have} of {need} ✓</span> : <span className="error small">{have} of {need}</span>;
 
 /** Pick the serials going out from those at a place: tap to pick, or scan one and press Enter. */
 export function SerialPicker({ itemId, locationId, qty, value, onChange }: {

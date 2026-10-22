@@ -3,6 +3,7 @@ import { ROLES, addDays, addMonths, gstinCheckChar, istDate, type Role } from '@
 import { hashPassword } from '../core/auth';
 import { setSetting } from '../core/settings';
 import type { Ctx } from '../lib/http';
+import { unitEvent } from '../core/units';
 import { createAdjustment, decideAdjustment } from '../modules/inventory';
 import { createApplicant, createEmployee, hireApplicant, moveApplicant, saveAttendance, scheduleInterview } from '../modules/hr';
 import { captureLead, sourceIdByName } from '../modules/leads';
@@ -10,7 +11,7 @@ import { fromShopify, takeOrder, type OnlineOrder } from '../modules/online';
 import { createParty } from '../modules/parties';
 import { rows, sql, type DB } from './client';
 import {
-  adSpends, allocations, assets, campaigns, channelEvents, items, jobOpenings, maintenanceSchedules, projects, taskTemplates, tasks, users,
+  adSpends, allocations, assets, campaigns, channelEvents, items, jobOpenings, maintenanceSchedules, projects, taskTemplates, tasks, units, users,
 } from './schema';
 
 /**
@@ -70,6 +71,27 @@ export async function seedDemo(db: DB, password: string = DEMO_PASSWORD): Promis
     };
     await opening(at('stores'), [['BRD-CRUISER', 20], ['BRD-LONG', 8], ['WHL-60', 40], ['HLM-01', 15], ['RM-MAPLE', 60]]);
     await opening(at('showroom'), [['BRD-CRUISER', 6], ['BRD-LONG', 2], ['WHL-60', 12], ['HLM-01', 6]]);
+
+    // The EV range, kept by serial number: scooters on the showroom floor, spare battery packs in stores
+    // (a pack needs a storage charge every 30 days; one is late, so the home screen shows the alert).
+    const [scooter, pack, motor] = await ctx.tx.insert(items).values([
+      { sku: 'EV-S1', name: 'Electric Scooter S1', itemType: 'vehicle', hsnSac: '871160', gstRate: '5', purchaseCost: '62000', mrp: '92000', retailPrice: '89250', dealerPrice: '76000', reorderLevel: '2', isSerialised: true },
+      { sku: 'BAT-60V', name: 'Battery Pack 60V 30Ah', itemType: 'sub_assembly', hsnSac: '850760', gstRate: '18', purchaseCost: '18000', retailPrice: '27140', dealerPrice: '21000', isSerialised: true, chargeEveryDays: 30 },
+      { sku: 'MTR-2K', name: 'Hub Motor 2 kW', itemType: 'sub_assembly', hsnSac: '850152', gstRate: '18', purchaseCost: '9000', isSerialised: true },
+    ]).returning();
+    for (const [where, lines] of [
+      [at('showroom'), [{ itemId: scooter!.id, qtyChange: '3', unitCost: '62000', serials: ['S1-24A0101', 'S1-24A0102', 'S1-24A0103'] }]],
+      [at('stores'), [{ itemId: pack!.id, qtyChange: '2', unitCost: '18000', serials: ['BP60-7781', 'BP60-7782'] }]],
+    ] as const) {
+      const adj = await createAdjustment(ctx, { kind: 'opening', locationId: where, reason: 'Opening stock (demo)', lines: lines.map((l) => ({ ...l, serials: [...l.serials] })) });
+      await decideAdjustment(ctx, adj.id, true);
+    }
+    // What the first scooter is made of: its battery pack (with its BPAN) and its motor.
+    const [s1] = await rows<{ id: string }>(ctx.tx, sql`select id from units where serial_no = 'S1-24A0101'`);
+    const [fittedPack] = await ctx.tx.insert(units).values({ itemId: pack!.id, serialNo: 'BP60-1001', parentUnitId: s1!.id, bpan: 'IN60V30AHLFP00001001A', firmwareVersion: 'BMS 3.2', status: 'available' }).returning();
+    const [fittedMotor] = await ctx.tx.insert(units).values({ itemId: motor!.id, serialNo: 'MT2K-5531', parentUnitId: s1!.id, status: 'available' }).returning();
+    for (const u of [fittedPack!, fittedMotor!]) await unitEvent(ctx, { unitId: u.id, event: 'fitted', refType: 'unit', refId: s1!.id, note: 'Recorded inside S1-24A0101' });
+    await ctx.tx.execute(sql`update units set last_charged_on = ${addDays(istDate(), -34)}::date where serial_no = 'BP60-7781'`);
 
     const lead = (name: string, phone: string, source: string, detail: string | null, sku: string) =>
       sourceIdByName(ctx.tx, source).then((sourceId) =>

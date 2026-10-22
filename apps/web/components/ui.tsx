@@ -174,11 +174,17 @@ export type PriceProblem = { item_id: string; item: string; unit_price: string; 
  * The prices that need the owner or Accounts. Someone who may approve is told that saving approves
  * them; anyone else is told whom to ask. The cost itself is never shown, only that it is below it.
  */
-export function PriceWarning({ problems, canApprove, action }: { problems: PriceProblem[] | undefined; canApprove: boolean; action: string }) {
+export function PriceWarning({ problems, canApprove, approves, ask }: {
+  problems: PriceProblem[] | undefined; canApprove: boolean;
+  /** What approves them, for someone who may: "Saving the bill". */
+  approves: string;
+  /** What to ask the owner or Accounts to do, for anyone else: "make this bill". */
+  ask: string;
+}) {
   if (!problems?.length) return null;
   return (
     <div className="warning" role="status">
-      <strong>{canApprove ? `These prices need approval: ${action} approves them, and it is logged.` : `These prices need the owner or Accounts to approve them. Ask one of them to ${action.toLowerCase()}.`}</strong>
+      <strong>{canApprove ? `These prices need approval. ${approves} approves them, and that is logged.` : `These prices need the owner or Accounts to approve them: ask one of them to ${ask}.`}</strong>
       <ul>
         {problems.map((p) => (
           <li key={p.item_id}>

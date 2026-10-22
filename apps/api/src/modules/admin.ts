@@ -442,6 +442,9 @@ export function mastersRouter(db: DB) {
   });
   r.patch('/locations/:id', requirePerm('masters:manage'), async (req, res) => {
     const body = zNameActive.partial().parse(req.body);
+    const [place] = await db.select().from(locations).where(eq(locations.id, zId.parse(req.params.id)));
+    // Job work runs through its own place: it cannot be switched off from the list.
+    if (place?.type === 'job_work' && body.active === false) throw badRequest('The place for stock with job workers is used by every job work challan and stays on');
     const [row] = await db.update(locations).set({ ...body, updatedAt: new Date() })
       .where(eq(locations.id, zId.parse(req.params.id))).returning();
     res.json({ data: must(row, 'Location') });

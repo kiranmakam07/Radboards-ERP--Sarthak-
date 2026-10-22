@@ -41,7 +41,7 @@ describe('a review copy', () => {
       select (select count(*) from users)::int as users, (select count(*) from leads)::int as leads, (select count(*) from items)::int as items,
              (select count(*) from employees)::int as employees, (select count(*) from projects)::int as projects,
              (select count(*) from allocations)::int as allocations, (select count(*) from applicants)::int as applicants`);
-    expect(counts).toEqual({ users: ROLES.length, leads: 4, items: 6, employees: 5, projects: 2, allocations: 8, applicants: 6 });
+    expect(counts).toEqual({ users: ROLES.length, leads: 4, items: 9, employees: 5, projects: 2, allocations: 8, applicants: 6 });
 
     const app = createApp(handle.db);
     await request(app).post('/api/auth/login').send({ identifier: '9000000006', password: 'radcore-demo' }).expect(401);
