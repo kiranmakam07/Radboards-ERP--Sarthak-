@@ -11,6 +11,7 @@ import { postJournal, reverseJournals, type JLine } from '../core/journal';
 import { nextNumber } from '../core/numbering';
 import { getCompany } from '../core/settings';
 import { locationByType, lockItems, stockIn, stockOut } from '../core/stock';
+import { taxRateOn } from '../core/taxrates';
 import { batchFor, cleanSerials, needsSerials, unitsIn } from '../core/units';
 import { rows, type DB } from '../db/client';
 import {
@@ -51,17 +52,21 @@ async function loadSupplier(tx: DB, id: string) {
 
 type PoLineInput = { itemId: string; qty: string; rate?: string | null };
 
-async function buildPoLines(tx: DB, input: PoLineInput[]) {
+/** PO lines, at the GST rate in force on the PO date (core/taxrates.ts). */
+async function buildPoLines(tx: DB, input: PoLineInput[], date: string) {
   if (input.length === 0) throw badRequest('Add at least one item');
   const found = await tx.select().from(items).where(inArray(items.id, [...new Set(input.map((l) => l.itemId))]));
   const byId = new Map(found.map((i) => [i.id, i]));
-  return input.map((l, idx) => {
+  const lines = [];
+  for (const [idx, l] of input.entries()) {
     const item = byId.get(l.itemId);
     if (!item) throw badRequest('Item not found');
     // Goods come in through the PO -> inward flow; services are booked as a bill or expense.
     if (!item.isStockItem) throw badRequest(`${item.name} is a service. Purchase orders are for goods.`);
-    return { itemId: item.id, qty: fmtQty(l.qty), rate: money(l.rate ?? item.purchaseCost), gstRate: item.gstRate, sort: idx };
-  });
+    const { gstRate } = await taxRateOn(tx, item, date);
+    lines.push({ itemId: item.id, qty: fmtQty(l.qty), rate: money(l.rate ?? item.purchaseCost), gstRate, sort: idx });
+  }
+  return lines;
 }
 
 /** Purchase order: supplier, items, quantity, rate, expected date. No indents, no approval chain (PRD 7.7). */
@@ -71,7 +76,7 @@ export async function createPurchaseOrder(
 ): Promise<PO> {
   const { tx } = ctx;
   await loadSupplier(tx, input.supplierId);
-  const lines = await buildPoLines(tx, input.lines);
+  const lines = await buildPoLines(tx, input.lines, input.orderDate);
   const { number } = await nextNumber(tx, 'purchase_order', input.orderDate);
   const [po] = await tx
     .insert(purchaseOrders)
@@ -550,7 +555,7 @@ export function purchasingRouter(db: DB) {
       const [po] = await ctx.tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).for('update');
       must(po, 'Purchase order');
       if (po!.status !== 'draft') throw conflict('Only a draft PO can be edited');
-      const lines = await buildPoLines(ctx.tx, b.lines.map(toPoLine));
+      const lines = await buildPoLines(ctx.tx, b.lines.map(toPoLine), po!.orderDate);
       await ctx.tx.delete(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, id));
       await ctx.tx.insert(purchaseOrderLines).values(lines.map((l) => ({ ...l, purchaseOrderId: id })));
       await audit(ctx, 'purchase_order', id, 'update_lines', null, lines);

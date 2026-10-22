@@ -355,6 +355,27 @@ export const items = pgTable('items', {
   check('items_cess_rate_chk', sql`${t.cessRate} >= 0`),
 ]);
 
+/**
+ * GST rate history by HSN: from effective_from on, goods under this HSN (or under a longer code that
+ * starts with it) carry this rate and cess. A document line takes the rate on its document's date;
+ * an item whose HSN has no row here keeps its own rate. BCD and SWS are the customs duties on import.
+ */
+export const taxRates = pgTable('tax_rates', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  hsn: text('hsn').notNull(),
+  gstRate: pct('gst_rate').notNull(),
+  cessRate: pct('cess_rate').notNull().default('0'),
+  bcdRate: pct('bcd_rate'),
+  swsRate: pct('sws_rate'),
+  effectiveFrom: date('effective_from').notNull(),
+  note: text('note'),
+  ...stamps,
+}, (t) => [
+  unique('tax_rates_hsn_from_uq').on(t.hsn, t.effectiveFrom),
+  check('tax_rates_gst_rate_chk', sql`${t.gstRate} in (0, 0.25, 3, 5, 12, 18, 28, 40)`),
+  check('tax_rates_hsn_chk', sql`${t.hsn} ~ '^[0-9]{2,8}$'`),
+]);
+
 export const itemImages = pgTable('item_images', {
   id: uuid('id').primaryKey().defaultRandom(),
   itemId: uuid('item_id').notNull().references(() => items.id),
