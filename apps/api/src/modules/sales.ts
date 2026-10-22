@@ -13,6 +13,7 @@ import { postJournal, reverseJournals } from '../core/journal';
 import { nextNumber } from '../core/numbering';
 import { getCompany, getSetting } from '../core/settings';
 import { locationByType, lockItems, stockIn, stockOut } from '../core/stock';
+import { taxRateOn } from '../core/taxrates';
 import { cleanSerials, needsSerials, unitEvent, unitsIn, unitsOut } from '../core/units';
 import { rows, type DB } from '../db/client';
 import {
@@ -79,8 +80,8 @@ async function loadParty(tx: DB, partyId: string | null): Promise<Party | null> 
   return party;
 }
 
-/** Build order lines: price from the party's price list, GST rate snapshotted from the item. */
-async function buildLines(tx: DB, party: Party | null, input: OrderLineInput[], taxInclusiveOverride?: boolean | null) {
+/** Build order lines: price from the party's price list, the GST rate in force on the order's date (core/taxrates.ts). */
+async function buildLines(tx: DB, party: Party | null, input: OrderLineInput[], date: string, taxInclusiveOverride?: boolean | null) {
   if (input.length === 0) throw badRequest('Add at least one item');
   const priceList = await priceListFor(tx, party);
   const taxInclusive = taxInclusiveOverride ?? priceList.taxInclusive;
@@ -95,7 +96,8 @@ async function buildLines(tx: DB, party: Party | null, input: OrderLineInput[], 
     const rate = l.rate ?? (await priceFor(tx, item, priceList));
     const discount = l.discount ?? '0';
     if (D(discount).gt(D(l.qty).times(rate))) throw badRequest(`Discount on ${item.name} is more than the line amount`);
-    lines.push({ itemId: item.id, qty: fmtQty(l.qty), rate: money(rate), discount: money(discount), gstRate: item.gstRate, cessRate: item.cessRate, sort: idx });
+    const tax = await taxRateOn(tx, item, date);
+    lines.push({ itemId: item.id, qty: fmtQty(l.qty), rate: money(rate), discount: money(discount), gstRate: tax.gstRate, cessRate: tax.cessRate, sort: idx });
   }
   return { lines, taxInclusive };
 }
@@ -110,7 +112,7 @@ export async function createOrder(ctx: Ctx, input: OrderInput): Promise<Order> {
     if (!e?.active) throw badRequest('That company (legal entity) does not exist or is switched off');
   }
   const company = await getCompany(tx, input.entityId);
-  const { lines, taxInclusive } = await buildLines(tx, party, input.lines, input.taxInclusive);
+  const { lines, taxInclusive } = await buildLines(tx, party, input.lines, input.orderDate, input.taxInclusive);
   const placeOfSupply = input.placeOfSupply ?? party?.stateCode ?? company.state_code;
   if (!STATE_CODES[placeOfSupply]) throw badRequest('Unknown place of supply');
 
@@ -482,7 +484,9 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
     } else discount = D(p.line.discount).times(p.qty).div(p.line.qty).toDecimalPlaces(2);
     const [cost] = await rows<{ c: string | null }>(tx, sql`
       select (sum(qty * unit_cost) / nullif(sum(qty), 0))::numeric(12,2)::text as c from delivery_lines where order_line_id = ${p.line.id}`);
-    const tax = computeLine({ qty: p.qty, rate: p.line.rate, discount, gstRate: p.line.gstRate, cessRate: p.line.cessRate }, inter, order.taxInclusive);
+    // GST is due at the rate in force on the invoice date (the time of supply), even if it changed after the order.
+    const onDate = await taxRateOn(tx, { hsnSac: item.hsnSac, gstRate: p.line.gstRate, cessRate: p.line.cessRate }, invoiceDate);
+    const tax = computeLine({ qty: p.qty, rate: p.line.rate, discount, gstRate: onDate.gstRate, cessRate: onDate.cessRate }, inter, order.taxInclusive);
     computed.push(tax);
     // The serials delivered on this order line and not billed yet go on the bill (a vehicle's frame number must).
     const billed = await rows<{ id: string; serial_no: string }>(tx, sql`
@@ -491,8 +495,8 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
     const [invLine] = await tx.insert(invoiceLines).values({
       invoiceId: draft!.id, orderLineId: p.line.id, itemId: item.id, description: item.name, hsnSac: item.hsnSac, unit: item.unit,
       qty: fmtQty(p.qty), rate: p.line.rate, discount: money(discount), taxableValue: money(tax.taxableValue),
-      gstRate: p.line.gstRate, cgst: money(tax.cgst), sgst: money(tax.sgst), igst: money(tax.igst),
-      cessRate: p.line.cessRate, cess: money(tax.cess),
+      gstRate: onDate.gstRate, cgst: money(tax.cgst), sgst: money(tax.sgst), igst: money(tax.igst),
+      cessRate: onDate.cessRate, cess: money(tax.cess),
       lineTotal: money(tax.lineTotal), unitCost: money(cost?.c ?? 0), sort: idx,
       serials: billed.length ? billed.map((u) => u.serial_no) : null,
     }).returning();
@@ -1070,7 +1074,7 @@ export function salesRouter(db: DB) {
       const { order, lines: before } = await lockOrder(ctx.tx, id);
       if (order.status !== 'draft') throw conflict('Only a draft order can be edited');
       const party = await loadParty(ctx.tx, order.partyId);
-      const { lines } = await buildLines(ctx.tx, party, b.lines.map(toLine), order.taxInclusive);
+      const { lines } = await buildLines(ctx.tx, party, b.lines.map(toLine), order.orderDate, order.taxInclusive);
       await ctx.tx.delete(salesOrderLines).where(eq(salesOrderLines.orderId, id));
       await ctx.tx.insert(salesOrderLines).values(lines.map((l) => ({ ...l, orderId: id })));
       if (b.notes !== undefined) await ctx.tx.update(salesOrders).set({ notes: b.notes, updatedAt: new Date() }).where(eq(salesOrders.id, id));
@@ -1160,7 +1164,7 @@ export function salesRouter(db: DB) {
       tax_inclusive: z.boolean().nullish(), place_of_supply: emptyToNull(zStateCode).optional() }).parse(req.body);
     const party = await loadParty(db, b.party_id ?? null);
     const company = await getCompany(db);
-    const { lines, taxInclusive } = await buildLines(db, party, b.lines.map(toLine), b.tax_inclusive);
+    const { lines, taxInclusive } = await buildLines(db, party, b.lines.map(toLine), istDate(), b.tax_inclusive);
     const pos = b.place_of_supply ?? party?.stateCode ?? company.state_code;
     const inter = isInterState(company.state_code, pos);
     const computed = lines.map((l) => computeLine(l, inter, taxInclusive));

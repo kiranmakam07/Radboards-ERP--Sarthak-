@@ -374,3 +374,36 @@ describe('0029 legal entities and branches', () => {
     expect(series.map((s) => s.prefix.split('/')[0])).toEqual(['INV', 'KINV']);
   });
 });
+
+describe('0030 GST rate history', () => {
+  it('each line takes the rate in force on its document date, the longest HSN first', async () => {
+    const admin = await w.as('admin');
+    const sales = await w.as('sales');
+    const today = istDate();
+    await (await w.as('sales')).post('/api/masters/tax-rates').send({ hsn: '8711', gst_rate: 18, effective_from: today }).expect(403);
+    await admin.post('/api/masters/tax-rates').send({ hsn: '8711', gst_rate: 10, effective_from: today }).expect(400);
+    // Two-wheelers (8711) go to 18% from tomorrow; electric ones (871160) to 12% from today.
+    await admin.post('/api/masters/tax-rates').send({ hsn: '8711', gst_rate: 18, effective_from: addDays(today, 1), note: 'Rate notification' }).expect(201);
+    await admin.post('/api/masters/tax-rates').send({ hsn: '871160', gst_rate: 12, cess_rate: 1, effective_from: today }).expect(201);
+    const rate = async (date: string) => {
+      const o = (await sales.post('/api/sales/orders').send({ channel: 'dealer', party_id: id.franchisee, order_date: date, lines: [{ item_id: id['GRS-1'], qty: 1 }] }).expect(201)).body.data;
+      const line = (await sales.get(`/api/sales/orders/${o.id}`).expect(200)).body.data.lines[0];
+      return { id: o.id, gst: Number(line.gst_rate), cess: Number(line.cess_rate) };
+    };
+    const yesterday = await rate(addDays(today, -1));
+    expect([yesterday.gst, yesterday.cess]).toEqual([5, 0]); // the item's own rate: no row in force yet
+    const now = await rate(today);
+    expect([now.gst, now.cess]).toEqual([12, 1]); // 871160 beats 8711
+    // Ordered yesterday at 5%, billed today: the bill charges today's 12% + 1%.
+    await sales.post(`/api/sales/orders/${yesterday.id}/confirm`).send({}).expect(200);
+    await sales.post(`/api/sales/orders/${yesterday.id}/deliver`).send({}).expect(201);
+    const inv = (await sales.post(`/api/sales/orders/${yesterday.id}/invoice`).send({}).expect(201)).body.data;
+    const doc = (await sales.get(`/api/sales/invoices/${inv.id}`).expect(200)).body.data;
+    expect([Number(doc.lines[0].gst_rate), Number(doc.lines[0].cess_rate)]).toEqual([12, 1]);
+    // And a purchase order dated today buys at it too.
+    const stores = await w.as('stores');
+    const po = (await stores.post('/api/purchasing/orders').send({ supplier_id: id.supplier, lines: [{ item_id: id['GRS-1'], qty: 1, rate: 700 }] }).expect(201)).body.data;
+    expect(Number((await stores.get(`/api/purchasing/orders/${po.id}`).expect(200)).body.data.lines[0].gst_rate)).toBe(12);
+    expect((await admin.get('/api/masters/tax-rates').expect(200)).body.data.map((r: any) => [r.hsn, Number(r.gst_rate)])).toEqual([['8711', 18], ['871160', 12]]);
+  });
+});

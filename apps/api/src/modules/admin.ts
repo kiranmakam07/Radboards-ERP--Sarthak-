@@ -14,10 +14,12 @@ import { getSetting, loadPermissionOverrides, setSetting, type CompanyProfile } 
 import { rows, type DB } from '../db/client';
 import {
   branches, campaigns, entities, expenseCategories, itemCategories, leadSources, locations, lostReasons, numberSeries, priceListItems,
-  priceLists, users,
+  priceLists, taxRates, users,
 } from '../db/schema';
 import { badRequest, forbidden, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zAddress, zGstin, zHttpUrl, zId, zMoney, zPhone, zStateCode, zText } from '../lib/http';
+import {
+  emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zGstRate, zHttpUrl, zId, zMoney, zPhone, zStateCode, zText,
+} from '../lib/http';
 import { toWorkbook, type Sheet } from '../lib/xlsx';
 
 /**
@@ -360,6 +362,29 @@ export function mastersRouter(db: DB) {
     const [row] = await db.update(itemCategories).set({ ...body, updatedAt: new Date() })
       .where(eq(itemCategories.id, zId.parse(req.params.id))).returning();
     res.json({ data: must(row, 'Category') });
+  });
+
+  // ---- GST rate history ----
+  /** Rate changes by HSN, newest first: what each code carries from which day (core/taxrates.ts). */
+  r.get('/tax-rates', requireAuth, async (req, res) => {
+    sendList(req, res, await db.select().from(taxRates).orderBy(asc(taxRates.hsn), desc(taxRates.effectiveFrom)), 'tax-rates');
+  });
+  r.post('/tax-rates', requirePerm('masters:manage'), async (req, res) => {
+    const pctOrNull = emptyToNull(z.coerce.number().min(0).max(300)).optional();
+    const b = z.object({
+      hsn: z.string().trim().regex(/^\d{2,8}$/, 'an HSN or SAC code: 2 to 8 digits'), gst_rate: zGstRate,
+      cess_rate: z.coerce.number().min(0).max(300).default(0), bcd_rate: pctOrNull, sws_rate: pctOrNull,
+      effective_from: zDate, note: emptyToNull(z.string().trim().max(300)).optional(),
+    }).parse(req.body);
+    const row = await inTx(db, req, async (ctx) => {
+      const [made] = await ctx.tx.insert(taxRates).values({
+        hsn: b.hsn, gstRate: b.gst_rate, cessRate: String(b.cess_rate), bcdRate: b.bcd_rate == null ? null : String(b.bcd_rate),
+        swsRate: b.sws_rate == null ? null : String(b.sws_rate), effectiveFrom: b.effective_from, note: b.note ?? null, createdBy: ctx.user!.id,
+      }).returning();
+      await audit(ctx, 'tax_rate', made!.id, 'create', null, made);
+      return made;
+    });
+    res.status(201).json({ data: row });
   });
 
   // ---- legal entities and branches ----

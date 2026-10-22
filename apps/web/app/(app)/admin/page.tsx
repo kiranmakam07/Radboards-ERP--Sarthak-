@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { LOCATION_TYPES, STATE_CODES } from '@radcore/shared';
+import { GST_RATES, LOCATION_TYPES, STATE_CODES } from '@radcore/shared';
 import { ActionButton, Badge, Card, ErrorBox, Form, Loading, Page, Table, Toggle, date, dateTime, inr, label } from '@/components/ui';
 import { patch, post, put, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -35,6 +35,7 @@ export default function AdminPage() {
   const accounts = useGet<{ data: any[] }>('/accounting/accounts');
   const series = useGet<{ data: any[] }>('/settings/number-series');
   const entities = useGet<{ data: any[] }>('/masters/entities');
+  const taxRates = useGet<{ data: any[] }>('/masters/tax-rates');
   const s = settings.data?.data;
   if (!s) return <Page title="Setup"><Loading loading={settings.loading} error={settings.error} /></Page>;
   const c = s.company;
@@ -136,6 +137,26 @@ export default function AdminPage() {
         <NameList title="Lost reasons" path="lost-reasons" />
         <NameList title="Item categories" path="item-categories" />
         <NameList title="Expense categories" path="expense-categories" extra={{ name: 'account_id', label: 'Posts to account', options: expenseAccounts }} />
+        <Card title="GST rate changes">
+          <p className="muted small">When the government changes the rate for an HSN, enter it here ahead of time: every bill and order dated on or after that day uses it. A longer code wins over a shorter one (871160 over 8711).</p>
+          <Table rows={taxRates.data?.data} empty="No changes entered: each product's own GST rate is used." columns={[
+            { key: 'hsn', title: 'HSN' }, { key: 'gst_rate', title: 'GST %', align: 'right', render: (r) => Number(r.gst_rate) },
+            { key: 'cess_rate', title: 'Cess %', align: 'right', render: (r) => (Number(r.cess_rate) ? Number(r.cess_rate) : '') },
+            { key: 'effective_from', title: 'From', render: (r) => date(r.effective_from) }, { key: 'note', title: 'Note' },
+          ]} />
+          {can('masters:manage') ? (
+            <Toggle label="Add a rate change">
+              <Form inline submit="Add"
+                fields={[
+                  { name: 'hsn', label: 'HSN', required: true },
+                  { name: 'gst_rate', label: 'GST %', type: 'select', required: true, options: GST_RATES.map((r) => ({ value: String(r), label: `${r}%` })) },
+                  { name: 'cess_rate', label: 'Cess %', type: 'number' }, { name: 'effective_from', label: 'From', type: 'date', required: true },
+                  { name: 'note', label: 'Note' },
+                ]}
+                onSubmit={(v) => post('/masters/tax-rates', { ...v, cess_rate: v.cess_rate || 0 })} onDone={taxRates.reload} />
+            </Toggle>
+          ) : null}
+        </Card>
         <Card title="Document numbering">
           <Table rows={series.data?.data} empty="Series are created the first time each document is issued." columns={[
             { key: 'doc_type', title: 'Document' }, { key: 'fy', title: 'FY' }, { key: 'prefix', title: 'Prefix' }, { key: 'next_value', title: 'Next no', align: 'right' },
