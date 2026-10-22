@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  FOLLOW_UP_REQUIRED_STAGES, LEAD_STAGES, LEAD_STAGE_LABELS, can, canMoveLead, istDate, type LeadStage,
+  SELLING_PARTY_TYPES, FOLLOW_UP_REQUIRED_STAGES, LEAD_STAGES, LEAD_STAGE_LABELS, can, canMoveLead, istDate, type LeadStage,
 } from '@radcore/shared';
 import { config } from '../config';
 import { advancePlan, planView, startDefaultPlan } from './plans';
@@ -216,7 +216,7 @@ export async function convertLead(
   ctx: Ctx,
   id: string,
   input: {
-    partyType: 'customer' | 'dealer'; name?: string; gstin?: string | null; stateCode?: string | null;
+    partyType: (typeof SELLING_PARTY_TYPES)[number]; name?: string; gstin?: string | null; stateCode?: string | null;
     billingAddress?: z.infer<typeof zAddress> | null; email?: string | null;
   },
 ): Promise<{ lead: Lead; party: Party }> {
@@ -375,7 +375,7 @@ export function leadsRouter(db: DB) {
       select p.id, p.name, p.phone, p.party_type, p.gstin, p.state_code, p.billing_address,
              coalesce(b.balance, 0) as balance
         from parties p left join v_party_balances b on b.party_id = p.id
-       where p.phone = ${phone} and p.party_type in ('customer','dealer') and p.active`);
+       where p.phone = ${phone} and p.party_type in ('customer', 'dealer', 'franchisee') and p.active`);
     const ids = foundParties.map((p) => p.id);
     const purchases = ids.length
       ? await rows(db, sql`
@@ -601,7 +601,7 @@ export function leadsRouter(db: DB) {
   r.post('/:id/convert', requirePerm('leads:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = z.object({
-      party_type: z.enum(['customer', 'dealer']).default('customer'),
+      party_type: z.enum(SELLING_PARTY_TYPES).default('customer'),
       name: zText(200).optional(),
       email: emptyToNull(z.string().email()).optional(),
       gstin: emptyToNull(zGstin).optional(),

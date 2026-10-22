@@ -4,7 +4,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   CHANNELS, D, Decimal, ORDER_STATUSES, PAYMENT_MODES, addDays, amountInWords, can, computeLine, computeTotals, formatDate, formatINR,
-  isInterState, istDate, money, qty as fmtQty, round2, STATE_CODES, type Channel, type LineTax, type PaymentMode, type Role,
+  isInterState, istDate, money, qty as fmtQty, round2, SELLING_PARTY_TYPES, STATE_CODES, UNSELLABLE_LOCATION_TYPES,
+  type Channel, type LineTax, type PaymentMode, type Role,
 } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
@@ -343,6 +344,7 @@ export async function deliverOrder(
   const [location] = await tx.select().from(locations).where(eq(locations.id, locationId));
   if (!location || !location.active) throw badRequest('Location not found');
   if (location.type === 'rejected') throw badRequest('Rejected stock cannot be sold');
+  if ((UNSELLABLE_LOCATION_TYPES as readonly string[]).includes(location.type)) throw badRequest(`Goods at ${location.name} cannot be delivered from there`);
 
   const date = input.date ?? istDate();
   const itemRows = await lockItems(tx, want.map((w) => w.line.itemId));
@@ -514,7 +516,7 @@ export async function quickBill(ctx: Ctx, input: QuickBillInput) {
     const [existing] = await tx
       .select()
       .from(parties)
-      .where(and(eq(parties.phone, input.customer.phone), inArray(parties.partyType, ['customer', 'dealer'])))
+      .where(and(eq(parties.phone, input.customer.phone), inArray(parties.partyType, [...SELLING_PARTY_TYPES])))
       .orderBy(asc(parties.createdAt))
       .limit(1);
     if (existing) partyId = existing.id;

@@ -1,5 +1,6 @@
 'use client';
 
+import { isTradeParty } from '@radcore/shared';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { LineEditor, toApiLines, type ItemLite, type Line } from '@/components/lines';
@@ -48,7 +49,7 @@ function NewOrder() {
       <Card title="Items">
         <p className="muted small">Rates default to the party's price list (dealer prices exclude GST, retail prices include it). Type a rate only to override.</p>
         <LineEditor items={items.data?.data ?? []} lines={lines} onChange={setLines}
-          priceKey={party?.party_type === 'dealer' ? 'dealer_price' : 'retail_price'} filter={(i) => i.item_type !== 'raw_material'} />
+          priceKey={isTradeParty(party?.party_type) ? 'dealer_price' : 'retail_price'} filter={(i) => i.item_type !== 'raw_material'} />
       </Card>
       <ErrorBox error={error} />
       <p style={{ marginTop: 12 }}><button type="button" className="primary" disabled={!partyId || lines.length === 0} onClick={save}>Save quote</button></p>

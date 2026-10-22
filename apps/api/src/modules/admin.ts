@@ -367,7 +367,8 @@ export function mastersRouter(db: DB) {
     sendList(req, res, await db.select().from(locations).orderBy(asc(locations.createdAt)));
   });
   r.post('/locations', requirePerm('masters:manage'), async (req, res) => {
-    const body = zNameActive.extend({ type: z.enum(['stores', 'showroom', 'rejected']) }).parse(req.body);
+    // Job work places are made by the system, one per job worker; every other kind can be added here.
+    const body = zNameActive.extend({ type: z.enum(['stores', 'showroom', 'rejected', 'service_bay', 'demo', 'franchise', 'in_transit']) }).parse(req.body);
     const [row] = await db.insert(locations).values({ ...body, createdBy: req.user!.id }).returning();
     res.status(201).json({ data: row });
   });

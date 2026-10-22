@@ -4,7 +4,7 @@ import type { Field } from './ui';
 /** `withTerms` is off for someone adding a party while working: the commercial terms belong to the master. */
 export const partyFields = (priceLists: any[], withType = true, withTerms = true): Field[] => [
   ...(withType ? [{ name: 'party_type', label: 'Type', type: 'select' as const, required: true,
-    options: [{ value: 'customer', label: 'Customer' }, { value: 'dealer', label: 'Dealer' }, { value: 'supplier', label: 'Supplier' }] }] : []),
+    options: [{ value: 'customer', label: 'Customer' }, { value: 'dealer', label: 'Dealer' }, { value: 'franchisee', label: 'Franchisee' }, { value: 'supplier', label: 'Supplier' }] }] : []),
   { name: 'name', label: 'Name', required: true },
   { name: 'phone', label: 'Phone', type: 'tel' },
   { name: 'email', label: 'Email', type: 'email' },

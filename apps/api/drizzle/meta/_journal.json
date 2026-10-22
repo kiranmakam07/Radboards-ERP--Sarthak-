@@ -183,6 +183,13 @@
       "when": 1792672548218,
       "tag": "0025_gst_40_and_cess",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792685628583,
+      "tag": "0026_ev_enums",
+      "breakpoints": true
     }
   ]
 }

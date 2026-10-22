@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { STATE_CODES } from '@radcore/shared';
-import { ActionButton, Badge, Card, ErrorBox, Form, Loading, Page, Table, Toggle, date, dateTime, inr } from '@/components/ui';
+import { LOCATION_TYPES, STATE_CODES } from '@radcore/shared';
+import { ActionButton, Badge, Card, ErrorBox, Form, Loading, Page, Table, Toggle, date, dateTime, inr, label } from '@/components/ui';
 import { patch, post, put, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -108,6 +108,8 @@ export default function AdminPage() {
             <Toggle label="Set rates on a list"><PriceListRates lists={priceLists.data.data} onDone={priceLists.reload} /></Toggle>
           )}
         </Card>
+        <NameList title="Places stock is kept" path="locations"
+          extra={{ name: 'type', label: 'Kind', options: LOCATION_TYPES.filter((t) => t !== 'job_work').map((t) => ({ value: t, label: label(t) })) }} />
         <NameList title="Lead sources" path="lead-sources" />
         <NameList title="Lost reasons" path="lost-reasons" />
         <NameList title="Item categories" path="item-categories" />

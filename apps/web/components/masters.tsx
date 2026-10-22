@@ -24,7 +24,7 @@ export function PartiesMaster({ side, onChange }: { side?: 'customers' | 'suppli
   const { data, loading, error, reload } = useGet<{ data: any[] }>(path);
   const priceLists = useGet<{ data: any[] }>('/masters/price-lists');
   const manage = can('parties:manage');
-  const types = side === 'suppliers' ? ['supplier'] : side === 'customers' ? ['customer', 'dealer'] : ['customer', 'dealer', 'supplier'];
+  const types = side === 'suppliers' ? ['supplier'] : side === 'customers' ? ['customer', 'dealer', 'franchisee'] : ['customer', 'dealer', 'franchisee', 'supplier'];
   const fields = partyFields(priceLists.data?.data ?? [], true, manage)
     .map((x) => (x.name === 'party_type' ? { ...x, options: (x.options ?? []).filter((o) => types.includes(String(o.value))) } : x));
   const noun = side === 'suppliers' ? 'supplier' : side === 'customers' ? 'customer' : 'party';
