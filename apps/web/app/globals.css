@@ -342,6 +342,8 @@ a.stat:hover { text-decoration: none; transform: translateY(-2px); box-shadow: v
 .toggle-body { background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; margin-top: 10px; }
 .error { color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-line); border-radius: 6px; padding: 7px 12px; }
 .error.small { padding: 2px 6px; margin-left: 6px; }
+.warning { color: var(--warn-ink); background: var(--warn-soft); border: 1px solid var(--warn-soft); border-left: 3px solid var(--warn); border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
+.warning ul { margin: 4px 0 0; padding-left: 18px; }
 .notice { color: var(--ok); background: var(--ok-soft); border: 1px solid var(--ok-line); border-radius: 6px; padding: 7px 12px; margin-bottom: 12px; }
 .action { display: inline-flex; align-items: center; }
 

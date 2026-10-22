@@ -144,6 +144,31 @@ export function Notice({ children }: { children: ReactNode }) {
   return children ? <div className="notice">{children}</div> : null;
 }
 
+/** A line priced below cost, or discounted more than the seller may give (from the API's price check). */
+export type PriceProblem = { item_id: string; item: string; unit_price: string; list_price: string; discount_pct: string; limit_pct: number | null; below_cost: boolean; over_limit: boolean };
+
+/**
+ * The prices that need the owner or Accounts. Someone who may approve is told that saving approves
+ * them; anyone else is told whom to ask. The cost itself is never shown, only that it is below it.
+ */
+export function PriceWarning({ problems, canApprove, action }: { problems: PriceProblem[] | undefined; canApprove: boolean; action: string }) {
+  if (!problems?.length) return null;
+  return (
+    <div className="warning" role="status">
+      <strong>{canApprove ? `These prices need approval: ${action} approves them, and it is logged.` : `These prices need the owner or Accounts to approve them. Ask one of them to ${action.toLowerCase()}.`}</strong>
+      <ul>
+        {problems.map((p) => (
+          <li key={p.item_id}>
+            {p.below_cost
+              ? `${p.item}: ₹${inr(p.unit_price)} before GST is below its cost.`
+              : `${p.item}: ${Number(p.discount_pct)}% off the list price of ₹${inr(p.list_price)} (the limit is ${p.limit_pct}%).`}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** While a screen's data is on its way: grey bars that shimmer where the content will be. */
 export function Loading({ loading, error }: { loading: boolean; error: string | null }) {
   if (error) return <ErrorBox error={error} />;

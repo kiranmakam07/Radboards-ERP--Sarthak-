@@ -57,6 +57,12 @@ export type SettingsMap = {
   bank_mail_state: { last_checked_at: string | null; last_found: number; last_error: string | null };
   /** When Meta last confirmed our webhook addresses (its one-time check when a webhook is subscribed). */
   crm_state: { meta_verified_at: string | null; whatsapp_verified_at: string | null };
+  /**
+   * The biggest discount off the price list, in %, each role may give without approval
+   * ({ store: 5, sales: 10 }). A role not named here may give none, unless it holds
+   * sales:approve_discount (no limit). Selling below purchase cost always needs that permission.
+   */
+  discount_limits: Partial<Record<Role, number>>;
 };
 
 export const SETTING_DEFAULTS: SettingsMap = {
@@ -78,6 +84,7 @@ export const SETTING_DEFAULTS: SettingsMap = {
   attendance_rules: { start: null, grace_min: 10, weekly_off: [0], place: null },
   payroll_rules: PAYROLL_RULES_DEFAULT,
   bank_mail_state: { last_checked_at: null, last_found: 0, last_error: null },
+  discount_limits: { store: 5, sales: 10 },
   crm_state: { meta_verified_at: null, whatsapp_verified_at: null },
 };
 

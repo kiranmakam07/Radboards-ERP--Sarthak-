@@ -292,6 +292,8 @@ export const items = pgTable('items', {
   categoryId: uuid('category_id').references(() => itemCategories.id),
   hsnSac: text('hsn_sac'),
   gstRate: pct('gst_rate').notNull().default('18'),
+  /** Compensation cess, as a % of the taxable value, on top of GST (0 for almost everything). */
+  cessRate: pct('cess_rate').notNull().default('0'),
   unit: text('unit').notNull().default('Nos'),
   purchaseCost: money('purchase_cost').notNull().default('0'),
   mrp: money('mrp').notNull().default('0'),
@@ -302,7 +304,11 @@ export const items = pgTable('items', {
   isStockItem: boolean('is_stock_item').notNull().default(true),
   active: boolean('active').notNull().default(true),
   ...stamps,
-}, (t) => [check('items_gst_rate_chk', sql`${t.gstRate} in (0, 5, 12, 18, 28)`)]);
+}, (t) => [
+  // The GST slabs, with 40% (from 22 Sep 2025) and the 0.25% and 3% special rates.
+  check('items_gst_rate_chk', sql`${t.gstRate} in (0, 0.25, 3, 5, 12, 18, 28, 40)`),
+  check('items_cess_rate_chk', sql`${t.cessRate} >= 0`),
+]);
 
 export const itemImages = pgTable('item_images', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -509,6 +515,7 @@ export const salesOrderLines = pgTable('sales_order_lines', {
   rate: money('rate').notNull(),
   discount: money('discount').notNull().default('0'),
   gstRate: pct('gst_rate').notNull(),
+  cessRate: pct('cess_rate').notNull().default('0'),
   deliveredQty: qty('delivered_qty').notNull().default('0'),
   invoicedQty: qty('invoiced_qty').notNull().default('0'),
   sort: integer('sort').notNull().default(0),
@@ -565,6 +572,7 @@ export const invoices = pgTable('invoices', {
   cgstTotal: money('cgst_total').notNull().default('0'),
   sgstTotal: money('sgst_total').notNull().default('0'),
   igstTotal: money('igst_total').notNull().default('0'),
+  cessTotal: money('cess_total').notNull().default('0'),
   roundOff: money('round_off').notNull().default('0'),
   grandTotal: money('grand_total').notNull().default('0'),
   dueDate: date('due_date'),
@@ -605,6 +613,8 @@ export const invoiceLines = pgTable('invoice_lines', {
   cgst: money('cgst').notNull().default('0'),
   sgst: money('sgst').notNull().default('0'),
   igst: money('igst').notNull().default('0'),
+  cessRate: pct('cess_rate').notNull().default('0'),
+  cess: money('cess').notNull().default('0'),
   lineTotal: money('line_total').notNull(),
   /** Cost of the goods on this line (from the delivery) - used when a return restocks. */
   unitCost: money('unit_cost').notNull().default('0'),

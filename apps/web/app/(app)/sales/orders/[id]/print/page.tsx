@@ -76,6 +76,7 @@ export default function OrderPrintPage() {
               ? <tr><td colSpan={8} className="right">IGST</td><td className="right">{inr(t.igst_total)}</td></tr>
               : <><tr><td colSpan={8} className="right">CGST</td><td className="right">{inr(t.cgst_total)}</td></tr>
                 <tr><td colSpan={8} className="right">SGST</td><td className="right">{inr(t.sgst_total)}</td></tr></>}
+            {Number(t.cess_total) > 0 && <tr><td colSpan={8} className="right">Cess</td><td className="right">{inr(t.cess_total)}</td></tr>}
             {Number(t.round_off) !== 0 && <tr><td colSpan={8} className="right">Round off</td><td className="right">{inr(t.round_off)}</td></tr>}
             <tr><td colSpan={8} className="right"><strong>Total</strong></td><td className="right"><strong>₹{inr(t.grand_total)}</strong></td></tr>
           </tfoot>

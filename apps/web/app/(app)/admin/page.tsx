@@ -85,6 +85,17 @@ export default function AdminPage() {
             </ActionButton>
           )}
         </Card>
+        <Card title="Discount limits">
+          <p className="muted">The biggest discount off the price list each role may give on its own. More than that, or any price below cost, needs the owner or Accounts to approve it.</p>
+          <Form inline submit="Save limits"
+            initial={{ store: String(s.discount_limits?.store ?? 0), sales: String(s.discount_limits?.sales ?? 0) }}
+            fields={[
+              { name: 'store', label: 'Counter (store), %', type: 'number', required: true },
+              { name: 'sales', label: 'Sales, %', type: 'number', required: true },
+            ]}
+            onSubmit={(v) => put('/settings/discount-limits', { discount_limits: { ...s.discount_limits, store: Number(v.store), sales: Number(v.sales) } })}
+            onDone={settings.reload} />
+        </Card>
         <Card title="Price lists">
           <Table rows={priceLists.data?.data} columns={[
             { key: 'name', title: 'Name' }, { key: 'base_price', title: 'Uses', render: (r) => `${r.base_price} price` },

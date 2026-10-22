@@ -324,6 +324,8 @@ describe('store quick bill (one transaction)', () => {
 
   it('finds a repeat customer by phone and bills the same party again, part on credit', async () => {
     const store = await w.as('store');
+    // ₹120 off ₹1,120 is 10.7% off the list: more than the counter's 5% unless the limit is raised, as here.
+    await (await w.as('admin')).put('/api/settings/discount-limits').send({ discount_limits: { store: 15, sales: 10 } }).expect(200);
     const lookup = await store.get('/api/leads/lookup').query({ phone: '9811100001' }).expect(200);
     expect(lookup.body.data.parties).toHaveLength(1);
     expect(lookup.body.data.purchases).toHaveLength(1);

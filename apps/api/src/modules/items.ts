@@ -7,7 +7,7 @@ import { requirePerm } from '../core/auth';
 import { rows, type DB } from '../db/client';
 import { channelItemMap, itemImages, items, priceListItems, priceLists } from '../db/schema';
 import { badRequest, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zGstRate, zLink, zId, zListQuery, zMoney, zQtyNonNeg, zText } from '../lib/http';
+import { emptyToNull, inTx, sendList, zCessRate, zGstRate, zLink, zId, zListQuery, zMoney, zQtyNonNeg, zText } from '../lib/http';
 
 /**
  * The item master: what we buy, make and sell, with HSN, GST rate, unit, prices, pictures and the
@@ -59,6 +59,7 @@ const zItem = z.object({
   category_id: emptyToNull(zId).optional(),
   hsn_sac: emptyToNull(z.string().regex(/^\d{4,8}$/, 'HSN/SAC must be 4 to 8 digits')).optional(),
   gst_rate: zGstRate,
+  cess_rate: zCessRate.default('0'),
   unit: zText(20).default('Nos'),
   purchase_cost: zMoney.default('0'),
   mrp: zMoney.default('0'),
@@ -71,7 +72,7 @@ const zItem = z.object({
 
 function toRow(b: Partial<z.infer<typeof zItem>>) {
   return {
-    sku: b.sku, name: b.name, itemType: b.item_type, categoryId: b.category_id, hsnSac: b.hsn_sac, gstRate: b.gst_rate,
+    sku: b.sku, name: b.name, itemType: b.item_type, categoryId: b.category_id, hsnSac: b.hsn_sac, gstRate: b.gst_rate, cessRate: b.cess_rate,
     unit: b.unit, purchaseCost: b.purchase_cost, mrp: b.mrp, retailPrice: b.retail_price, dealerPrice: b.dealer_price,
     reorderLevel: b.reorder_level, barcode: b.barcode, active: b.active,
     // Services are never stock items (PRD 8.4).

@@ -3,8 +3,9 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { LineEditor, toApiLines, type ItemLite, type Line } from '@/components/lines';
-import { Card, ErrorBox, Page, inr } from '@/components/ui';
-import { api, post, useGet } from '@/lib/api';
+import { Card, ErrorBox, Page, PriceWarning, inr } from '@/components/ui';
+import { ApiError, api, post, useGet } from '@/lib/api';
+import { useCan } from '@/lib/session';
 
 const MODES = ['cash', 'upi', 'card'] as const;
 
@@ -21,7 +22,10 @@ function QuickBill() {
   const [pay, setPay] = useState<Record<string, string>>({ cash: '', upi: '', card: '' });
   const [preview, setPreview] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  // Refused for credit (over the limit, or bills overdue): someone with sales:override_credit can bill it anyway.
+  const [creditRefused, setCreditRefused] = useState(false);
   const [busy, setBusy] = useState(false);
+  const can = useCan();
 
   useEffect(() => {
     if (!partyId) { setParty(null); return; }
@@ -57,18 +61,21 @@ function QuickBill() {
   const paid = MODES.reduce((s, m) => s + Number(pay[m] || 0), 0);
   const due = Math.round((total - paid) * 100) / 100;
 
-  async function save() {
-    setBusy(true); setError(null);
+  async function save(overrideCredit = false) {
+    setBusy(true); setError(null); setCreditRefused(false);
     try {
       const res = await post('/sales/quick-bill', {
         party_id: partyId,
         customer: !partyId && phone ? { phone, name } : null,
         lines: toApiLines(lines.filter((l) => Number(l.qty) > 0)),
         payments: MODES.filter((m) => Number(pay[m]) > 0).map((m) => ({ mode: m, amount: pay[m] })),
+        override_credit: overrideCredit,
       });
       router.push(`/invoices/${res.data.invoice.id}?new=1`);
     } catch (e) {
       setError((e as Error).message);
+      const details = e instanceof ApiError ? (e.details as Record<string, unknown> | undefined) : undefined;
+      setCreditRefused(Boolean(details && ('exposure' in details || 'overdue' in details)));
       setBusy(false);
     }
   }
@@ -105,6 +112,7 @@ function QuickBill() {
               {Number(preview.totals.cgst_total) > 0 && <div><span>CGST</span><span>{inr(preview.totals.cgst_total)}</span></div>}
               {Number(preview.totals.sgst_total) > 0 && <div><span>SGST</span><span>{inr(preview.totals.sgst_total)}</span></div>}
               {Number(preview.totals.igst_total) > 0 && <div><span>IGST</span><span>{inr(preview.totals.igst_total)}</span></div>}
+              {Number(preview.totals.cess_total) > 0 && <div><span>Cess</span><span>{inr(preview.totals.cess_total)}</span></div>}
               {Number(preview.totals.round_off) !== 0 && <div><span>Round off</span><span>{inr(preview.totals.round_off)}</span></div>}
               <div className="grand"><span>Total</span><span>₹{inr(total)}</span></div>
             </div>
@@ -126,11 +134,15 @@ function QuickBill() {
             </p>
           </>
         ) : <p className="muted">Add items to see the total.</p>}
+        <PriceWarning problems={preview?.price_problems} canApprove={can('sales:approve_discount')} action="Saving the bill" />
         <ErrorBox error={error} />
-        <div style={{ marginTop: 12 }}>
-          <button type="button" className="primary big" disabled={busy || !preview || due < 0} onClick={save}>
+        <div className="actions" style={{ marginTop: 12 }}>
+          <button type="button" className="primary big" disabled={busy || !preview || due < 0} onClick={() => save()}>
             {busy ? 'Saving…' : 'Save & print invoice'}
           </button>
+          {creditRefused && can('sales:override_credit') ? (
+            <button type="button" className="big" disabled={busy} onClick={() => save(true)}>Bill on credit anyway (override)</button>
+          ) : null}
         </div>
       </Card>
     </Page>

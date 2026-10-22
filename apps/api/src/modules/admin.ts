@@ -160,6 +160,7 @@ export function settingsRouter(db: DB) {
         allow_negative_stock: await getSetting(db, 'allow_negative_stock'),
         valuation_method: await getSetting(db, 'valuation_method'),
         default_follow_up_days: await getSetting(db, 'default_follow_up_days'),
+        discount_limits: await getSetting(db, 'discount_limits'),
       },
       state_codes: STATE_CODES,
     });
@@ -249,6 +250,17 @@ export function settingsRouter(db: DB) {
       const before = await getSetting(ctx.tx, 'allow_negative_stock');
       await setSetting(ctx.tx, 'allow_negative_stock', body.allow_negative_stock, ctx.user!.id);
       await audit(ctx, 'settings', 'allow_negative_stock', 'update', { value: before }, { value: body.allow_negative_stock });
+    });
+    res.json({ data: body });
+  });
+
+  /** The biggest discount off the price list each role may give without approval, in %. */
+  r.put('/discount-limits', requirePerm('settings:manage'), async (req, res) => {
+    const body = z.object({ discount_limits: z.record(z.enum(ROLES), z.number().min(0).max(100)) }).parse(req.body);
+    await inTx(db, req, async (ctx) => {
+      const before = await getSetting(ctx.tx, 'discount_limits');
+      await setSetting(ctx.tx, 'discount_limits', body.discount_limits, ctx.user!.id);
+      await audit(ctx, 'settings', 'discount_limits', 'update', before, body.discount_limits);
     });
     res.json({ data: body });
   });

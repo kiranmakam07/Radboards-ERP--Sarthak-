@@ -24,6 +24,8 @@ export default function ProductPage() {
   const { id } = useParams<{ id: string }>();
   const can = useCan();
   const write = can('items:write');
+  // Cost price and margins only for costs:read; the API leaves them out for everyone else too.
+  const costs = can('costs:read');
   const { data, loading, error, reload } = useGet<{ data: any }>(`/items/${id}`);
   const categories = useGet<{ data: any[] }>('/masters/item-categories');
   const [tab, setTab] = useState<Tab>('overview');
@@ -78,16 +80,19 @@ export default function ProductPage() {
                 : <span className="product-pic" style={{ width: 110, height: 110, fontSize: 28 }} aria-hidden="true">{initials(p.name)}</span>}
               <KV rows={[
                 ['Code (SKU)', p.sku], ['Kind', label(p.item_type)], ['Category', category],
-                ['Unit', p.unit], ['HSN / SAC', p.hsn_sac], ['GST', `${num(p.gst_rate)}%`], ['Barcode', p.barcode],
+                ['Unit', p.unit], ['HSN / SAC', p.hsn_sac], ['GST', `${num(p.gst_rate)}%${Number(p.cess_rate) ? ` + ${num(p.cess_rate)}% cess` : ''}`], ['Barcode', p.barcode],
               ]} />
             </div>
           </Card>
           <Card title="Prices at a glance">
             <KV rows={[
               ['Retail (with GST)', `₹${inr(p.retail_price)}`], ['Dealer (before GST)', `₹${inr(p.dealer_price)}`],
-              ['MRP', `₹${inr(p.mrp)}`], ['Purchase cost', `₹${inr(p.purchase_cost)}`],
-              ['Margin, retail', cost ? `${pct(retailBeforeGst - cost, retailBeforeGst)} (₹${inr((retailBeforeGst - cost).toFixed(2))})` : ''],
-              ['Margin, dealer', cost ? `${pct(dealerBeforeGst - cost, dealerBeforeGst)} (₹${inr((dealerBeforeGst - cost).toFixed(2))})` : ''],
+              ['MRP', `₹${inr(p.mrp)}`],
+              ...(costs ? [
+                ['Purchase cost', `₹${inr(p.purchase_cost)}`],
+                ['Margin, retail', cost ? `${pct(retailBeforeGst - cost, retailBeforeGst)} (₹${inr((retailBeforeGst - cost).toFixed(2))})` : ''],
+                ['Margin, dealer', cost ? `${pct(dealerBeforeGst - cost, dealerBeforeGst)} (₹${inr((dealerBeforeGst - cost).toFixed(2))})` : ''],
+              ] as [string, string][] : []),
             ]} />
           </Card>
         </div>
@@ -98,7 +103,8 @@ export default function ProductPage() {
           <Card title="Its own prices">
             <KV rows={[
               ['Retail (with GST)', `₹${inr(p.retail_price)}`], ['Before GST', `₹${inr(retailBeforeGst.toFixed(2))}`],
-              ['Dealer (before GST)', `₹${inr(p.dealer_price)}`], ['MRP', `₹${inr(p.mrp)}`], ['Purchase cost', `₹${inr(p.purchase_cost)}`],
+              ['Dealer (before GST)', `₹${inr(p.dealer_price)}`], ['MRP', `₹${inr(p.mrp)}`],
+              ...(costs ? [['Purchase cost', `₹${inr(p.purchase_cost)}`] as [string, string]] : []),
             ]} />
           </Card>
           <Card title="On price lists" actions={can('settings:manage') ? <Link href="/admin">Price lists</Link> : null}>
@@ -120,12 +126,14 @@ export default function ProductPage() {
                 { key: 'qty', title: 'Quantity', align: 'right', render: (r) => `${num(r.qty)} ${p.unit}` },
               ]} />
             </Card>
-            <Card title="Its value">
+            <Card title={costs ? 'Its value' : 'Reorder'}>
               <KV rows={[
                 ['Reorder level', p.reorder_level !== null ? `${num(p.reorder_level)} ${p.unit}` : 'Not set'],
-                ['On hand, all places', `${num(p.valuation.qty)} ${p.unit}`],
-                ['Value at cost', `₹${inr(p.valuation.value)}`],
-                ['Average cost', p.valuation.avg_cost ? `₹${inr(p.valuation.avg_cost)}` : ''],
+                ['On hand, all places', `${num((p.stock as any[]).reduce((t, s) => t + Number(s.qty), 0))} ${p.unit}`],
+                ...(costs ? [
+                  ['Value at cost', `₹${inr(p.valuation.value)}`],
+                  ['Average cost', p.valuation.avg_cost ? `₹${inr(p.valuation.avg_cost)}` : ''],
+                ] as [string, string][] : []),
               ]} />
             </Card>
           </div>
@@ -147,11 +155,11 @@ export default function ProductPage() {
       {editing ? (
         <FormModal title={`Edit ${p.name}`} submit="Save" wide onClose={() => setEditing(false)}
           initial={{
-            ...p, gst_rate: String(Number(p.gst_rate)), category_id: p.category_id ?? '', hsn_sac: p.hsn_sac ?? '',
+            ...p, gst_rate: String(Number(p.gst_rate)), cess_rate: String(Number(p.cess_rate ?? 0)), category_id: p.category_id ?? '', hsn_sac: p.hsn_sac ?? '',
             reorder_level: p.reorder_level ?? '', barcode: p.barcode ?? '',
           }}
-          fields={productFields(cats)}
-          onSubmit={(v) => patch(`/items/${id}`, Object.fromEntries(productFields([]).map((x) => [x.name, v[x.name]])))}
+          fields={productFields(cats, { costs })}
+          onSubmit={(v) => patch(`/items/${id}`, Object.fromEntries(productFields([], { costs }).map((x) => [x.name, v[x.name]])))}
           onDone={reload} />
       ) : null}
     </Page>

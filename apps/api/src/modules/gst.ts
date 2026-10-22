@@ -23,11 +23,11 @@ export const B2CL_THRESHOLD = '100000';
 // ---------------------------------------------------------------------------
 // GSTR-3B: the summary
 // ---------------------------------------------------------------------------
-type Tax = { taxable: string; igst: string; cgst: string; sgst: string };
-const zero = (): Tax => ({ taxable: '0.00', igst: '0.00', cgst: '0.00', sgst: '0.00' });
+type Tax = { taxable: string; igst: string; cgst: string; sgst: string; cess: string };
+const zero = (): Tax => ({ taxable: '0.00', igst: '0.00', cgst: '0.00', sgst: '0.00', cess: '0.00' });
 const net = (a: Tax, b: Tax): Tax => ({
   taxable: money(D(a.taxable).minus(b.taxable)), igst: money(D(a.igst).minus(b.igst)),
-  cgst: money(D(a.cgst).minus(b.cgst)), sgst: money(D(a.sgst).minus(b.sgst)),
+  cgst: money(D(a.cgst).minus(b.cgst)), sgst: money(D(a.sgst).minus(b.sgst)), cess: money(D(a.cess).minus(b.cess)),
 });
 
 /**
@@ -39,20 +39,22 @@ export async function gstSummary(db: DB, from: string, to: string) {
   const outward = async (docType: 'tax_invoice' | 'credit_note') => {
     const [r] = await rows<Tax>(db, sql`
       select coalesce(sum(taxable_total), 0)::numeric(16,2)::text as taxable, coalesce(sum(igst_total), 0)::numeric(16,2)::text as igst,
-             coalesce(sum(cgst_total), 0)::numeric(16,2)::text as cgst, coalesce(sum(sgst_total), 0)::numeric(16,2)::text as sgst
+             coalesce(sum(cgst_total), 0)::numeric(16,2)::text as cgst, coalesce(sum(sgst_total), 0)::numeric(16,2)::text as sgst,
+             coalesce(sum(cess_total), 0)::numeric(16,2)::text as cess
         from invoices where doc_type = ${docType}::invoice_doc_type and status = 'issued' and invoice_date between ${from}::date and ${to}::date`);
     return r ?? zero();
   };
   const inward = async (docType: 'bill' | 'debit_note') => {
     const [r] = await rows<Tax>(db, sql`
       select coalesce(sum(taxable_total), 0)::numeric(16,2)::text as taxable, coalesce(sum(igst_total), 0)::numeric(16,2)::text as igst,
-             coalesce(sum(cgst_total), 0)::numeric(16,2)::text as cgst, coalesce(sum(sgst_total), 0)::numeric(16,2)::text as sgst
+             coalesce(sum(cgst_total), 0)::numeric(16,2)::text as cgst, coalesce(sum(sgst_total), 0)::numeric(16,2)::text as sgst,
+             '0.00' as cess
         from purchase_bills where doc_type = ${docType}::bill_doc_type and status = 'posted' and bill_date between ${from}::date and ${to}::date`);
     return r ?? zero();
   };
   const [exp] = await rows<Tax>(db, sql`
     select coalesce(sum(amount) filter (where gst_amount > 0), 0)::numeric(16,2)::text as taxable, coalesce(sum(igst), 0)::numeric(16,2)::text as igst,
-           coalesce(sum(cgst), 0)::numeric(16,2)::text as cgst, coalesce(sum(sgst), 0)::numeric(16,2)::text as sgst
+           coalesce(sum(cgst), 0)::numeric(16,2)::text as cgst, coalesce(sum(sgst), 0)::numeric(16,2)::text as sgst, '0.00' as cess
       from expenses where status = 'posted' and expense_date between ${from}::date and ${to}::date`);
 
   const sales = await outward('tax_invoice');
@@ -64,9 +66,10 @@ export async function gstSummary(db: DB, from: string, to: string) {
   const itc: Tax = {
     taxable: money(D(purchaseNet.taxable).plus(exp?.taxable ?? 0)), igst: money(D(purchaseNet.igst).plus(exp?.igst ?? 0)),
     cgst: money(D(purchaseNet.cgst).plus(exp?.cgst ?? 0)), sgst: money(D(purchaseNet.sgst).plus(exp?.sgst ?? 0)),
+    cess: money(D(purchaseNet.cess).plus(exp?.cess ?? 0)),
   };
-  const outputTax = D(output.igst).plus(output.cgst).plus(output.sgst);
-  const itcTax = D(itc.igst).plus(itc.cgst).plus(itc.sgst);
+  const outputTax = D(output.igst).plus(output.cgst).plus(output.sgst).plus(output.cess);
+  const itcTax = D(itc.igst).plus(itc.cgst).plus(itc.sgst).plus(itc.cess);
   return {
     from, to,
     outward: { sales, sales_returns: salesReturns, net: output, total_tax: money(outputTax) },
@@ -74,7 +77,7 @@ export async function gstSummary(db: DB, from: string, to: string) {
     // Estimate only: the real set-off order (IGST credit first, etc.) is applied on the portal.
     net_payable: {
       igst: money(D(output.igst).minus(itc.igst)), cgst: money(D(output.cgst).minus(itc.cgst)), sgst: money(D(output.sgst).minus(itc.sgst)),
-      total: money(outputTax.minus(itcTax)),
+      cess: money(D(output.cess).minus(itc.cess)), total: money(outputTax.minus(itcTax)),
     },
   };
 }
@@ -87,7 +90,7 @@ function gstr1Sections(db: DB, from: string, to: string, home: string) {
   const invoiceWise = (b2b: boolean) => rows(db, sql`
     select i.party_gstin as gstin, i.party_name as receiver_name, i.invoice_no, i.invoice_date, i.grand_total as invoice_value,
            i.place_of_supply, il.gst_rate as rate, sum(il.taxable_value) as taxable_value,
-           sum(il.igst) as igst, sum(il.cgst) as cgst, sum(il.sgst) as sgst
+           sum(il.igst) as igst, sum(il.cgst) as cgst, sum(il.sgst) as sgst, sum(il.cess) as cess
       from invoices i join invoice_lines il on il.invoice_id = i.id
      where i.doc_type = 'tax_invoice' and i.status = 'issued' and i.invoice_date between ${from}::date and ${to}::date
        and ${b2b ? sql`i.party_gstin is not null` : sql`i.party_gstin is null and i.place_of_supply <> ${home} and i.grand_total > ${B2CL_THRESHOLD}::numeric`}
@@ -98,13 +101,15 @@ function gstr1Sections(db: DB, from: string, to: string, home: string) {
     b2cl: () => invoiceWise(false),
     // Everything else sold to unregistered buyers, summarised by place of supply and rate, net of their credit notes.
     b2cs: () => rows(db, sql`
-      select x.place_of_supply, x.rate, sum(x.taxable_value) as taxable_value, sum(x.igst) as igst, sum(x.cgst) as cgst, sum(x.sgst) as sgst
+      select x.place_of_supply, x.rate, sum(x.taxable_value) as taxable_value, sum(x.igst) as igst, sum(x.cgst) as cgst, sum(x.sgst) as sgst,
+             sum(x.cess) as cess
         from (
           select i.place_of_supply, il.gst_rate as rate,
                  case when i.doc_type = 'credit_note' then -il.taxable_value else il.taxable_value end as taxable_value,
                  case when i.doc_type = 'credit_note' then -il.igst else il.igst end as igst,
                  case when i.doc_type = 'credit_note' then -il.cgst else il.cgst end as cgst,
-                 case when i.doc_type = 'credit_note' then -il.sgst else il.sgst end as sgst
+                 case when i.doc_type = 'credit_note' then -il.sgst else il.sgst end as sgst,
+                 case when i.doc_type = 'credit_note' then -il.cess else il.cess end as cess
             from invoices i join invoice_lines il on il.invoice_id = i.id
             left join invoices orig on orig.id = i.against_invoice_id
            where i.status = 'issued' and i.party_gstin is null and i.invoice_date between ${from}::date and ${to}::date
@@ -116,7 +121,7 @@ function gstr1Sections(db: DB, from: string, to: string, home: string) {
       select i.party_gstin as gstin, i.party_name as receiver_name, i.invoice_no as note_no, i.invoice_date as note_date, 'C' as note_type,
              orig.invoice_no as original_invoice_no, orig.invoice_date as original_invoice_date, i.grand_total as note_value,
              i.place_of_supply, il.gst_rate as rate, sum(il.taxable_value) as taxable_value,
-             sum(il.igst) as igst, sum(il.cgst) as cgst, sum(il.sgst) as sgst
+             sum(il.igst) as igst, sum(il.cgst) as cgst, sum(il.sgst) as sgst, sum(il.cess) as cess
         from invoices i join invoice_lines il on il.invoice_id = i.id join invoices orig on orig.id = i.against_invoice_id
        where i.doc_type = 'credit_note' and i.status = 'issued' and i.invoice_date between ${from}::date and ${to}::date
          and ${registered
@@ -130,7 +135,8 @@ function gstr1Sections(db: DB, from: string, to: string, home: string) {
              sum(case when i.doc_type = 'credit_note' then -il.taxable_value else il.taxable_value end) as taxable_value,
              sum(case when i.doc_type = 'credit_note' then -il.igst else il.igst end) as igst,
              sum(case when i.doc_type = 'credit_note' then -il.cgst else il.cgst end) as cgst,
-             sum(case when i.doc_type = 'credit_note' then -il.sgst else il.sgst end) as sgst
+             sum(case when i.doc_type = 'credit_note' then -il.sgst else il.sgst end) as sgst,
+             sum(case when i.doc_type = 'credit_note' then -il.cess else il.cess end) as cess
         from invoices i join invoice_lines il on il.invoice_id = i.id
        where i.status = 'issued' and i.invoice_date between ${from}::date and ${to}::date
          and (${registered}::boolean is null or (i.party_gstin is not null) = ${registered}::boolean)
@@ -169,8 +175,8 @@ type Row = Record<string, any>;
 function itemDetail(r: Row, home: string) {
   const base = { txval: num(r.taxable_value), rt: Number(r.rate) };
   return String(r.place_of_supply) === home
-    ? { ...base, camt: num(r.cgst), samt: num(r.sgst), csamt: 0 }
-    : { ...base, iamt: num(r.igst), csamt: 0 };
+    ? { ...base, camt: num(r.cgst), samt: num(r.sgst), csamt: num(r.cess) }
+    : { ...base, iamt: num(r.igst), csamt: num(r.cess) };
 }
 // One item per tax rate on a document; the serial is the rate with "01" after it (18% -> 1801), as the offline tool numbers them.
 const item = (r: Row, home: string) => ({ num: Math.round(Number(r.rate) * 100) + 1, itm_det: itemDetail(r, home) });
@@ -229,7 +235,7 @@ export async function gstr1PortalFile(db: DB, month: string) {
     const service = String(r.hsn).startsWith('99');
     return {
       num: i + 1, hsn_sc: String(r.hsn), desc: '', uqc: service ? 'NA' : (UQC[String(r.uqc).toLowerCase()] ?? 'OTH'),
-      qty: service ? 0 : Number(D(String(r.total_qty)).toFixed(3)), txval: num(r.taxable_value), iamt: num(r.igst), camt: num(r.cgst), samt: num(r.sgst), csamt: 0,
+      qty: service ? 0 : Number(D(String(r.total_qty)).toFixed(3)), txval: num(r.taxable_value), iamt: num(r.igst), camt: num(r.cgst), samt: num(r.sgst), csamt: num(r.cess),
       rt: Number(r.rate),
     };
   });

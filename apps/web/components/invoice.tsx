@@ -69,6 +69,7 @@ export function InvoiceDocument({ inv, thermal = false }: { inv: any; thermal?: 
         {inv.is_inter_state
           ? <div><span>IGST</span><span>{inr(inv.igst_total)}</span></div>
           : <><div><span>CGST</span><span>{inr(inv.cgst_total)}</span></div><div><span>SGST</span><span>{inr(inv.sgst_total)}</span></div></>}
+        {Number(inv.cess_total) > 0 && <div><span>Cess</span><span>{inr(inv.cess_total)}</span></div>}
         {Number(inv.round_off) !== 0 && <div><span>Round off</span><span>{inr(inv.round_off)}</span></div>}
         <div className="grand"><span>Total</span><span>₹{inr(inv.grand_total)}</span></div>
       </div>
@@ -78,12 +79,13 @@ export function InvoiceDocument({ inv, thermal = false }: { inv: any; thermal?: 
         <>
           <h3>HSN summary</h3>
           <table>
-            <thead><tr><th>HSN/SAC</th><th className="right">GST %</th><th className="right">Taxable</th><th className="right">CGST</th><th className="right">SGST</th><th className="right">IGST</th></tr></thead>
+            <thead><tr><th>HSN/SAC</th><th className="right">GST %</th><th className="right">Taxable</th><th className="right">CGST</th><th className="right">SGST</th><th className="right">IGST</th>{Number(inv.cess_total) > 0 && <th className="right">Cess</th>}</tr></thead>
             <tbody>
               {inv.hsn_summary.map((h: any) => (
                 <tr key={`${h.hsn_sac}-${h.gst_rate}`}>
                   <td>{h.hsn_sac}</td><td className="right">{num(h.gst_rate)}</td><td className="right">{inr(h.taxable_value)}</td>
                   <td className="right">{inr(h.cgst)}</td><td className="right">{inr(h.sgst)}</td><td className="right">{inr(h.igst)}</td>
+                  {Number(inv.cess_total) > 0 && <td className="right">{inr(h.cess)}</td>}
                 </tr>
               ))}
             </tbody>

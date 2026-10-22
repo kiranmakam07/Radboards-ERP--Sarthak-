@@ -266,7 +266,8 @@ export async function takeOrder(ctx: Ctx, o: OnlineOrder): Promise<{ orderId: st
     lines,
   });
   // The customer has already ordered and (usually) paid: there is no credit decision left to make here.
-  await confirmOrder(ctx, order.id, { skipCreditCheck: true });
+  // Paid on the channel, at the channel's own price: neither the credit nor the price check applies.
+  await confirmOrder(ctx, order.id, { skipCreditCheck: true, skipPriceCheck: true });
 
   const made = await tx.select().from(salesOrderLines).where(eq(salesOrderLines.orderId, order.id));
   const { totals } = await orderTotals(tx, order, made);

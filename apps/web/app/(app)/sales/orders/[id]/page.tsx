@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import {
-  ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, SmartButton, StatusBar, Table, Toggle, date, dateTime, inr, label, num, sub,
+  ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, PriceWarning, SmartButton, StatusBar, Table, Toggle, date, dateTime, inr, label, num, sub,
 } from '@/components/ui';
 import { EditLines, linesKey } from '@/components/edit-lines';
 import { post, useGet } from '@/lib/api';
@@ -18,6 +18,10 @@ export default function OrderPage() {
   const o = data?.data;
   if (!o) return <Page title="Order"><Loading loading={loading} error={error} /></Page>;
   const write = can('sales:write');
+  // The owner confirms an order to approve a price below cost or over a seller's discount limit.
+  const approver = can('sales:approve_discount');
+  const needsApproval = (o.price_problems ?? []).length > 0;
+  const mayConfirm = o.status === 'draft' && (write || (approver && needsApproval));
   const pendingDelivery = o.lines.some((l: any) => Number(l.delivered_qty) < Number(l.qty));
   const pendingInvoice = o.lines.some((l: any) => Number(l.invoiced_qty) < Number(l.delivered_qty));
   const delivered = o.lines.some((l: any) => Number(l.delivered_qty) > 0);
@@ -41,9 +45,12 @@ export default function OrderPage() {
       }
       actions={
       <>
-        {write && o.status === 'draft' && (
+        {mayConfirm && (
           <>
-            <ActionButton kind="primary" onClick={() => post(`/sales/orders/${id}/confirm`, {})} onDone={reload}>Confirm order</ActionButton>
+            <ActionButton kind="primary" onClick={() => post(`/sales/orders/${id}/confirm`, {})} onDone={reload}
+              confirm={needsApproval && approver ? 'Approve these prices and confirm the order? The approval is logged.' : undefined}>
+              {needsApproval && approver ? 'Approve prices & confirm' : 'Confirm order'}
+            </ActionButton>
             {can('sales:override_credit') && (
               <ActionButton confirm="Confirm this order even though it is over the dealer's credit limit?" onClick={() => post(`/sales/orders/${id}/confirm`, { override_credit: true })} onDone={reload}>Confirm (override credit limit)</ActionButton>
             )}
@@ -61,6 +68,7 @@ export default function OrderPage() {
         )}
       </>
     }>
+      {o.status === 'draft' ? <PriceWarning problems={o.price_problems} canApprove={approver} action="Confirming the order" /> : null}
       <Card>
         <KV rows={[
           ['Status', <Badge value={o.status} />],
@@ -88,6 +96,7 @@ export default function OrderPage() {
           {Number(o.totals.igst_total) > 0 && <div><span>IGST</span><span>{inr(o.totals.igst_total)}</span></div>}
           {Number(o.totals.cgst_total) > 0 && <div><span>CGST</span><span>{inr(o.totals.cgst_total)}</span></div>}
           {Number(o.totals.sgst_total) > 0 && <div><span>SGST</span><span>{inr(o.totals.sgst_total)}</span></div>}
+          {Number(o.totals.cess_total) > 0 && <div><span>Cess</span><span>{inr(o.totals.cess_total)}</span></div>}
           {Number(o.totals.round_off) !== 0 && <div><span>Round off</span><span>{inr(o.totals.round_off)}</span></div>}
           <div className="grand"><span>Total</span><span>₹{inr(o.totals.grand_total)}</span></div>
         </div>
