@@ -225,6 +225,13 @@
       "when": 1792688387117,
       "tag": "0031_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792688731113,
+      "tag": "0032_einvoice_fields",
+      "breakpoints": true
     }
   ]
 }

@@ -474,3 +474,73 @@ describe('0031 currency and exchange differences', () => {
     await expectBooksHealthy(w);
   });
 });
+
+describe('0032 e-invoice fields', () => {
+  const IRN = 'a'.repeat(32) + '0123456789abcdef0123456789abcdef';
+  /** The database's own answer to an UPDATE: null if it went through, else its message. */
+  const tryUpdate = async (statement: string) => {
+    try {
+      await w.db.execute(sql.raw(statement));
+      return null;
+    } catch (e) {
+      const err = e as Error & { cause?: { message?: string } };
+      return `${err.message} ${err.cause?.message ?? ''}`;
+    }
+  };
+
+  it('an issued invoice takes its IRN, acknowledgement, QR and e-way bill', async () => {
+    const accounts = await w.as('accounts');
+    const [inv] = await rows<{ id: string }>(w.db, sql`select id from invoices where status = 'issued' and doc_type = 'tax_invoice' order by created_at limit 1`);
+    id.einv = inv!.id;
+    await accounts.put(`/api/sales/invoices/${id.einv}/e-invoice`).send({ irn: 'short' }).expect(400);
+    await (await w.as('sales')).put(`/api/sales/invoices/${id.einv}/e-invoice`).send({ irn: IRN }).expect(403);
+    const res = await accounts.put(`/api/sales/invoices/${id.einv}/e-invoice`).send({
+      irn: IRN.toUpperCase(), irn_ack_no: '112410000012345', irn_ack_date: '2026-10-22T10:15:00+05:30', signed_qr: 'eyJhbGciOi...', irn_status: 'generated',
+      eway_bill_no: '351000012345', eway_valid_until: '2026-10-24T23:59:00+05:30',
+    }).expect(200);
+    expect(res.body.data).toMatchObject({ irn: IRN, irn_ack_no: '112410000012345', irn_status: 'generated', eway_bill_no: '351000012345' });
+  });
+
+  it('every other column of an issued invoice stays locked, even with direct database access', async () => {
+    const open = new Set(['irn', 'irn_ack_no', 'irn_ack_date', 'signed_qr', 'irn_status', 'irn_cancelled_at', 'eway_bill_no', 'eway_valid_until',
+      'updated_at', 'status', 'cancelled_at', 'cancel_reason']);
+    const cols = await rows<{ column_name: string; data_type: string; udt_name: string; character_maximum_length: number | null }>(w.db, sql`
+      select column_name, data_type, udt_name, character_maximum_length from information_schema.columns
+       where table_name = 'invoices' and table_schema = current_schema() order by ordinal_position`);
+    const locked = cols.filter((c) => !open.has(c.column_name));
+    expect(locked.length).toBeGreaterThanOrEqual(30);
+    // For each column, a value that is certainly different from what is there.
+    const changed = (c: (typeof cols)[number]) => {
+      const q = `"${c.column_name}"`;
+      switch (c.data_type) {
+        case 'numeric': case 'integer': case 'bigint': case 'smallint': return `coalesce(${q}, 0) + 1`;
+        case 'date': return `coalesce(${q}, current_date) + 1`;
+        case 'timestamp with time zone': return `coalesce(${q}, now()) + interval '1 day'`;
+        case 'boolean': return `not coalesce(${q}, false)`;
+        case 'uuid': return 'gen_random_uuid()';
+        case 'jsonb': return `'{"changed": true}'::jsonb`;
+        case 'character': return `case when ${q} = repeat('9', ${c.character_maximum_length}) then repeat('8', ${c.character_maximum_length}) else repeat('9', ${c.character_maximum_length}) end`;
+        case 'USER-DEFINED': return `(select e.enumlabel::${c.udt_name} from pg_enum e join pg_type t on t.oid = e.enumtypid
+                                       where t.typname = '${c.udt_name}' and e.enumlabel <> coalesce(${q}::text, '') limit 1)`;
+        default: return `coalesce(${q}::text, '') || 'x'`;
+      }
+    };
+    const leaks: string[] = [];
+    for (const c of locked) {
+      const answer = await tryUpdate(`update invoices set "${c.column_name}" = ${changed(c)} where id = '${id.einv}'`);
+      if (!answer || !/issued invoice .* is immutable/.test(answer)) leaks.push(`${c.column_name}: ${answer ?? 'changed'}`);
+    }
+    expect(leaks).toEqual([]);
+    // And the open ones really are open.
+    expect(await tryUpdate(`update invoices set eway_bill_no = '351000099999', irn_status = 'generated' where id = '${id.einv}'`)).toBeNull();
+  });
+
+  it('a cancelled invoice can still have its IRN cancellation recorded, and nothing else', async () => {
+    const [inv] = await rows<{ id: string }>(w.db, sql`select id from invoices where status = 'cancelled' order by created_at limit 1`);
+    expect(inv).toBeTruthy();
+    expect(await tryUpdate(`update invoices set irn_status = 'cancelled', irn_cancelled_at = now() where id = '${inv!.id}'`)).toBeNull();
+    expect(await tryUpdate(`update invoices set notes = 'x' where id = '${inv!.id}'`)).toMatch(/cancelled invoice .* cannot change/);
+    expect(await tryUpdate(`update invoices set status = 'issued' where id = '${inv!.id}'`)).toMatch(/cancelled invoice .* cannot change/);
+    expect(await tryUpdate(`delete from invoices where id = '${inv!.id}'`)).toMatch(/legal record and cannot be deleted/);
+  });
+});

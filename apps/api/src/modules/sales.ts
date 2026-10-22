@@ -1261,6 +1261,39 @@ export function salesRouter(db: DB) {
     res.json({ ok: true });
   });
 
+  /**
+   * Record the e-invoice (IRN) and e-way bill references for an issued invoice or credit note, as the
+   * GST portal gave them (a GSP connection will fill these by itself later). Nothing else can change.
+   */
+  r.put('/invoices/:id/e-invoice', requirePerm('invoices:adjust'), async (req, res) => {
+    const id = zId.parse(req.params.id);
+    const stamp = emptyToNull(z.string().datetime({ offset: true })).optional();
+    const b = z.object({
+      irn: emptyToNull(z.string().trim().regex(/^[0-9a-f]{64}$/i, 'an IRN is 64 hexadecimal characters')).optional(),
+      irn_ack_no: emptyToNull(z.string().trim().max(30)).optional(), irn_ack_date: stamp,
+      signed_qr: emptyToNull(z.string().trim().max(5000)).optional(),
+      irn_status: emptyToNull(z.enum(['generated', 'cancelled', 'failed'])).optional(), irn_cancelled_at: stamp,
+      eway_bill_no: emptyToNull(z.string().trim().regex(/^\d{12}$/, 'an e-way bill number is 12 digits')).optional(), eway_valid_until: stamp,
+    }).parse(req.body);
+    const updated = await inTx(db, req, async (ctx) => {
+      const [inv] = await ctx.tx.select().from(invoices).where(eq(invoices.id, id)).for('update');
+      must(inv, 'Invoice');
+      if (inv!.status === 'draft') throw conflict('Issue the invoice first');
+      const patch = {
+        ...(b.irn !== undefined ? { irn: b.irn?.toLowerCase() ?? null } : {}), ...(b.irn_ack_no !== undefined ? { irnAckNo: b.irn_ack_no } : {}),
+        ...(b.irn_ack_date !== undefined ? { irnAckDate: b.irn_ack_date ? new Date(b.irn_ack_date) : null } : {}),
+        ...(b.signed_qr !== undefined ? { signedQr: b.signed_qr } : {}), ...(b.irn_status !== undefined ? { irnStatus: b.irn_status } : {}),
+        ...(b.irn_cancelled_at !== undefined ? { irnCancelledAt: b.irn_cancelled_at ? new Date(b.irn_cancelled_at) : null } : {}),
+        ...(b.eway_bill_no !== undefined ? { ewayBillNo: b.eway_bill_no } : {}),
+        ...(b.eway_valid_until !== undefined ? { ewayValidUntil: b.eway_valid_until ? new Date(b.eway_valid_until) : null } : {}),
+      };
+      const [row] = await ctx.tx.update(invoices).set({ ...patch, updatedAt: new Date() }).where(eq(invoices.id, id)).returning();
+      await audit(ctx, 'invoice', id, 'e_invoice', null, patch);
+      return row;
+    });
+    res.json({ data: updated });
+  });
+
   r.post('/invoices/:id/cancel', requirePerm('invoices:adjust'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = z.object({ reason: zText(500), restock: z.boolean().default(false), cancel_payments: z.boolean().default(false) }).parse(req.body);
