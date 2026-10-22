@@ -137,7 +137,7 @@ function QuickBill() {
             </p>
           </>
         ) : <p className="muted">Add items to see the total.</p>}
-        <PriceWarning problems={preview?.price_problems} canApprove={can('sales:approve_discount')} action="Saving the bill" />
+        <PriceWarning problems={preview?.price_problems} canApprove={can('sales:approve_discount')} approves="Saving the bill" ask="make this bill, or save it as a sales order for them to confirm" />
         <ErrorBox error={error} />
         <div className="actions" style={{ marginTop: 12 }}>
           <button type="button" className="primary big" disabled={busy || !preview || due < 0} onClick={() => save()}>

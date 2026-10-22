@@ -144,6 +144,17 @@ These are the conventions the code already follows. Keep to them and a new modul
     (`AppDeps` in `app.ts`), so tests replace them and nothing in a test touches the network.
 12. **Comments say why.** A description at the top of each file says what it is for; a comment
     on a function says what it guarantees or why it is the way it is, not what the next line does.
+13. **Cost price stays with costs:read.** `hideCosts` (in `lib/http.ts`) is mounted in `app.ts` in
+    front of items, sales, purchasing, masters and stock: for anyone without `costs:read` it takes
+    purchase cost, unit cost, average cost, valuation, COGS and margins out of every answer and
+    every download. A new route under those mounts is covered without doing anything; a route
+    elsewhere that shows cost must check `seesCosts(req)` itself.
+14. **Serialised stock moves by unit.** For an item with `is_serialised`, every stock movement in
+    or out of a place (except Rejected) names its one unit (`core/units.ts`: `unitsIn`,
+    `unitsOut`, `unitsMove`), so the units at a place always equal the stock there.
+15. **Every document belongs to a legal entity.** The column defaults to the first one
+    (`rc_default_entity()`); a document of another entity passes its `entityId` to
+    `nextNumber`, `getCompany` and `postJournal`.
 
 ## 5. Module by module
 
@@ -164,9 +175,11 @@ writes. A dash means none.
 | `collect.ts` | `/api/payments/reminders`, `/api/public/invoices` | payment_reminders | sales | - |
 | `online.ts`, `online-router.ts` | `/api/sales/online`, `/api/hooks/shopify` | channel_events | parties, sales, crm | - |
 | `purchasing.ts` | `/api/purchasing` | purchase_orders, goods_receipts, purchase_bills, purchase_returns and their lines | jobwork | goods_receipt, purchase_bill, purchase_return |
-| `inventory.ts` | `/api/stock` | stock_transfers, stock_adjustments and their lines | - | stock_adjustment |
+| `inventory.ts` | `/api/stock` | stock_transfers, stock_adjustments and their lines | reservations | stock_adjustment |
+| `units.ts` | `/api/units` | units, unit_events, batches (written by `core/units.ts` from the documents) | - | - |
+| `reservations.ts` | `/api/sales` (holds on orders) | stock_reservations | - | - |
 | `jobwork.ts` | `/api/jobwork` | job_works, job_work_receipts and their lines | - | job_work_receipt |
-| `payments.ts` | `/api/payments` | payments, payment_allocations | credits | payment |
+| `payments.ts` | `/api/payments` | payments, payment_allocations | credits | payment (and its exchange difference) |
 | `accounting.ts` | `/api/accounting` | accounts, expenses, fiscal_closes | - | expense, manual, transfer, year_close |
 | `bank.ts` | `/api/bank` | bank_statement_lines, bank_line_matches, bank_feeds | accounting, payments | manual |
 | `bank-mail.ts` | `/api/bank/mail`, `/api/hooks/bank-mail` | bank_mails, bank_feeds | bank | - |
@@ -178,7 +191,7 @@ writes. A dash means none.
 | `ops.ts` | `/api/ops` | task_templates, tasks, assets, maintenance_schedules, maintenance_logs | - | - |
 | `projects.ts` | `/api/ops/projects`, `/api/ops/allocations` | projects, allocations | ops | - |
 | `dashboards.ts` | `/api/dashboards` | none: read-only | gst, ops | - |
-| `admin.ts` | `/api/auth`, `/api/users`, `/api/settings`, `/api/masters` | users, lead_sources, lost_reasons, campaigns, item_categories, locations, expense_categories, price_lists | - | - |
+| `admin.ts` | `/api/auth`, `/api/users`, `/api/settings`, `/api/masters` | users, lead_sources, lost_reasons, campaigns, item_categories, locations, expense_categories, price_lists, entities, branches, tax_rates | - | - |
 | `files.ts` | `/api/files` | files, file_contents | - | - |
 
 There are no import cycles between modules: the "Calls" column only ever points one way.
@@ -187,7 +200,7 @@ Beside the modules:
 
 | Folder | What is in it |
 |---|---|
-| `core/` | The engines: `auth`, `numbering`, `stock`, `journal`, `audit`, `settings`. |
+| `core/` | The engines: `auth`, `numbering`, `stock`, `units` (serials), `journal`, `audit`, `settings`, `taxrates` (the GST rate on a date). |
 | `lib/` | Tools with no business rules: `errors`, `http` (the zod checks, `inTx`, `sendList`), `xlsx`, `bank-csv`, `bank-pdf`, `mailbox`, `secret-box`. |
 | `db/` | `schema.ts` (every table), `client.ts` (one `DB` type for PostgreSQL and PGlite), `seed.ts` (what a new installation needs), `demo.ts` (sample data). |
 | `app.ts`, `server.ts`, `serverless.ts`, `prepare.ts`, `config.ts` | The front door, the two ways of running it, and the settings from the environment. |
@@ -200,13 +213,14 @@ Account names are the ones in the seeded chart of accounts; the code refers to t
 | Step | Module | Stock ledger | Books |
 |---|---|---|---|
 | Delivery | sales | out of Stores or Showroom, at average cost | Dr Cost of Goods Sold, Cr Stock in Hand |
-| Invoice | sales | - | Dr Debtors (party), Cr Sales, Cr Output GST, round-off |
+| Invoice | sales | - | Dr Debtors (party), Cr Sales, Cr Output GST, Cr Output Cess, round-off |
 | Credit note | sales | back in, when restocked | the invoice in reverse; with restock, Dr Stock, Cr Cost of Goods Sold |
 | Quality check on goods received | purchasing | accepted into Stores, rejected into Rejected, at the order rate | Dr Stock in Hand, Cr Goods Received Not Billed |
 | Purchase bill | purchasing | - | Dr Goods Received Not Billed (goods) or Purchases (services), Dr Input GST, Cr Creditors (party) |
 | Supplier return | purchasing | out of Rejected | Dr Creditors, Cr Stock in Hand, Cr Input GST |
 | Payment received | payments | - | Dr Bank or Cash, Dr TDS Receivable (if held back), Cr Debtors |
 | Payment made | payments | - | Dr Creditors, Cr Bank or Cash, Cr TDS Payable |
+| Foreign bill paid at another rate | payments | - | gain: Dr Creditors, Cr Foreign Exchange Gain / Loss; a loss the other way round |
 | Expense | accounting | - | Dr the expense account, Dr Input GST, Cr Bank or Cash, Cr TDS Payable |
 | Stock transfer | inventory | out of one place, into another, same value | none |
 | Stock adjustment, count | inventory | in or out | Dr or Cr Stock in Hand against Stock Adjustment |
@@ -247,6 +261,19 @@ flowchart LR
   C --> F["Rejects sent back<br/>createSupplierReturn"]
 ```
 
+### A unit by its serial
+
+```mermaid
+flowchart LR
+  A["Received<br/>qcGoodsReceipt: a serial per unit"] --> B["Moved<br/>createTransfer with serials"] --> C["Held for an order<br/>reserve"]
+  C --> D["Sold<br/>deliverOrder with serials"] --> E["On the bill<br/>invoiceOrder"]
+  E --> F["Back<br/>createCreditNote with serials, or cancelInvoice"]
+  A --> G["Parts recorded inside<br/>POST /api/units/:id/components"]
+```
+
+A sale checks the price first (`confirmOrder`: below cost or over the seller's discount limit
+needs `sales:approve_discount`) and the customer's credit on what is not paid now.
+
 ### Job work
 
 ```mermaid
@@ -286,9 +313,12 @@ flowchart LR
   - `RC001` journal lines, journal entries, stock movements and the audit log cannot be changed or deleted
   - `RC002` an entry's debits must equal its credits (checked at commit)
   - `RC003` nothing can be posted on or before the period lock date
-  - `RC004` an issued invoice and its lines cannot be changed
-- **Views** the code reads rather than recomputing: `v_invoice_outstanding`, `v_bill_outstanding`,
-  `v_party_balances`, `v_stock_on_hand`, `v_item_valuation`.
+  - `RC004` an issued invoice and its lines cannot be changed, except for cancelling it and its
+    e-invoice and e-way bill references (rewritten in `0032_einvoice_fields`)
+  - `unit_events` is append-only (`RC001`), and a stock movement that names a unit moves exactly one
+- **Views** the code reads rather than recomputing: `v_invoice_outstanding`, `v_bill_outstanding`
+  (cleared by payments plus their exchange difference), `v_party_balances`, `v_stock_on_hand`
+  (`qty` on hand, `reserved` by open holds, `available` the difference), `v_item_valuation`.
 - **Indexes:** every list of "rows of a document" is indexed on the document it belongs to, and
   the ledgers on what they are searched by (account, party, item and place, document reference).
 - **Two drivers, one type.** `DB` in `db/client.ts` is satisfied by node-postgres (real
