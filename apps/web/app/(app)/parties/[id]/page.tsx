@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
-import { STATE_CODES } from '@radcore/shared';
+import { PARTY_STATE_CODES } from '@radcore/shared';
 import { partyBody, partyFields } from '@/components/party-form';
 import { ActionButton, Badge, Card, CsvLink, FormModal, KV, Loading, Page, SmartButton, Table, date, dateTime, inr, label } from '@/components/ui';
 import { patch, useGet } from '@/lib/api';
@@ -46,7 +46,7 @@ export default function PartyPage() {
       <Card>
         <KV rows={[
           ['Type', <><Badge value={p.party_type} />{p.active ? null : <> <Badge value="closed" /></>}</>], ['Phone', p.phone], ['Email', p.email], ['GSTIN', p.gstin], ['PAN', p.pan],
-          ['State', `${STATE_CODES[p.state_code] ?? ''} (${p.state_code})`],
+          ['State', `${PARTY_STATE_CODES[p.state_code] ?? ''} (${p.state_code})`],
           ['Address', [a.line1, a.city, a.pincode].filter(Boolean).join(', ')],
           ['Credit limit', p.credit_limit ? `₹${inr(p.credit_limit)}` : null],
           ['Payment terms', p.payment_terms_days !== null ? `${p.payment_terms_days} days` : null],

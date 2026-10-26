@@ -109,6 +109,11 @@ export type PaymentMode = (typeof PAYMENT_MODES)[number];
 export const PAYMENT_DIRECTIONS = ['in', 'out'] as const;
 
 // pending_approval: sent by someone whose limit it is over (po_approval_limits); it waits for po:approve (brief P3).
+/** The GST returns whose filing closes a month (core/gst-lock.ts). */
+export const GST_RETURNS = ['gstr1', 'gstr3b'] as const;
+export type GstReturn = (typeof GST_RETURNS)[number];
+export const GST_RETURN_LABELS: Record<GstReturn, string> = { gstr1: 'GSTR-1', gstr3b: 'GSTR-3B' };
+
 export const PO_STATUSES = ['draft', 'sent', 'partly_received', 'received', 'closed', 'cancelled', 'pending_approval'] as const;
 export const GRN_STATUSES = ['received', 'inwarded', 'cancelled'] as const;
 export const BILL_DOC_TYPES = ['bill', 'debit_note'] as const;
@@ -280,6 +285,10 @@ export type IntervalUnit = (typeof INTERVAL_UNITS)[number];
 // ---------------------------------------------------------------------------
 export const PERMISSIONS = {
   'users:manage': ['admin'],
+  // Reopening a closed financial year: Accounts asks (accounts:write), and someone else holding this approves.
+  'books:reopen': ['owner', 'admin'],
+  // A list with people's phone numbers, emails or bank accounts as a file (CSV / Excel): the whole list leaves the system.
+  'lists:export': ['owner', 'marketing', 'accounts', 'hr', 'admin'],
   'settings:manage': ['admin'],
   // Masters: the set-up records every other screen reads from (items, customers and suppliers, employees,
   // and the small lists). They are changed in one place, by an admin, and the change shows everywhere.
@@ -344,6 +353,9 @@ export const PERMISSIONS = {
   'accounts:read': ['owner', 'accounts', 'admin'],
   'accounts:write': ['accounts', 'admin'],
   'gst:read': ['owner', 'accounts', 'admin'],
+  // Marking a month's return as filed closes it for the documents it reports; taking the mark back is the owner's.
+  'gst:file': ['accounts', 'admin'],
+  'gst:unfile': ['owner', 'admin'],
 
   'dashboard:sales': ['owner', 'sales', 'store', 'admin'],
   'dashboard:marketing': ['owner', 'marketing', 'admin'],

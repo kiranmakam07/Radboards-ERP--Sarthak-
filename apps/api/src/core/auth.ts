@@ -72,17 +72,30 @@ export function clearSessionCookie(res: Response) {
   res.clearCookie(config.cookieName, { httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, path: '/' });
 }
 
-/** Loads req.user from the HttpOnly session cookie. Does not reject; see requireAuth. */
+/**
+ * Loads req.user from the HttpOnly session cookie. Does not reject; see requireAuth.
+ * A sign-in in use stays signed in: once past half its life it is renewed for a full term (technical review,
+ * 26 Oct 2026: a sign-in that ran out in the middle of someone's work lost what they had typed). One left
+ * unused for SESSION_TTL_DAYS still ends.
+ */
 export function authenticate(db: DB) {
-  return async (req: Request, _res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     const token = (req.cookies as Record<string, string> | undefined)?.[config.cookieName];
     if (token) {
       const [row] = await db
-        .select({ id: users.id, name: users.name, role: users.role, phone: users.phone })
+        .select({ id: users.id, name: users.name, role: users.role, phone: users.phone, expiresAt: sessions.expiresAt })
         .from(sessions)
         .innerJoin(users, eq(users.id, sessions.userId))
         .where(and(eq(sessions.tokenHash, sha256(token)), gt(sessions.expiresAt, new Date()), eq(users.active, true)));
-      if (row) req.user = row;
+      if (row) {
+        const { expiresAt, ...user } = row;
+        req.user = user;
+        const term = config.sessionTtlDays * 86400_000;
+        if (expiresAt.getTime() - Date.now() < term / 2) {
+          await db.update(sessions).set({ expiresAt: new Date(Date.now() + term) }).where(eq(sessions.tokenHash, sha256(token)));
+          setSessionCookie(res, token);
+        }
+      }
     }
     next();
   };

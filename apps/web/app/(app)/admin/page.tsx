@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { GST_RATES, LOCATION_TYPES, STATE_CODES } from '@radcore/shared';
+import { GST_RATES, LOCATION_TYPES, PARTY_STATE_CODES, STATE_CODES } from '@radcore/shared';
 import { ActionButton, Badge, Card, ErrorBox, Form, Loading, Page, Table, Toggle, date, dateTime, inr, label } from '@/components/ui';
 import { patch, post, put, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -43,6 +43,7 @@ export default function AdminPage() {
 
   return (
     <Page title="Setup">
+      {can('audit:read') ? <SystemHealth /> : null}
       <Card title="Company profile (printed on invoices)">
         <Form submit="Save company"
           initial={{
@@ -73,7 +74,7 @@ export default function AdminPage() {
         <p className="muted">The company above is the first. Add another only for a separate company with its own GSTIN: its documents carry its name and are numbered on their own, with its letter in front (KINV/26-27/00001).</p>
         <Table rows={entities.data?.data} columns={[
           { key: 'legal_name', title: 'Company', render: (r) => <>{r.legal_name}{r.is_default ? <span className="muted small"> · the company profile</span> : null}</> },
-          { key: 'gstin', title: 'GSTIN' }, { key: 'state_code', title: 'State', render: (r) => STATE_CODES[r.state_code] ?? r.state_code },
+          { key: 'gstin', title: 'GSTIN' }, { key: 'state_code', title: 'State', render: (r) => PARTY_STATE_CODES[r.state_code] ?? r.state_code },
           { key: 'code', title: 'Number letter' },
           { key: 'branches', title: 'Branches', render: (r) => r.branches.map((b: any) => b.name).join(', ') },
         ]} />
@@ -248,6 +249,33 @@ function PoLimits() {
         ]}
         onSubmit={(v) => put('/purchasing/approval-limits', { limits: [{ role: 'stores', max_amount: v.stores || null }, { role: 'accounts', max_amount: v.accounts || null }] })}
         onDone={limits.reload} />
+    </Card>
+  );
+}
+
+/**
+ * What went wrong lately, when the background jobs last ran, and whether alerts reach anyone (technical review,
+ * 26 Oct 2026: "nothing records errors or warns anyone when something fails").
+ */
+function SystemHealth() {
+  const h = useGet<{ data: any }>('/settings/health');
+  const d = h.data?.data;
+  if (!d) return null;
+  const jobs = Object.entries(d.jobs?.result ?? {}) as [string, string][];
+  return (
+    <Card title="System health" actions={d.alerts_on ? <ActionButton onClick={() => post('/settings/health/test-alert')}>Send a test alert</ActionButton> : null}>
+      <p className="muted small">
+        {d.alerts_on ? 'Problems are also sent to the alert channel set on the server.' : 'No alert channel is set on the server (ALERT_WEBHOOK_URL), so problems are only listed here.'}
+        {' '}Background jobs {d.jobs?.last_run_at ? <>last ran {dateTime(d.jobs.last_run_at)}</> : 'have not run yet'}
+        {d.scheduler === 'cron' ? ' (run by a daily schedule on this host)' : ' (every 15 minutes)'}.
+        {jobs.length ? <> {jobs.map(([k, v]) => `${label(k)}: ${v}`).join(' · ')}</> : null}
+      </p>
+      <Table rows={d.errors} empty="No errors recorded." columns={[
+        { key: 'at', title: 'When', render: (e) => dateTime(e.at) },
+        { key: 'source', title: 'Where' },
+        { key: 'message', title: 'What went wrong', render: (e) => <span style={{ whiteSpace: 'normal' }}>{e.message}</span> },
+        { key: 'user_name', title: 'Who was using it' },
+      ]} />
     </Card>
   );
 }

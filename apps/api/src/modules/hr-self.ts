@@ -7,7 +7,7 @@ import { requireAuth, requirePerm } from '../core/auth';
 import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { attendance, employees, leaveRequests } from '../db/schema';
-import { AppError, badRequest, conflict, must } from '../lib/errors';
+import { AppError, badRequest, conflict, forbidden, must } from '../lib/errors';
 import { emptyToNull, inTx, zDate, zId, zText, type Ctx } from '../lib/http';
 
 /**
@@ -45,11 +45,15 @@ export async function clockIn(ctx: Ctx, at: Place | null | undefined) {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`attendance:${me.id}:${today}`}, 0))`);
   const [row] = await tx.select().from(attendance).where(and(eq(attendance.employeeId, me.id), eq(attendance.date, today)));
   if (row?.checkIn) throw conflict(`You already clocked in today at ${row.checkIn.slice(0, 5)}`);
+  // A day HR has marked stays as HR marked it (technical review, 26 Oct 2026: a self check-in could overrule
+  // HR marking someone absent). If the person is at work after all, HR changes the mark.
+  if (row && !row.selfMarked && row.status !== 'present') {
+    throw conflict(`HR has marked today as ${row.status.replace('_', ' ')} for you. If you are at work, ask HR to change it.`);
+  }
   const values = {
     status: 'present' as const, checkIn: istClock(), selfMarked: true, inLat: at ? at.lat.toFixed(6) : null, inLng: at ? at.lng.toFixed(6) : null,
     inDistanceM: await awayFrom(tx, at), updatedAt: new Date(),
   };
-  // A day HR had already marked (absent, or leave that was not taken after all) becomes a day worked.
   if (row) await tx.update(attendance).set(values).where(eq(attendance.id, row.id));
   else await tx.insert(attendance).values({ ...values, employeeId: me.id, date: today, createdBy: ctx.user!.id });
   await audit(ctx, 'attendance', `${me.id}:${today}`, 'clock_in', row ? { status: row.status } : null, { check_in: values.checkIn, distance_m: values.inDistanceM });
@@ -102,6 +106,8 @@ export async function decideLeave(ctx: Ctx, id: string, approve: boolean, note: 
   const [req] = await tx.select().from(leaveRequests).where(eq(leaveRequests.id, id)).for('update');
   must(req, 'Leave request');
   if (req!.status !== 'pending') throw conflict(`This request was already ${req!.status}`);
+  const [own] = await tx.select({ id: employees.id }).from(employees).where(and(eq(employees.id, req!.employeeId), eq(employees.userId, ctx.user!.id)));
+  if (own) throw forbidden('Someone else must decide your own leave');
   if (!approve && !note) throw badRequest('Say why it is refused, so the person knows');
   const [row] = await tx.update(leaveRequests)
     .set({ status: approve ? 'approved' : 'rejected', decidedBy: ctx.user!.id, decidedAt: new Date(), decisionNote: note, updatedAt: new Date() })

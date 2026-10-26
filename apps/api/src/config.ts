@@ -96,6 +96,17 @@ export const config = {
   bankMailPassword: env.BANK_MAIL_PASSWORD ?? '',
   bankMailFolder: env.BANK_MAIL_FOLDER ?? 'INBOX',
   bankMailCronSecret: env.BANK_MAIL_CRON_SECRET ?? env.CRON_SECRET ?? '',
+  /** Lets a scheduler run the background jobs (/api/hooks/jobs/run); the Vercel review copy's daily cron sends it. */
+  cronSecret: env.CRON_SECRET ?? '',
+  /**
+   * Where problems are sent (core/alerts.ts): an incoming webhook of Slack, Google Chat or Discord, or an ntfy.sh
+   * topic address. Blank = problems are only kept in the error log (Admin → System health).
+   */
+  alertWebhookUrl: env.ALERT_WEBHOOK_URL ?? '',
+  /** The address people open RadCore at, to say which installation an alert is from. */
+  publicUrl: env.PUBLIC_URL ?? (env.DOMAIN ? `https://${env.DOMAIN}` : ''),
+  /** off = the API does not run the background jobs itself; a scheduler calls /api/hooks/jobs/run (always so on Vercel). */
+  scheduler: env.SCHEDULER ?? (env.VERCEL ? 'off' : 'on'),
   /** Shopify signs every webhook with this (Settings > Notifications > Webhooks in the Shopify admin). Blank = not connected. */
   shopifyWebhookSecret: env.SHOPIFY_WEBHOOK_SECRET ?? '',
   /**

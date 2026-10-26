@@ -29,6 +29,20 @@ export const forbidden = (message = 'You do not have permission to do this') =>
 export const notFound = (what = 'Record') => new AppError(404, 'not_found', `${what} not found`);
 export const conflict = (message: string, details?: unknown) => new AppError(409, 'conflict', message, details);
 
+/**
+ * Each document line at most once in one request. A line listed twice would pass the "still pending"
+ * check twice, against the same figure, and so move goods twice while the document records it once
+ * (technical review, 26 Oct 2026).
+ */
+export function assertOnce<T>(list: readonly T[], key: (x: T) => string, what = 'line'): void {
+  const seen = new Set<string>();
+  for (const x of list) {
+    const k = key(x);
+    if (seen.has(k)) throw badRequest(`The same ${what} is listed twice. Enter it once, with the whole quantity.`);
+    seen.add(k);
+  }
+}
+
 /** Throw 404 when a lookup came back empty. */
 export function must<T>(value: T | undefined | null, what = 'Record'): T {
   if (value === undefined || value === null) throw notFound(what);
@@ -79,8 +93,14 @@ const PG_ANSWERS: Record<string, [number, string, ((pg: PgishError) => string)?]
   RC004: [409, 'immutable_document'],
 };
 
+/** Told about every unexpected error (core/alerts.ts, set by app.ts); nothing when unset. */
+let reporter: ((err: unknown, req: Request) => void) | null = null;
+export const setProblemReporter = (r: typeof reporter) => {
+  reporter = r;
+};
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
+export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
   if (err instanceof AppError) {
     res.status(err.status).json({ error: { code: err.code, message: err.message, details: err.details } });
     return;
@@ -113,5 +133,6 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     return;
   }
   console.error(err);
+  reporter?.(err, req);
   res.status(500).json({ error: { code: 'internal_error', message: 'Something went wrong' } });
 }

@@ -371,7 +371,7 @@ export function leadsRouter(db: DB) {
        order by ${q.sort === 'score' ? sql`sc.score desc nulls last, l.created_at desc`
          : q.view === 'followups_due' || q.view === 'overdue' ? sql`l.next_follow_up_at asc` : sql`l.created_at desc`}
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'leads');
+    sendList(req, res, data, 'leads', { limit: q.limit });
   });
 
   /**

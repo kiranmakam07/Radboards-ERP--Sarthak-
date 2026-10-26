@@ -109,8 +109,20 @@ export function usersRouter(db: DB) {
     password: zPassword,
   });
 
+  /**
+   * Only an admin gives the admin role or changes an admin's sign-in, and nobody changes their own role (technical
+   * review, 26 Oct 2026: "someone given user-management rights can make themselves an administrator"). An admin can
+   * hand users:manage to another role; that role still cannot reach admin through it.
+   */
+  const guardAdmin = (actor: { id: string; role: string }, target: { id: string; role: string } | null, role: string | undefined) => {
+    if (actor.role === 'admin') return;
+    if (role === 'admin') throw forbidden('Only an admin can give someone the admin role');
+    if (target?.role === 'admin') throw forbidden('Only an admin can change an admin\'s sign-in');
+  };
+
   r.post('/', requirePerm('users:manage'), async (req, res) => {
     const body = zUser.parse(req.body);
+    guardAdmin(req.user!, null, body.role);
     const created = await inTx(db, req, async (ctx) => {
       const [u] = await ctx.tx
         .insert(users)
@@ -129,9 +141,9 @@ export function usersRouter(db: DB) {
     const updated = await inTx(db, req, async (ctx) => {
       const [before] = await ctx.tx.select(publicUser).from(users).where(eq(users.id, id));
       must(before, 'User');
-      if (id === ctx.user!.id && (body.active === false || (body.role && body.role !== 'admin'))) {
-        throw badRequest('You cannot deactivate or demote yourself');
-      }
+      guardAdmin(ctx.user!, before!, body.role);
+      if (id === ctx.user!.id && body.active === false) throw badRequest('You cannot deactivate yourself');
+      if (id === ctx.user!.id && body.role && body.role !== before!.role) throw badRequest('You cannot change your own role');
       const { password, ...rest } = body;
       const [u] = await ctx.tx
         .update(users)
@@ -240,6 +252,11 @@ export function settingsRouter(db: DB) {
     const body = z.object({ period_lock_date: z.string().refine(isIsoDate, 'must be YYYY-MM-DD').nullable() }).parse(req.body);
     await inTx(db, req, async (ctx) => {
       const before = await getSetting(ctx.tx, 'period_lock_date');
+      // Moving the lock back into a closed year would reopen it with one person: that takes a request and an approval.
+      const [closed] = await rows<{ fy: string; to_date: string }>(ctx.tx, sql`select fy, to_date::text from fiscal_closes order by to_date desc limit 1`);
+      if (closed && (body.period_lock_date === null || body.period_lock_date < closed.to_date)) {
+        throw forbidden(`The books up to ${closed.to_date.split('-').reverse().join('-')} are the closed year ${closed.fy}. To change anything in it, Accounts asks to reopen the year (Books & reports, Financial years) and the owner approves.`);
+      }
       await setSetting(ctx.tx, 'period_lock_date', body.period_lock_date, ctx.user!.id);
       await audit(ctx, 'settings', 'period_lock_date', 'update', { value: before }, { value: body.period_lock_date });
     });

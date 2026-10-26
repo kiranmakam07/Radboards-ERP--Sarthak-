@@ -412,7 +412,7 @@ export function opsRouter(db: DB) {
          and (${q.project_id ?? null}::uuid is null or t.project_id = ${q.project_id ?? null}::uuid)
        order by t.due_date desc, t.due_time nulls last, t.title
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'tasks');
+    sendList(req, res, data, 'tasks', { limit: q.limit });
   });
 
   /** A one-off task for someone, outside any schedule. */
@@ -550,7 +550,7 @@ export function opsRouter(db: DB) {
          and (${like}::text is null or a.name ilike ${like} or a.asset_no ilike ${like} or a.category ilike ${like} or a.serial_no ilike ${like})
        order by (a.status = 'retired'), a.name
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'assets');
+    sendList(req, res, data, 'assets', { limit: q.limit });
   });
 
   r.get('/assets/:id', requirePerm('ops:read'), async (req, res) => {

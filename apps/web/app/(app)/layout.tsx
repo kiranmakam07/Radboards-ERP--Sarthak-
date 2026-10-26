@@ -7,8 +7,8 @@ import { LeadAlerts } from '@/components/crm';
 import { Icon } from '@/components/icons';
 import { InstallButton } from '@/components/install';
 import { ThemeButton } from '@/components/theme';
-import { Collapse, label, usePresence } from '@/components/ui';
-import { api, post, qs, useGet } from '@/lib/api';
+import { Collapse, FormModal, label, usePresence } from '@/components/ui';
+import { SIGNED_OUT_EVENT, api, markSignedIn, post, qs, useGet } from '@/lib/api';
 import { NAV } from '@/lib/nav';
 import { SessionContext, type Session } from '@/lib/session';
 
@@ -30,6 +30,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }, [menuOpen]);
   // api() sends the browser to /login on a 401, so a signed-out visitor never sees the shell.
   const { data, error } = useGet<Session>('/auth/me');
+  useEffect(() => {
+    if (data) markSignedIn();
+  }, [data]);
   if (error) return <div className="center"><div className="error">{error}</div></div>;
   if (!data) return <div className="center muted">Loading…</div>;
   const can = (p?: string) => !p || data.permissions.includes(p);
@@ -101,6 +104,7 @@ function Shell({ data, can, active, here, activeGroup, home, menuOpen, setMenuOp
           {data.sample_data ? <div className="sample-banner no-print">Review copy with sample data. Nothing here is real, and it will be cleared before the system goes live.</div> : null}
           {children}
           {can('leads:read') ? <LeadAlerts /> : null}
+          <SignInAgain me={data.user} />
         </main>
       </div>
     </SessionContext.Provider>
@@ -250,5 +254,30 @@ function MeMenu({ data }: { data: Session }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Signed out while working (the sign-in ran out, or was ended from another place): the password is asked for here,
+ * over the screen, so nothing typed on it is lost. Someone else signing in instead starts the page afresh.
+ */
+function SignInAgain({ me }: { me: Session['user'] }) {
+  const [out, setOut] = useState(false);
+  useEffect(() => {
+    const onOut = () => setOut(true);
+    window.addEventListener(SIGNED_OUT_EVENT, onOut);
+    return () => window.removeEventListener(SIGNED_OUT_EVENT, onOut);
+  }, []);
+  if (!out) return null;
+  return (
+    <FormModal title="Signed out" submit="Sign in" onClose={() => undefined}
+      intro={<p className="muted">You were signed out. Sign in again to carry on: what you typed on this screen is still here, so press Save again afterwards.</p>}
+      initial={{ identifier: me.phone, password: '' }}
+      fields={[{ name: 'identifier', label: 'Phone or email', required: true }, { name: 'password', label: 'Password', type: 'password', required: true }]}
+      onSubmit={(v) => post<{ user: Session['user'] }>('/auth/login', v)}
+      onDone={(r) => {
+        if (r?.user?.id && r.user.id !== me.id) window.location.reload();
+        else setOut(false);
+      }} />
   );
 }

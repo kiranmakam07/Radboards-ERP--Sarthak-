@@ -237,7 +237,7 @@ export function paymentsRouter(db: DB) {
          and (${q.to ?? null}::date is null or p.paid_on <= ${q.to ?? null}::date)
        order by p.paid_on desc, p.created_at desc
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'payments');
+    sendList(req, res, data, 'payments', { limit: q.limit });
   });
 
   r.get('/:id', requirePerm('payments:read'), async (req, res) => {

@@ -9,7 +9,7 @@ import { locationByType, lockItems, onHand } from '../core/stock';
 import { cleanSerials, needsSerials, unitEvent, unitsBySerial } from '../core/units';
 import { rows, type DB } from '../db/client';
 import { locations, salesOrderLines, salesOrders, stockReservations, units } from '../db/schema';
-import { badRequest, conflict, must } from '../lib/errors';
+import { assertOnce, badRequest, conflict, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zDate, zId, zQty, zSerials, zText, type Ctx } from '../lib/http';
 
 /**
@@ -74,6 +74,7 @@ export async function reserve(
   if (!['draft', 'confirmed'].includes(order!.status)) throw conflict(`Order ${order!.orderNo} is ${order!.status}; stock is reserved for an order not yet delivered`);
   if (input.expiresOn && input.expiresOn < istDate()) throw badRequest('The hold cannot end before today');
   const lines = await tx.select().from(salesOrderLines).where(eq(salesOrderLines.orderId, orderId));
+  assertOnce(input.lines, (l) => l.orderLineId, 'order line');
   const itemRows = await lockItems(tx, input.lines.map((l) => lines.find((x) => x.id === l.orderLineId)?.itemId ?? '').filter(Boolean));
   const made: Reservation[] = [];
   for (const l of input.lines) {

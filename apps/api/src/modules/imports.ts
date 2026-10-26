@@ -302,7 +302,7 @@ export function importsRouter(db: DB) {
         from import_shipments s join parties p on p.id = s.supplier_id
        where (${q.stage ?? null}::text is null or s.stage::text = ${q.stage ?? null})
          and (${like}::text is null or s.shipment_no ilike ${like} or p.name ilike ${like} or s.bl_awb_no ilike ${like} or s.boe_no ilike ${like})
-       order by s.created_at desc limit ${q.limit} offset ${q.offset}`), 'import-shipments');
+       order by s.created_at desc limit ${q.limit} offset ${q.offset}`), 'import-shipments', { limit: q.limit });
   });
 
   /** Supplier advances: money paid out to suppliers and not yet set against a bill, by age (0-30, 31-90, over 90 days). */

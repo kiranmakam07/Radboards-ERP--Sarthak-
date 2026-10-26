@@ -53,7 +53,10 @@ export function InvoiceDocument({ inv, thermal = false }: { inv: any; thermal?: 
         <tbody>
           {inv.lines.map((l: any, i: number) => (
             <tr key={l.id}>
-              <td>{i + 1}</td><td>{l.description}{l.serials?.length ? <><br /><span className="small">Serial: {l.serials.join(', ')}</span></> : null}</td><td className="hide-thermal">{l.hsn_sac}</td>
+              <td>{i + 1}</td><td>{l.description}{l.serials?.length ? <><br /><span className="small">Serial: {l.serials.join(', ')}</span></> : null}
+                {/* On the narrow roll the HSN, rate and taxable value go under the item: a dealer needs them to claim the GST. */}
+                {thermal ? <><br /><span className="small">HSN {l.hsn_sac} · GST {num(l.gst_rate)}% · taxable {inr(l.taxable_value)}{Number(l.discount) ? ` · less ${inr(l.discount)}` : ''}</span></> : null}</td>
+              <td className="hide-thermal">{l.hsn_sac}</td>
               <td className="right">{num(l.qty)} {l.unit}</td><td className="right">{inr(l.rate)}</td>
               <td className="right hide-thermal">{Number(l.discount) ? inr(l.discount) : ''}</td>
               <td className="right hide-thermal">{inr(l.taxable_value)}</td><td className="right hide-thermal">{num(l.gst_rate)}</td>
@@ -74,6 +77,25 @@ export function InvoiceDocument({ inv, thermal = false }: { inv: any; thermal?: 
         <div className="grand"><span>Total</span><span>₹{inr(inv.grand_total)}</span></div>
       </div>
       <p className="words">{inv.amount_in_words}</p>
+
+      {thermal && (
+        // The tax by rate and the signature, which a tax invoice needs on the roll as on A4 (technical review, 26 Oct 2026).
+        <>
+          <table className="thermal-tax">
+            <thead><tr><th>HSN</th><th className="right">GST %</th><th className="right">Taxable</th><th className="right">Tax</th></tr></thead>
+            <tbody>
+              {inv.hsn_summary.map((h: any) => (
+                <tr key={`${h.hsn_sac}-${h.gst_rate}`}>
+                  <td>{h.hsn_sac}</td><td className="right">{num(h.gst_rate)}</td><td className="right">{inr(h.taxable_value)}</td>
+                  <td className="right">{inr(Number(h.cgst) + Number(h.sgst) + Number(h.igst) + Number(h.cess ?? 0))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {inv.is_inter_state ? null : <p className="small">CGST and SGST are half each of the tax.</p>}
+          <div className="sign">For {c.name}<br /><br />Authorised signatory</div>
+        </>
+      )}
 
       {!thermal && (
         <>

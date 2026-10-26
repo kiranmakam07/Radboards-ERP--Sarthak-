@@ -113,12 +113,24 @@ describe('year-end close', () => {
     await expectBooksHealthy(w);
   });
 
-  it('reopens the latest closed year only, and can close it again', async () => {
+  it('reopens the latest closed year only, with two people: Accounts asks, and someone else approves', async () => {
     const accounts = await w.as('accounts');
-    const older = await accounts.post(`/api/accounting/years/${fyBefore}/reopen`).send({}).expect(409);
+    const owner = await w.as('owner');
+    const older = await accounts.post(`/api/accounting/years/${fyBefore}/reopen-request`).send({ reason: 'missed bill' }).expect(409);
     expect(older.body.error.message).toContain(`${lastFy} was closed after it`);
 
-    await accounts.post(`/api/accounting/years/${lastFy}/reopen`).send({}).expect(200);
+    // Accounts cannot reopen by itself, and the owner cannot reopen without a request.
+    await accounts.post(`/api/accounting/years/${lastFy}/reopen`).send({}).expect(403);
+    expect((await owner.post(`/api/accounting/years/${lastFy}/reopen`).send({}).expect(409)).body.error.message).toMatch(/needs a request from Accounts/);
+    await accounts.post(`/api/accounting/years/${lastFy}/reopen-request`).send({}).expect(400); // the reason is required
+    await accounts.post(`/api/accounting/years/${lastFy}/reopen-request`).send({ reason: 'A March bill was booked in April' }).expect(200);
+    expect((await years()).find((y) => y.fy === lastFy).reopen_request).toMatchObject({ reason: 'A March bill was booked in April' });
+    // An admin who asked cannot approve their own request.
+    const admin = await w.as('admin');
+    await accounts.post(`/api/accounting/years/${lastFy}/reopen-request/drop`).send({}).expect(200);
+    await admin.post(`/api/accounting/years/${lastFy}/reopen-request`).send({ reason: 'checking' }).expect(200);
+    expect((await admin.post(`/api/accounting/years/${lastFy}/reopen`).send({}).expect(403)).body.error.message).toMatch(/someone else must approve/);
+    await owner.post(`/api/accounting/years/${lastFy}/reopen`).send({}).expect(200);
     const reopened = await tbAsOf(B.to);
     expect(reopened['Other Income']).toBe(-2000); // back as it was before the close
     expect(reopened['Salaries & Wages']).toBe(2500);
@@ -126,7 +138,7 @@ describe('year-end close', () => {
     expect((await years()).map((y) => [y.fy, y.status, y.can_close, y.can_reopen])).toEqual([
       [thisFy, 'current', false, false], [lastFy, 'ended', true, false], [fyBefore, 'closed', false, true],
     ]);
-    await accounts.post(`/api/accounting/years/${lastFy}/reopen`).send({}).expect(409); // not closed any more
+    await owner.post(`/api/accounting/years/${lastFy}/reopen`).send({}).expect(409); // not closed any more
 
     await accounts.post(`/api/accounting/years/${lastFy}/close`).send({}).expect(201);
     expect((await tbAsOf(B.to))['Retained Earnings']).toBe(-100);

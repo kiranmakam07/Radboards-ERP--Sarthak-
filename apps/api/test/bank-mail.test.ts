@@ -25,8 +25,15 @@ const readMailbox = async (opts: ReadOptions): Promise<InboundMail[]> => {
 const BANK_FROM = 'statements@idfcfirstbank.com';
 const SUBJECT = 'IDFC FIRST Bank Account statement for the month of September 2026';
 const PASSWORD = 'RADB0102';
-const mail = (id: string, attachments: { filename: string; content: Buffer }[], over: Partial<InboundMail> = {}): InboundMail =>
-  ({ messageId: `<${id}@mail.test>`, from: BANK_FROM, subject: SUBJECT, date: new Date('2026-10-01T04:30:00Z'), attachments, ...over });
+/** What the receiving mail service says of a genuine bank mail: signed by the bank's domain. */
+const SIGNED = 'mx.mail.test; dkim=pass header.i=@idfcfirstbank.com header.s=s1; spf=pass smtp.mailfrom=idfcfirstbank.com; dmarc=pass (p=REJECT) header.from=idfcfirstbank.com';
+const mail = (id: string, attachments: { filename: string; content: Buffer }[], over: Partial<InboundMail> = {}): InboundMail => {
+  const from = over.from ?? BANK_FROM;
+  return {
+    messageId: `<${id}@mail.test>`, from, subject: SUBJECT, date: new Date('2026-10-01T04:30:00Z'), attachments,
+    authResults: SIGNED.replaceAll('idfcfirstbank.com', from.split('@')[1]!), ...over,
+  };
+};
 
 // 1,00,000 to start with. The second and fourth rows are already in the books; the rest are not.
 const WEEK = [
@@ -265,6 +272,28 @@ describe('a statement arrives', () => {
     await request(w.app).get('/api/hooks/bank-mail/check').set('Authorization', 'Bearer wrong').expect(404);
     const ok = await request(w.app).get('/api/hooks/bank-mail/check').set('Authorization', 'Bearer cron-secret-123').expect(200);
     expect(ok.body.data).toMatchObject({ configured: true, found: 0, error: null });
+  });
+
+  it('holds a statement whose sender is not proven by the bank’s signature, until a person imports it (technical review, 26 Oct 2026)', async () => {
+    const accounts = await w.as('accounts');
+    const before = (await lines()).lines.length;
+    const forged = [['15-Sep-2026', '15-Sep-2026', 'NEFT/N258/PUNE BOARDS/INV-26-27-00031', '', '', '45,000.00', '90,591.97']];
+    // The bank's address written on a mail sent from somewhere else: no signature at all, or one from another domain.
+    inbox.push(mail('forged-1', [{ filename: 'Statement_15Sep.pdf', content: await pdf(forged) }], { authResults: null }));
+    inbox.push(mail('forged-2', [{ filename: 'Statement_15Sep.pdf', content: await pdf(forged) }], {
+      authResults: 'mx.mail.test; dkim=pass header.d=cheap-mailer.example; spf=fail smtp.mailfrom=cheap-mailer.example; dmarc=fail header.from=idfcfirstbank.com',
+    }));
+    expect(await check()).toMatchObject({ found: 2, imported: 0, failed: 2 });
+    const held = (await mailList()).mails.slice(0, 2);
+    for (const m of held) {
+      expect(m).toMatchObject({ status: 'failed', can_retry: true });
+      expect(m.detail).toMatch(/Not proven to come from statements@idfcfirstbank\.com/);
+    }
+    expect((await lines()).lines).toHaveLength(before); // nothing came in
+    // A person who has checked it can still bring it in.
+    await accounts.post(`/api/bank/mail/${held[0].id}/retry`).send({}).expect(200);
+    expect((await lines()).lines).toHaveLength(before + 1);
+    await accounts.post(`/api/bank/mail/${held[1].id}/dismiss`).send({}).expect(200);
   });
 });
 

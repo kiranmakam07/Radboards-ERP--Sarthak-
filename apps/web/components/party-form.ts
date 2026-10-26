@@ -1,4 +1,4 @@
-import { STATE_CODES } from '@radcore/shared';
+import { PARTY_STATE_CODES } from '@radcore/shared';
 import type { Field } from './ui';
 
 /** `withTerms` is off for someone adding a party while working: the commercial terms belong to the master. */
@@ -10,7 +10,7 @@ export const partyFields = (priceLists: any[], withType = true, withTerms = true
   { name: 'email', label: 'Email', type: 'email' },
   { name: 'gstin', label: 'GSTIN', help: 'State is read from the GSTIN' },
   { name: 'pan', label: 'PAN', help: 'For TDS. Not needed when there is a GSTIN' },
-  { name: 'state_code', label: 'State (if no GSTIN)', type: 'select', options: Object.entries(STATE_CODES).map(([c, n]) => ({ value: c, label: `${c} ${n}` })) },
+  { name: 'state_code', label: 'State (if no GSTIN)', type: 'select', options: Object.entries(PARTY_STATE_CODES).map(([c, n]) => ({ value: c, label: `${c} ${n}` })) },
   { name: 'line1', label: 'Address' },
   { name: 'city', label: 'City' },
   { name: 'pincode', label: 'Pincode' },

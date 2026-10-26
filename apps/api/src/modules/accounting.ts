@@ -11,7 +11,7 @@ import { nextNumber } from '../core/numbering';
 import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { accounts, expenseCategories, expenses, fiscalCloses, journalEntries, tdsRates } from '../db/schema';
-import { badRequest, conflict, must } from '../lib/errors';
+import { badRequest, conflict, forbidden, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zDate, zLink, zId, zListQuery, zMoney, zMoneyPos, zText, wantsFile, type Ctx } from '../lib/http';
 
 /**
@@ -189,19 +189,52 @@ export async function closeYear(ctx: Ctx, fy: string) {
   return { ...close!, entryId };
 }
 
-/** Undo a close, to correct something in that year. Only the most recently closed year can be reopened. */
-export async function reopenYear(ctx: Ctx, fy: string): Promise<void> {
-  const { tx } = ctx;
-  await tx.execute(sql`select 1 from settings where key = 'period_lock_date' for update`);
-  const [close] = await tx.select().from(fiscalCloses).where(eq(fiscalCloses.fy, fy));
+/** The closed year, locked, if it is the latest one closed (only that one can be reopened). */
+async function latestClose(tx: DB, fy: string) {
+  const [close] = await tx.select().from(fiscalCloses).where(eq(fiscalCloses.fy, fy)).for('update');
   if (!close) throw conflict(`${fy} is not closed`);
   const [later] = await rows<{ fy: string }>(tx, sql`select fy from fiscal_closes where from_date > ${close.fromDate}::date order by from_date limit 1`);
   if (later) throw conflict(`${later.fy} was closed after it. Reopen that year first.`);
+  return close;
+}
+
+/**
+ * Ask for a closed year to be reopened, saying why. Reopening takes two people (technical review, 26 Oct 2026:
+ * "a closed financial year can be reopened and changed by one person"): Accounts asks here, and the owner or an
+ * admin who did not ask approves it (reopenYear).
+ */
+export async function requestReopen(ctx: Ctx, fy: string, reason: string): Promise<void> {
+  const close = await latestClose(ctx.tx, fy);
+  if (close.reopenRequestedBy) throw conflict(`Reopening ${fy} has already been asked for`);
+  await ctx.tx.update(fiscalCloses).set({ reopenRequestedBy: ctx.user!.id, reopenRequestedAt: new Date(), reopenReason: reason, updatedAt: new Date() })
+    .where(eq(fiscalCloses.id, close.id));
+  await audit(ctx, 'fiscal_year', fy, 'reopen_request', null, { reason });
+}
+
+/** Turn a request down, or withdraw it. */
+export async function dropReopenRequest(ctx: Ctx, fy: string): Promise<void> {
+  const close = await latestClose(ctx.tx, fy);
+  if (!close.reopenRequestedBy) throw conflict(`Nobody has asked to reopen ${fy}`);
+  await ctx.tx.update(fiscalCloses).set({ reopenRequestedBy: null, reopenRequestedAt: null, reopenReason: null, updatedAt: new Date() })
+    .where(eq(fiscalCloses.id, close.id));
+  await audit(ctx, 'fiscal_year', fy, 'reopen_request_dropped', { reason: close.reopenReason }, null);
+}
+
+/**
+ * Undo a close, to correct something in that year: the approval of a request made by someone else. Only the most
+ * recently closed year can be reopened.
+ */
+export async function reopenYear(ctx: Ctx, fy: string): Promise<void> {
+  const { tx } = ctx;
+  await tx.execute(sql`select 1 from settings where key = 'period_lock_date' for update`);
+  const close = await latestClose(tx, fy);
+  if (!close.reopenRequestedBy) throw conflict(`Reopening ${fy} needs a request from Accounts first, with the reason`);
+  if (close.reopenRequestedBy === ctx.user?.id) throw forbidden('You asked for this year to be reopened, so someone else must approve it');
   await insideLockedPeriod(ctx, close.toDate, () =>
     reverseJournals(ctx, 'year_close', close.id, close.toDate, `Reopened ${fy}: closing entry reversed`));
   await tx.update(fiscalCloses).set({ entryId: null }).where(eq(fiscalCloses.id, close.id));
   await tx.delete(fiscalCloses).where(eq(fiscalCloses.id, close.id));
-  await audit(ctx, 'fiscal_year', fy, 'reopen', { profit: close.profit }, null);
+  await audit(ctx, 'fiscal_year', fy, 'reopen', { profit: close.profit }, { asked_by: close.reopenRequestedBy, reason: close.reopenReason });
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +324,7 @@ export function accountingRouter(db: DB) {
          and (${q.from ?? null}::date is null or e.expense_date >= ${q.from ?? null}::date)
          and (${q.to ?? null}::date is null or e.expense_date <= ${q.to ?? null}::date)
        order by e.expense_date desc, e.created_at desc limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'expenses');
+    sendList(req, res, data, 'expenses', { limit: q.limit });
   });
 
   r.post('/expenses', requirePerm('expenses:write'), async (req, res) => {
@@ -353,7 +386,7 @@ export function accountingRouter(db: DB) {
          and (${q.ref_id ?? null}::uuid is null or e.ref_id = ${q.ref_id ?? null}::uuid)
        order by e.entry_date desc, e.entry_no desc, l.id
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'day-book');
+    sendList(req, res, data, 'day-book', { limit: q.limit });
   });
 
   /**
@@ -676,6 +709,8 @@ export function accountingRouter(db: DB) {
     const today = istDate();
     const [first] = await rows<{ d: string | null }>(db, sql`select min(entry_date) as d from journal_entries`);
     const closes = await db.select().from(fiscalCloses);
+    const askers = new Map((await rows<{ id: string; name: string }>(db, sql`
+      select u.id, u.name from users u join fiscal_closes c on c.reopen_requested_by = u.id`)).map((u) => [u.id, u.name]));
     const current = fyOf(today);
     const years: Record<string, unknown>[] = [];
     let earlierOpen = false;
@@ -689,6 +724,9 @@ export function accountingRouter(db: DB) {
         income: money(p.income), expense: money(p.expense), profit: money(p.profit), closed_at: closed?.createdAt ?? null,
         can_close: !closed && ended && !earlierOpen,
         can_reopen: Boolean(closed) && !closes.some((c) => c.fromDate > from),
+        reopen_request: closed?.reopenRequestedBy ? {
+          by_id: closed.reopenRequestedBy, by: askers.get(closed.reopenRequestedBy) ?? null, at: closed.reopenRequestedAt, reason: closed.reopenReason,
+        } : null,
       });
       // A year that ended with income or expenses and was never closed holds up the ones after it.
       if (!closed && (!p.income.isZero() || !p.expense.isZero())) earlierOpen = true;
@@ -701,7 +739,19 @@ export function accountingRouter(db: DB) {
     res.status(201).json({ data: await inTx(db, req, (ctx) => closeYear(ctx, String(req.params.fy))) });
   });
 
-  r.post('/years/:fy/reopen', requirePerm('accounts:write'), async (req, res) => {
+  r.post('/years/:fy/reopen-request', requirePerm('accounts:write'), async (req, res) => {
+    const b = z.object({ reason: zText(500) }).parse(req.body);
+    await inTx(db, req, (ctx) => requestReopen(ctx, String(req.params.fy), b.reason));
+    res.json({ ok: true });
+  });
+
+  r.post('/years/:fy/reopen-request/drop', requirePerm('accounts:write', 'books:reopen'), async (req, res) => {
+    await inTx(db, req, (ctx) => dropReopenRequest(ctx, String(req.params.fy)));
+    res.json({ ok: true });
+  });
+
+  /** Approve a request to reopen: the owner or an admin, not the person who asked. */
+  r.post('/years/:fy/reopen', requirePerm('books:reopen'), async (req, res) => {
     await inTx(db, req, (ctx) => reopenYear(ctx, String(req.params.fy)));
     res.json({ ok: true });
   });

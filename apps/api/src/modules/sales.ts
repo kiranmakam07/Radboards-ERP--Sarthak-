@@ -1,10 +1,10 @@
 import crypto from 'node:crypto';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
   CHANNELS, D, Decimal, ORDER_STATUSES, PAYMENT_MODES, addDays, amountInWords, can, computeLine, computeTotals, formatDate, formatINR,
-  isInterState, istDate, money, qty as fmtQty, round2, SELLING_PARTY_TYPES, STATE_CODES, UNSELLABLE_LOCATION_TYPES,
+  isInterState, istDate, money, qty as fmtQty, round2, SELLING_PARTY_TYPES, OUTSIDE_INDIA, STATE_CODES, UNSELLABLE_LOCATION_TYPES,
   type Channel, type LineTax, type PaymentMode, type Role,
 } from '@radcore/shared';
 import { audit } from '../core/audit';
@@ -12,6 +12,7 @@ import { requirePerm } from '../core/auth';
 import { postJournal, reverseJournals } from '../core/journal';
 import { nextNumber } from '../core/numbering';
 import { getCompany, getSetting } from '../core/settings';
+import { assertGstOpen } from '../core/gst-lock';
 import { locationByType, lockItems, stockIn, stockOut } from '../core/stock';
 import { taxRateOn } from '../core/taxrates';
 import { cleanSerials, needsSerials, unitEvent, unitsIn, unitsOut } from '../core/units';
@@ -20,7 +21,7 @@ import {
   deliveries, deliveryChecks, deliveryLines, entities, files, invoiceLines, invoiceLinks, invoices, items, leadActivities, leads, locations, parties,
   salesOrderLines, salesOrders, units,
 } from '../db/schema';
-import { badRequest, conflict, forbidden, must } from '../lib/errors';
+import { assertOnce, badRequest, conflict, forbidden, must } from '../lib/errors';
 import {
   emptyToNull, inTx, sendList, zDate, zId, zListQuery, zMoney, zMoneyPos, zPhone, zQty, zSerials, zStateCode, zText, type Ctx,
 } from '../lib/http';
@@ -115,6 +116,7 @@ export async function createOrder(ctx: Ctx, input: OrderInput): Promise<Order> {
   const company = await getCompany(tx, input.entityId);
   const { lines, taxInclusive } = await buildLines(tx, party, input.lines, input.orderDate, input.taxInclusive);
   const placeOfSupply = input.placeOfSupply ?? party?.stateCode ?? company.state_code;
+  if (placeOfSupply === OUTSIDE_INDIA) throw badRequest('Sales outside India (exports) are not set up yet');
   if (!STATE_CODES[placeOfSupply]) throw badRequest('Unknown place of supply');
 
   const { number } = await nextNumber(tx, 'sales_order', input.orderDate, input.entityId);
@@ -148,6 +150,28 @@ export async function orderTotals(tx: DB, order: Order, lines: TotalsLine[]) {
   const inter = isInterState(company.state_code, order.placeOfSupply);
   const computed = lines.map((l) => computeLine({ qty: l.qty, rate: l.rate, discount: l.discount, gstRate: l.gstRate, cessRate: l.cessRate ?? 0 }, inter, order.taxInclusive));
   return { computed, totals: computeTotals(computed) };
+}
+
+/**
+ * What a party already has on order and not yet billed: its other confirmed orders, at what is left to invoice on
+ * them, with GST. It counts against the credit limit (technical review, 26 Oct 2026: "dealers can get more credit
+ * than their limit", by confirming several orders that each fit inside it on their own).
+ */
+async function openOrdersValue(tx: DB, partyId: string, exceptOrderId: string): Promise<Decimal> {
+  const open = await tx.select().from(salesOrders)
+    .where(and(eq(salesOrders.partyId, partyId), inArray(salesOrders.status, ['confirmed', 'delivered']), ne(salesOrders.id, exceptOrderId)));
+  let total = D(0);
+  for (const o of open) {
+    const lines = await tx.select().from(salesOrderLines).where(eq(salesOrderLines.orderId, o.id));
+    const left = lines
+      .map((l) => {
+        const q = D(l.qty).minus(l.invoicedQty);
+        return { ...l, qty: q.toString(), discount: D(l.discount).times(q).div(l.qty).toDecimalPlaces(2).toString() };
+      })
+      .filter((l) => D(l.qty).gt(0));
+    if (left.length) total = total.plus((await orderTotals(tx, o, left)).totals.grandTotal);
+  }
+  return total;
 }
 
 async function lockOrder(tx: DB, id: string): Promise<{ order: Order; lines: OrderLine[] }> {
@@ -294,13 +318,18 @@ export async function confirmOrder(
         }
         await audit(ctx, 'sales_order', id, 'overdue_override', null, { overdue: late.amount, bills: late.n });
       }
-      // 2. The credit limit: what they owe + what goes on credit now must fit inside it.
+      // 2. The credit limit: what they owe + what they have on order and not yet billed + what goes on credit now
+      // must fit inside it. The party is locked first, so two orders confirmed at the same moment are counted
+      // one after the other, never both against the same headroom.
       if (party.creditLimit) {
-        const exposure = D(await partyBalance(tx, party.id)).plus(onCredit);
+        await tx.select({ id: parties.id }).from(parties).where(eq(parties.id, party.id)).for('update');
+        const onOrder = await openOrdersValue(tx, party.id, id);
+        const exposure = D(await partyBalance(tx, party.id)).plus(onOrder).plus(onCredit);
         if (exposure.gt(party.creditLimit)) {
           if (!mayOverride) {
             throw conflict(
-              `${party.name} would be at ${money(exposure)} against a credit limit of ${money(party.creditLimit)}. ` +
+              `${party.name} would be at ${money(exposure)} against a credit limit of ${money(party.creditLimit)}` +
+                `${onOrder.gt(0) ? ` (₹${formatINR(money(onOrder))} of it on orders not yet billed)` : ''}. ` +
                 'Collect payment first, or ask Accounts / the owner to override.',
               { exposure: money(exposure), creditLimit: party.creditLimit },
             );
@@ -353,6 +382,7 @@ export async function deliverOrder(
   const { tx } = ctx;
   const { order, lines } = await lockOrder(tx, orderId);
   if (order.status !== 'confirmed') throw conflict(`Order ${order.orderNo} is ${order.status}; only a confirmed order can be delivered`);
+  if (input.lines) assertOnce(input.lines, (l) => l.orderLineId, 'order line');
 
   const want: { line: OrderLine; qty: Decimal; serials?: string[] | null; issuedUnitCost?: string }[] = input.lines
     ? input.lines.map((l) => {
@@ -510,6 +540,7 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
   const company = await getCompany(tx, order.entityId);
   const inter = isInterState(company.state_code, order.placeOfSupply);
   const invoiceDate = input.invoiceDate ?? istDate();
+  await assertGstOpen(tx, invoiceDate, 'sales', 'no invoice can be dated in it');
   const itemRows = await tx.select().from(items).where(inArray(items.id, pending.map((p) => p.line.itemId)));
   const itemById = new Map(itemRows.map((i) => [i.id, i]));
 
@@ -693,8 +724,10 @@ export async function createCreditNote(
   must(inv, 'Invoice');
   if (inv!.docType !== 'tax_invoice' || inv!.status !== 'issued') throw conflict('A credit note needs an issued tax invoice');
   if (input.lines.length === 0) throw badRequest('Pick at least one line to return');
+  assertOnce(input.lines, (l) => l.invoiceLineId, 'invoice line');
   const date = input.date ?? istDate();
   if (date < inv!.invoiceDate) throw badRequest('Credit note cannot be dated before its invoice');
+  await assertGstOpen(tx, date, 'sales', 'no credit note can be dated in it');
 
   const origLines = await tx.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, invoiceId)).orderBy(asc(invoiceLines.sort));
   const prior = await rows<{ against_line_id: string; qty: string; taxable: string; cgst: string; sgst: string; igst: string; cess: string }>(tx, sql`
@@ -836,6 +869,8 @@ export async function cancelInvoice(
   const [inv] = await tx.select().from(invoices).where(eq(invoices.id, id)).for('update');
   must(inv, 'Invoice');
   if (inv!.status !== 'issued') throw conflict(`This document is ${inv!.status}`);
+  // Already in a filed GSTR-1: cancelling would change that return behind it.
+  await assertGstOpen(tx, inv!.invoiceDate, 'sales', `${inv!.invoiceNo} cannot be cancelled`);
   const today = istDate();
 
   if (inv!.docType === 'tax_invoice') {
@@ -1065,7 +1100,7 @@ export function salesRouter(db: DB) {
          and (${like}::text is null or o.order_no ilike ${like} or p.name ilike ${like})
        order by o.order_date desc, o.created_at desc
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'sales-orders');
+    sendList(req, res, data, 'sales-orders', { limit: q.limit });
   });
 
   /** How many quotes and orders are at each status: the counters above the list. */
@@ -1292,7 +1327,7 @@ export function salesRouter(db: DB) {
          and (${like}::text is null or i.invoice_no ilike ${like} or i.party_name ilike ${like})
        order by i.invoice_date desc, i.issued_at desc
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'invoices');
+    sendList(req, res, data, 'invoices', { limit: q.limit });
   });
 
   r.get('/invoices/:id', requirePerm('invoices:read'), async (req, res) => {

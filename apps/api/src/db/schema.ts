@@ -1164,6 +1164,13 @@ export const fiscalCloses = pgTable('fiscal_closes', {
   income: numeric('income', { precision: 16, scale: 2 }).notNull().default('0'),
   expense: numeric('expense', { precision: 16, scale: 2 }).notNull().default('0'),
   profit: numeric('profit', { precision: 16, scale: 2 }).notNull().default('0'),
+  /**
+   * Reopening takes two people (technical review, 26 Oct 2026): Accounts asks, with the reason, and the owner or
+   * an admin who did not ask approves (modules/accounting.ts).
+   */
+  reopenRequestedBy: uuid('reopen_requested_by').references(() => users.id),
+  reopenRequestedAt: ts('reopen_requested_at'),
+  reopenReason: text('reopen_reason'),
   ...stamps,
 });
 
@@ -1582,10 +1589,27 @@ export const payslips = pgTable('payslips', {
   otherDeduction: money('other_deduction').notNull().default('0'),
   netPay: money('net_pay').notNull(),
   note: text('note'),
-  /** The key of the link the person opens to see this payslip; made the first time it is sent. */
+  /** Days of leave beyond the person's allowance for the leave year: not paid (technical review, 26 Oct 2026). */
+  unpaidLeave: numeric('unpaid_leave', { precision: 4, scale: 1 }).notNull().default('0'),
+  /** The key of the link the person opens to see this payslip; made when it is sent, good until tokenExpiresAt. */
   token: text('token').unique(),
+  tokenExpiresAt: ts('token_expires_at'),
   ...stamps,
 }, (t) => [unique('payslips_run_employee_uq').on(t.runId, t.employeeId)]);
+
+/**
+ * A person's monthly salary from a date (technical review, 26 Oct 2026). A month is worked out at the salary in force
+ * on each of its days, so approving or reopening a past month never pays it at today's salary. The first salary
+ * recorded for someone runs from their joining date; employees.monthly_salary keeps the latest one entered.
+ */
+export const salaryRevisions = pgTable('salary_revisions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  employeeId: uuid('employee_id').notNull().references(() => employees.id),
+  effectiveFrom: date('effective_from').notNull(),
+  /** 0 when the salary was taken off. */
+  monthlySalary: money('monthly_salary').notNull(),
+  ...stamps,
+}, (t) => [unique('salary_revisions_uq').on(t.employeeId, t.effectiveFrom), check('salary_revisions_amount_chk', sql`${t.monthlySalary} >= 0`)]);
 
 /** Money given to someone ahead of their salary, taken back out of later salaries a set amount a month. */
 export const salaryAdvances = pgTable('salary_advances', {
@@ -2052,6 +2076,55 @@ export const accessLog = pgTable('access_log', {
   recordId: uuid('record_id').notNull(),
   at: ts('at').notNull().defaultNow(),
 }, (t) => [index('access_log_record_idx').on(t.recordType, t.recordId), index('access_log_at_idx').on(t.at)]);
+
+/**
+ * Unexpected errors: a request that failed with a 500, a background job that failed (core/alerts.ts). Listed on
+ * Admin → System health and, when ALERT_WEBHOOK_URL is set, also sent there. Kept 90 days.
+ */
+export const errorLog = pgTable('error_log', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  at: ts('at').notNull().defaultNow(),
+  source: text('source').notNull(),
+  message: text('message').notNull(),
+  detail: text('detail'),
+  userId: uuid('user_id'),
+}, (t) => [index('error_log_at_idx').on(t.at)]);
+
+/**
+ * One save done once (technical review, 26 Oct 2026; lib/idempotency.ts): the key a screen sent with a save, and
+ * the answer it got, kept for a day so that a repeat of the same save gets the same answer instead of a second save.
+ */
+export const idempotencyKeys = pgTable('idempotency_keys', {
+  key: text('key').primaryKey(),
+  userId: uuid('user_id').notNull(),
+  method: text('method').notNull(),
+  path: text('path').notNull(),
+  /** Null while the first request is still being worked on. */
+  statusCode: integer('status_code'),
+  response: jsonb('response'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+}, (t) => [index('idempotency_keys_created_idx').on(t.createdAt)]);
+
+/**
+ * GST returns marked as filed (technical review, 26 Oct 2026). Once a month's GSTR-1 is filed, no invoice or credit
+ * note dated in it can be issued or cancelled; once its GSTR-3B is filed, no purchase bill or debit note dated in it
+ * can be booked or cancelled. A correction is a document dated now, which goes in the next return
+ * (core/gst-lock.ts). Taking a mark back needs gst:unfile (the owner or an admin) and is audited.
+ */
+export const gstFilings = pgTable('gst_filings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  returnType: text('return_type').notNull(),
+  /** The month the return is for, YYYY-MM. */
+  period: char('period', { length: 7 }).notNull(),
+  filedOn: date('filed_on').notNull(),
+  /** The acknowledgement number the portal gave. */
+  arn: text('arn'),
+  ...stamps,
+}, (t) => [
+  uniqueIndex('gst_filings_uq').on(t.returnType, t.period),
+  check('gst_filings_return_chk', sql`${t.returnType} in ('gstr1', 'gstr3b')`),
+  check('gst_filings_period_chk', sql`${t.period} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+]);
 
 /**
  * Amount-based purchase order approval (brief P3): a PO worth more than its sender's role may send (with GST)

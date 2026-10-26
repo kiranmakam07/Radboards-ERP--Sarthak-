@@ -3,5 +3,6 @@
   "framework": "nextjs",
   "installCommand": "cd ../.. && npm ci",
   "buildCommand": "npm run vercel-build",
-  "regions": ["sin1"]
+  "regions": ["sin1"],
+  "crons": [{ "path": "/api/hooks/jobs/run", "schedule": "30 0 * * *" }]
 }

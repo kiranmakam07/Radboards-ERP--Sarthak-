@@ -6,7 +6,8 @@ import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type F
 import { formatDate, formatINR } from '@radcore/shared';
 import { BarList, Donut, LineChart, count } from '@/components/charts';
 import { Icon } from '@/components/icons';
-import { SessionContext } from '@/lib/session';
+import { MAX_LIST, cutShortInfo, lastLoaded, newSaveKey, showMore, withSaveKey } from '@/lib/api';
+import { SessionContext, useCan } from '@/lib/session';
 
 /**
  * The building blocks every screen is made of: how money, quantities and dates are shown, the
@@ -269,6 +270,7 @@ const TONES: Record<string, string> = {
   pass: 'green', hold: 'amber', fail: 'red', active: 'green', left: 'grey', planned: 'grey',
   present: 'green', half_day: 'amber', absent: 'red', leave: 'blue', weekly_off: 'grey', holiday: 'grey',
   in_use: 'green', under_repair: 'amber', retired: 'grey', overdue: 'red', due_soon: 'amber', on_track: 'green', off: 'grey',
+  filed: 'green',
 };
 
 export function Badge({ value }: { value: unknown }) {
@@ -416,7 +418,21 @@ export function Table<T extends Record<string, any>>({
         </tbody>
         {footer ? <tfoot>{footer}</tfoot> : null}
       </table>
+      <CutShort rows={rows} />
     </div>
+  );
+}
+
+/** Under a list the API cut short: how many are shown, and more on request (lib/api.ts showMore). */
+function CutShort({ rows }: { rows: unknown[] }) {
+  const more = cutShortInfo(rows);
+  if (!more) return null;
+  return (
+    <p className="cut-short muted small no-print">
+      Showing the first {rows.length.toLocaleString('en-IN')}. {more.limit < MAX_LIST
+        ? <button type="button" className="link" onClick={() => showMore(more.path, more.limit)}>Show more</button>
+        : 'Narrow the list with the search or filters to see the rest.'}
+    </p>
   );
 }
 
@@ -424,7 +440,7 @@ export function Table<T extends Record<string, any>>({
 export type Field = {
   name: string;
   label: string;
-  type?: 'text' | 'number' | 'date' | 'time' | 'datetime-local' | 'select' | 'textarea' | 'checkbox' | 'password' | 'tel' | 'email' | 'file';
+  type?: 'text' | 'number' | 'date' | 'month' | 'time' | 'datetime-local' | 'select' | 'textarea' | 'checkbox' | 'password' | 'tel' | 'email' | 'file';
   /** For type 'file': what the file is (resume, bill, item_image), which decides who may open it. */
   purpose?: string;
   options?: { value: string; label: string }[];
@@ -468,18 +484,26 @@ export function Form({
     setValues((v) => ({ ...v, [name]: value }));
   };
 
+  // One key for this save, kept across retries until it goes through (lib/api.ts withSaveKey).
+  const saveKey = useRef(newSaveKey());
+  const saving = useRef(false);
+
   async function handle(e: FormEvent) {
     e.preventDefault();
+    if (saving.current) return; // a second press before the first has finished
+    saving.current = true;
     setBusy(true);
     setError(null);
     try {
-      const result = await onSubmit(values);
+      const result = await withSaveKey(saveKey.current, () => onSubmit(values));
+      saveKey.current = newSaveKey();
       setValues(initial);
       touched.current = false;
       onDone?.(result);
     } catch (err) {
       setError((err as Error).message);
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   }
@@ -587,18 +611,25 @@ export function ActionButton({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const saveKey = useRef(newSaveKey());
+  const saving = useRef(false);
   return (
     <span className="action">
       <button type="button" className={kind} disabled={busy || disabled}
         onClick={async () => {
+          if (saving.current) return;
           if (confirm && !window.confirm(confirm)) return;
+          saving.current = true;
           setBusy(true);
           setError(null);
           try {
-            onDone?.(await onClick());
+            const result = await withSaveKey(saveKey.current, onClick);
+            saveKey.current = newSaveKey();
+            onDone?.(result);
           } catch (e) {
             setError((e as Error).message);
           } finally {
+            saving.current = false;
             setBusy(false);
           }
         }}>
@@ -695,8 +726,16 @@ export function KV({ rows }: { rows: [string, ReactNode][] }) {
 }
 
 /** Download what is on screen (with the same filters) as an Excel file or as CSV. */
+/** Keys that make a row someone's contact or bank details: such a list goes out as a file only with lists:export. */
+const PERSONAL_KEYS = ['phone', 'party_phone', 'lead_phone', 'customer_phone', 'address', 'billing_address', 'shipping_address', 'email', 'bank_account_no', 'pan'];
+
 export function CsvLink({ href }: { href: string }) {
+  const can = useCan();
   const sep = href.includes('?') ? '&' : '?';
+  // The API refuses the file to a role without lists:export when the list holds people's details (technical review,
+  // 26 Oct 2026); the buttons are not offered then.
+  const rows = lastLoaded<{ data?: Record<string, unknown>[] }>(href)?.data;
+  if (!can('lists:export') && rows?.some((r) => PERSONAL_KEYS.some((k) => r[k] != null && r[k] !== ''))) return null;
   return (
     <>
       <a className="button" href={`/api${href}${sep}format=xlsx&limit=5000`}>Excel</a>

@@ -12,7 +12,7 @@ import { StatementFormatError, parseStatement, type ParsedStatement } from '../l
 import { StatementPasswordError, isPdf, parsePdfStatement } from '../lib/bank-pdf';
 import { AppError, badRequest, conflict, must } from '../lib/errors';
 import { emptyToNull, inTx, zId, type Ctx } from '../lib/http';
-import { type InboundMail, type MailAttachment, type ReadOptions } from '../lib/mailbox';
+import { signedBySender, type InboundMail, type MailAttachment, type ReadOptions } from '../lib/mailbox';
 import { canSeal, seal, unseal } from '../lib/secret-box';
 import { importParsed } from './bank';
 
@@ -114,6 +114,19 @@ export async function recordMail(db: DB, mail: InboundMail): Promise<Outcome[]> 
     if (skip) {
       await tx.insert(bankMails).values({ ...base, part: 0, status: 'ignored', detail: skip });
       return [{ status: 'ignored', accountId: null, detail: skip }];
+    }
+    // A sender's address can be made up; the bank's signature cannot. An unsigned statement is held, with its file,
+    // for a person to look at and import with Try again (technical review, 26 Oct 2026).
+    if (!signedBySender(mail)) {
+      const detail = `Not proven to come from ${mail.from}: the mail service found no valid signature from that address's domain, so anyone could have sent it. `
+        + 'Check that it is the bank\'s own statement, then press Try again to import it';
+      for (const [part, attachment] of statements.entries()) {
+        await tx.insert(bankMails).values({
+          ...base, part, attachmentName: attachment.filename.slice(0, 200), attachment: attachment.content.length <= KEEP_BYTES ? attachment.content : null,
+          status: 'failed', detail,
+        });
+      }
+      return statements.map(() => ({ status: 'failed' as const, accountId: null, detail }));
     }
     const outcomes: Outcome[] = [];
     for (const [part, attachment] of statements.entries()) {

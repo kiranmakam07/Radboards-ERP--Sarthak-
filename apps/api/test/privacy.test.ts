@@ -40,7 +40,7 @@ describe('consent', () => {
 });
 
 describe('phone numbers and addresses in lists', () => {
-  it('are masked for a role without pii:read, in the list and in its download', async () => {
+  it('are masked for a role without pii:read, and that role cannot download the list', async () => {
     await (await w.as('admin')).patch(`/api/parties/${id.party}`).send({ billing_address: { line1: '4 Lake Road', city: 'Pune', state: 'Maharashtra', pincode: '411001' } }).expect(200);
     const full = (await (await w.as('sales')).get('/api/parties?q=Farah').expect(200)).body.data[0];
     expect(full.phone).toBe('+919811000081');
@@ -48,9 +48,10 @@ describe('phone numbers and addresses in lists', () => {
     const masked = (await stores.get('/api/parties?q=Farah').expect(200)).body.data[0];
     expect(masked.phone).toBe(`${'•'.repeat(9)}0081`); // +919811000081: all but the last four digits
     expect(masked.billing_address).toBe('Hidden');
-    const csv = (await stores.get('/api/parties?q=Farah&format=csv').expect(200)).text;
-    expect(csv).not.toContain('9811000081');
-    expect(csv).not.toContain('Lake Road');
+    // A download of people's contact details needs lists:export (technical review, 26 Oct 2026).
+    const refused = await stores.get('/api/parties?q=Farah&format=csv').expect(403);
+    expect(refused.body.error.message).toMatch(/contact details/);
+    expect(refused.text).not.toContain('9811000081');
   });
 });
 

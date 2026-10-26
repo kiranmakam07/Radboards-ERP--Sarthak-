@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { PARTY_TYPES, STATE_CODES, can, isValidPan, istDate, normalisePan, stateCodeFromGstin } from '@radcore/shared';
+import { PARTY_STATE_CODES, PARTY_TYPES, can, isValidPan, istDate, normalisePan, stateCodeFromGstin } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { getCompany } from '../core/settings';
@@ -50,7 +50,7 @@ async function resolveStateCode(tx: DB, gstin: string | null | undefined, given:
     return fromGstin;
   }
   if (given) {
-    if (!STATE_CODES[given]) throw badRequest('Unknown state code');
+    if (!PARTY_STATE_CODES[given]) throw badRequest('Unknown state code');
     return given;
   }
   return (await getCompany(tx)).state_code;
@@ -117,7 +117,7 @@ export function partiesRouter(db: DB) {
               or (${phoneLike}::text is not null and p.phone like ${phoneLike}))
        order by p.name
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'parties');
+    sendList(req, res, data, 'parties', { limit: q.limit });
   });
 
   r.get('/:id', requirePerm('parties:read'), async (req, res) => {

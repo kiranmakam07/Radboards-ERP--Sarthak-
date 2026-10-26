@@ -203,7 +203,9 @@ describe('lead pipeline (fixed stage machine)', () => {
     expect(overdue.body.data.map((l: { id: string }) => l.id)).toContain(lead_id);
     // Timestamps go out as ISO-8601, whichever query produced them.
     expect(overdue.body.data[0].next_follow_up_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-    const csv = await sales.get('/api/leads?view=open&format=csv').expect(200);
+    // The list as a file takes everyone's phone number out of the system: marketing may, a salesperson may not.
+    await sales.get('/api/leads?view=open&format=csv').expect(403);
+    const csv = await (await w.as('marketing')).get('/api/leads?view=open&format=csv').expect(200);
     expect(csv.headers['content-type']).toContain('text/csv');
     expect(csv.text).toContain('lead_no');
   });

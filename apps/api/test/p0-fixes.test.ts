@@ -115,7 +115,9 @@ describe('2. the quick bill and the dealer\'s credit', () => {
   it('refuses a credit bill over the limit for sales', async () => {
     const sales = await w.as('sales');
     const res = await sales.post('/api/sales/quick-bill').send({ party_id: id.dealer, lines: fifteen, payments: [] }).expect(409);
-    expect(res.body.error.message).toMatch(/Pune Boards would be at 70800\.00 against a credit limit of 50000\.00/);
+    // 70,800 for this bill, and 4 for the 3 boards at 1 confirmed above and not billed yet: orders on hand count too
+    // (technical review, 26 Oct 2026).
+    expect(res.body.error.message).toMatch(/Pune Boards would be at 70804\.00 against a credit limit of 50000\.00 \(₹4\.00 of it on orders not yet billed\)/);
     await sales.post('/api/sales/quick-bill').send({ party_id: id.dealer, lines: fifteen, payments: [], override_credit: true }).expect(403);
   });
 

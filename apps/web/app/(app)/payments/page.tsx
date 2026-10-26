@@ -1,10 +1,10 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { istDate, PAYMENT_MODES, tdsOn } from '@radcore/shared';
 import { ActionButton, Badge, Card, CsvLink, CurrencyFields, ErrorBox, Loading, Page, Table, Toggle, currencyBody, date, inr, label } from '@/components/ui';
-import { api, post, qs, useGet } from '@/lib/api';
+import { api, newSaveKey, post, qs, useGet, withSaveKey } from '@/lib/api';
 import { useCan } from '@/lib/session';
 import { rupees } from '@/components/charts';
 
@@ -57,6 +57,9 @@ function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () 
   const [v, setV] = useState({ amount: '', mode: 'bank_transfer', account_id: '', reference: '', paid_on: istDate(), direction: '' });
   const [alloc, setAlloc] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  // One payment, saved once however often Save is pressed (technical review, 26 Oct 2026).
+  const [busy, setBusy] = useState(false);
+  const saveKey = useRef(newSaveKey());
 
   useEffect(() => {
     setAlloc({});
@@ -93,21 +96,26 @@ function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () 
   }
 
   async function save() {
+    if (busy) return;
+    setBusy(true);
     setError(null);
     try {
-      await post('/payments', {
+      await withSaveKey(saveKey.current, () => post('/payments', {
         direction, party_id: partyId, mode: v.mode, account_id: v.account_id, amount: v.amount, reference: v.reference, paid_on: v.paid_on,
         allocations: Object.entries(alloc).filter(([, a]) => Number(a) > 0)
           .map(([docId, amount]) => (direction === 'in' ? { invoice_id: docId, amount } : { purchase_bill_id: docId, amount })),
         ...(held > 0 ? { tds_amount: tds.amount, tds_rate_id: tds.rate_id, tds_base: tds.base } : {}),
         ...(direction === 'out' ? currencyBody(money) : {}),
-      });
+      }));
+      saveKey.current = newSaveKey();
       setV({ ...v, amount: '', reference: '' }); setAlloc({}); setTds({ on: false, rate_id: '', base: '', amount: '' });
       const fresh = await api(`/parties/${partyId}`);
       setParty(fresh.data);
       onDone();
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -171,7 +179,7 @@ function PaymentForm({ presetParty, onDone }: { presetParty: string; onDone: () 
           <p className="muted small">Allocated ₹{inr(allocated)} of ₹{inr(settles)}. Anything left over is kept as an advance.</p>
         </Card>
       )}
-      <div className="form-foot"><button type="button" className="primary" disabled={!partyId || !v.amount} onClick={save}>Save payment</button><ErrorBox error={error} /></div>
+      <div className="form-foot"><button type="button" className="primary" disabled={busy || !partyId || !v.amount} onClick={save}>{busy ? 'Saving…' : 'Save payment'}</button><ErrorBox error={error} /></div>
     </div>
   );
 }

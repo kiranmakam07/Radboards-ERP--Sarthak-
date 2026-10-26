@@ -11,7 +11,7 @@ import { requireAuth, requirePerm } from '../core/auth';
 import { nextNumber } from '../core/numbering';
 import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
-import { applicantActivities, applicants, attendance, employees, interviews, jobOpenings, users } from '../db/schema';
+import { applicantActivities, applicants, attendance, employees, interviews, jobOpenings, salaryRevisions, users } from '../db/schema';
 import { parseBankDate, parseCsv } from '../lib/bank-csv';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zClock, zDate, zLink, zId, zListQuery, zMoney, zPhone, zText, wantsFile, type Ctx } from '../lib/http';
@@ -66,6 +66,29 @@ async function checkNotOnRolls(tx: DB, phone: string, exceptEmployeeId: string |
   if (same && same.id !== exceptEmployeeId) throw conflict(`${same.name} (${same.employeeNo}) is already on the rolls with this phone number`);
 }
 
+/**
+ * A salary from a date (technical review, 26 Oct 2026: "approving or reopening a past month can pay it at today's
+ * salary"). Payroll works a month out at the salary in force on each of its days (modules/payroll.ts). The first
+ * salary recorded for someone runs from their joining date, whatever date is given; a change runs from `from`.
+ * Nobody changes their own salary. Writes nothing when the salary is the same as the one already in force then.
+ */
+export async function recordSalary(ctx: Ctx, employee: Employee, monthlySalary: string | null, from: string): Promise<void> {
+  const { tx } = ctx;
+  if (employee.userId && employee.userId === ctx.user?.id) throw forbidden('Someone else must change your own salary');
+  const amount = monthlySalary ?? '0';
+  const [first] = await rows<{ n: number }>(tx, sql`select count(*)::int as n from salary_revisions where employee_id = ${employee.id}`);
+  const effectiveFrom = first!.n === 0 ? employee.joinDate : from;
+  if (first!.n > 0 && effectiveFrom < employee.joinDate) throw badRequest('A salary cannot start before the joining date');
+  const [current] = await rows<{ monthly_salary: string }>(tx, sql`
+    select monthly_salary::text from salary_revisions where employee_id = ${employee.id} and effective_from <= ${effectiveFrom}::date
+     order by effective_from desc limit 1`);
+  if (current && Number(current.monthly_salary) === Number(amount)) return;
+  if (!current && Number(amount) === 0) return;
+  await tx.insert(salaryRevisions).values({ employeeId: employee.id, effectiveFrom, monthlySalary: amount, createdBy: ctx.user?.id ?? null })
+    .onConflictDoUpdate({ target: [salaryRevisions.employeeId, salaryRevisions.effectiveFrom], set: { monthlySalary: amount, updatedAt: new Date() } });
+  await audit(ctx, 'employee', employee.id, 'salary', current ? { monthlySalary: current.monthly_salary } : null, { monthlySalary: amount, from: effectiveFrom });
+}
+
 /** Add someone to the rolls. A phone number already on the rolls, or a sign-in already linked to someone else, is refused. */
 export async function createEmployee(ctx: Ctx, input: EmployeeInput): Promise<Employee> {
   const { tx } = ctx;
@@ -85,6 +108,7 @@ export async function createEmployee(ctx: Ctx, input: EmployeeInput): Promise<Em
     employeeNo: number, name: input.name, department: input.department, designation: input.designation, joinDate: input.joinDate,
     monthlySalary: input.monthlySalary ?? null,
   });
+  if (input.monthlySalary) await recordSalary(ctx, row!, input.monthlySalary, input.joinDate);
   return row!;
 }
 
@@ -308,6 +332,8 @@ export async function saveAttendance(ctx: Ctx, date: string, entries: Attendance
   for (const e of entries) {
     const emp = byId.get(e.employeeId);
     if (!emp) throw badRequest('Unknown employee');
+    // Own attendance is paid attendance: someone else marks it (technical review, 26 Oct 2026).
+    if (emp.userId && emp.userId === ctx.user?.id) throw forbidden('Someone else marks your own attendance; you clock in from your phone');
     if (date < emp.joinDate) throw badRequest(`${emp.name} joined on ${formatDate(emp.joinDate)}; ${formatDate(date)} is before that`);
     if (emp.leftOn && date > emp.leftOn) throw badRequest(`${emp.name} left on ${formatDate(emp.leftOn)}; ${formatDate(date)} is after that`);
     const worked = e.status === 'present' || e.status === 'half_day';
@@ -445,6 +471,8 @@ const zEmployee = z.object({
   employment_type: z.enum(EMPLOYMENT_TYPES).default('full_time'),
   join_date: zDate,
   monthly_salary: emptyToNull(zMoney).optional(),
+  /** The day a changed salary starts from; today if not given. */
+  salary_from: zDate.optional(),
   user_id: emptyToNull(zId).optional(),
   notes: emptyToNull(z.string().trim().max(2000)).optional(),
   annual_leave_days: emptyToNull(zLeaveDays).optional(),
@@ -557,7 +585,7 @@ export function hrRouter(db: DB) {
               or (${phoneLike}::text is not null and a.phone like ${phoneLike}))
        order by a.applied_on desc, a.created_at desc, a.applicant_no desc
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'applicants');
+    sendList(req, res, data, 'applicants', { limit: q.limit });
   });
 
   /** The hiring board: everyone still in progress, by stage. */
@@ -770,7 +798,7 @@ export function hrRouter(db: DB) {
          and (${like}::text is null or e.name ilike ${like} or e.employee_no ilike ${like} or e.phone like ${like})
        order by (e.status = 'active') desc, e.name
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'employees');
+    sendList(req, res, data, 'employees', { limit: q.limit });
   });
 
   r.get('/employees/:id', requirePerm('hr:read'), async (req, res) => {
@@ -830,7 +858,10 @@ export function hrRouter(db: DB) {
       if (b.department !== undefined) patch.department = b.department;
       if (b.designation !== undefined) patch.designation = b.designation;
       if (b.employment_type !== undefined && req.body.employment_type !== undefined) patch.employmentType = b.employment_type;
-      if (b.monthly_salary !== undefined) patch.monthlySalary = b.monthly_salary;
+      if (b.monthly_salary !== undefined) {
+        await recordSalary(ctx, { ...e!, ...(patch.joinDate ? { joinDate: patch.joinDate } : {}) }, b.monthly_salary, b.salary_from ?? istDate());
+        patch.monthlySalary = b.monthly_salary;
+      }
       if (b.annual_leave_days !== undefined) patch.annualLeaveDays = b.annual_leave_days;
       if (b.notes !== undefined) patch.notes = b.notes;
       const [updated] = await ctx.tx.update(employees).set(patch).where(eq(employees.id, id)).returning();

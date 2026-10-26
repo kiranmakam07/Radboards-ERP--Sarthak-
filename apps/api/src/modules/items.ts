@@ -117,7 +117,7 @@ export function itemsRouter(db: DB) {
          and (${q.active} = 'all' or i.active = (${q.active} = 'true'))
        order by i.name
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'items');
+    sendList(req, res, data, 'items', { limit: q.limit });
   });
 
   /** Exact barcode/SKU scan for the quick bill. */

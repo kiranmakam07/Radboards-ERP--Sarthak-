@@ -112,14 +112,30 @@ describe('clocking in and out from the phone', () => {
     expect(register.rules).toMatchObject({ start: '10:00', grace_min: 10 });
   });
 
-  it('turns a day HR had marked absent into a day worked when the person does clock in', async () => {
+  it('leaves a day HR marked absent as HR marked it: the person asks HR, who changes it (technical review, 26 Oct 2026)', async () => {
     const hr = await w.as('hr');
-    // HR's own sign-in has an employee record too in this test.
+    const admin = await w.as('admin');
+    const [storesUser] = await rows<{ id: string }>(w.db, sql`select id from users where role = 'stores'`);
+    const ravi = (await admin.post('/api/hr/employees').send({ name: 'Ravi Stores', phone: '9822200019', department: 'Stores', designation: 'Storekeeper', join_date: addDays(today, -30), user_id: storesUser!.id }).expect(201)).body.data.id;
+    await hr.put('/api/hr/attendance').send({ date: today, entries: [{ employee_id: ravi, status: 'absent' }] }).expect(200);
+    const stores = await w.as('stores');
+    const refused = await stores.post('/api/hr/me/clock-in').send({ at: OFFICE }).expect(409);
+    expect(refused.body.error.message).toMatch(/HR has marked today as absent for you/);
+    expect(await dayRow(ravi)).toMatchObject({ status: 'absent', self_marked: false });
+    // HR puts it right; the clock-in then records the times.
+    await hr.put('/api/hr/attendance').send({ date: today, entries: [{ employee_id: ravi, status: 'present' }] }).expect(200);
+    await stores.post('/api/hr/me/clock-in').send({ at: OFFICE }).expect(201);
+    expect(await dayRow(ravi)).toMatchObject({ status: 'present', self_marked: true, in_distance_m: 0 });
+  });
+
+  it('does not let HR mark their own attendance or decide their own leave', async () => {
+    const hr = await w.as('hr');
     const [hrUser] = await rows<{ id: string }>(w.db, sql`select id from users where role = 'hr'`);
     const priya = (await (await w.as('admin')).post('/api/hr/employees').send({ name: 'Priya HR', phone: '9822200009', department: 'HR', designation: 'HR', join_date: addDays(today, -30), user_id: hrUser!.id }).expect(201)).body.data.id;
-    await hr.put('/api/hr/attendance').send({ date: today, entries: [{ employee_id: priya, status: 'absent' }] }).expect(200);
+    const own = await hr.put('/api/hr/attendance').send({ date: today, entries: [{ employee_id: priya, status: 'present' }] }).expect(403);
+    expect(own.body.error.message).toMatch(/Someone else marks your own attendance/);
     await hr.post('/api/hr/me/clock-in').send({ at: OFFICE }).expect(201);
-    expect(await dayRow(priya)).toMatchObject({ status: 'present', self_marked: true, in_distance_m: 0 });
+    expect(await dayRow(priya)).toMatchObject({ status: 'present', self_marked: true });
   });
 
   it('counts late arrivals and hours worked in the month', async () => {

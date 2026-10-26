@@ -1,11 +1,11 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { LineEditor, toApiLines, type ItemLite, type Line } from '@/components/lines';
 import { DeliveryChecklist, NO_CHECKS, type Checks } from '@/components/delivery-checks';
 import { Card, ErrorBox, Page, PriceWarning, inr } from '@/components/ui';
-import { ApiError, api, post, useGet } from '@/lib/api';
+import { ApiError, api, newSaveKey, post, useGet, withSaveKey } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
 const MODES = ['cash', 'upi', 'card'] as const;
@@ -29,6 +29,8 @@ function QuickBill() {
   // Refused for credit (over the limit, or bills overdue): someone with sales:override_credit can bill it anyway.
   const [creditRefused, setCreditRefused] = useState(false);
   const [busy, setBusy] = useState(false);
+  // One bill, saved once however often it is pressed (technical review, 26 Oct 2026).
+  const saveKey = useRef(newSaveKey());
   // Selling a vehicle: its delivery checklist goes with the bill (brief P2).
   const [checks, setChecks] = useState<Checks>(NO_CHECKS);
   const vehicle = lines.some((l) => Number(l.qty) > 0 && (items.data?.data ?? []).find((i) => i.id === l.item_id)?.item_type === 'vehicle');
@@ -69,16 +71,17 @@ function QuickBill() {
   const due = Math.round((total - paid) * 100) / 100;
 
   async function save(overrideCredit = false) {
+    if (busy) return;
     setBusy(true); setError(null); setCreditRefused(false);
     try {
-      const res = await post('/sales/quick-bill', {
+      const res = await withSaveKey(saveKey.current, () => post('/sales/quick-bill', {
         party_id: partyId,
         customer: !partyId && phone ? { phone, name } : null,
         lines: toApiLines(lines.filter((l) => Number(l.qty) > 0)),
         payments: MODES.filter((m) => Number(pay[m]) > 0).map((m) => ({ mode: m, amount: pay[m] })),
         override_credit: overrideCredit,
         delivery_checks: vehicle ? checks : null,
-      });
+      }));
       router.push(`/invoices/${res.data.invoice.id}?new=1`);
     } catch (e) {
       setError((e as Error).message);

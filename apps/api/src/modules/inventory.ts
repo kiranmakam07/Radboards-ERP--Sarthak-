@@ -250,7 +250,7 @@ export function inventoryRouter(db: DB) {
       having ${q.include_zero} = 'true' or coalesce(sum(s.qty), 0) <> 0
        order by i.name
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'stock-on-hand');
+    sendList(req, res, data, 'stock-on-hand', { limit: q.limit });
   });
 
   /** Low stock: sellable on-hand below the reorder level (PRD 7.6). */
@@ -293,7 +293,7 @@ export function inventoryRouter(db: DB) {
          and (${q.to ?? null}::date is null or (m.posted_at at time zone 'Asia/Kolkata')::date <= ${q.to ?? null}::date)
        order by m.id desc
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'stock-movements');
+    sendList(req, res, data, 'stock-movements', { limit: q.limit });
   });
 
   r.post('/transfers', requirePerm('stock:write'), async (req, res) => {
@@ -318,7 +318,7 @@ export function inventoryRouter(db: DB) {
         left join users c on c.id = a.created_by left join users d on d.id = a.decided_by
        where (${q.status ?? null}::text is null or a.status::text = ${q.status ?? null})
        order by a.created_at desc limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'stock-adjustments');
+    sendList(req, res, data, 'stock-adjustments', { limit: q.limit });
   });
 
   r.get('/adjustments/:id', requirePerm('stock:read'), async (req, res) => {

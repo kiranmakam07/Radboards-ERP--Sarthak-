@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { DayBook, HsnSummary, PartyProfit, Tds } from '@/components/reports';
 import { ActionButton, Badge, Card, CsvLink, Form, Loading, Page, Table, date, inr, label , num } from '@/components/ui';
 import { post, put, qs, useGet } from '@/lib/api';
-import { useCan } from '@/lib/session';
+import { useCan, useSession } from '@/lib/session';
 import { rupees } from '@/components/charts';
 
 const TABS = [
@@ -39,6 +39,7 @@ export default function ReportsPage() {
     'Health check': '/accounting/reports/integrity',
   };
   const { data, loading, error, reload } = useGet<any>(paths[tab]);
+  const me = useSession().user;
   const can = useCan();
   // Each side of profit and loss and of the balance sheet can be seen as shares of its total.
   const amountList = (rows: any[], name: string) => (
@@ -148,7 +149,8 @@ export default function ReportsPage() {
         <Card title="Closing the year">
           <p className="muted small">
             Closing a year moves its profit or loss into Retained Earnings with one entry on 31 March, and locks the year so nothing
-            more can be posted into it. Years are closed in order, after they have ended. The latest closed year can be reopened to correct something.
+            more can be posted into it. Years are closed in order, after they have ended. The latest closed year can be reopened to correct
+            something: Accounts asks, with the reason, and the owner approves. Nobody can do both.
           </p>
           <Table rows={data.data} columns={[
             { key: 'fy', title: 'Year' },
@@ -160,8 +162,20 @@ export default function ReportsPage() {
             { key: 'actions', title: '', render: (r) => (!can('accounts:write') ? null : r.can_close ? (
               <ActionButton kind="primary" onClick={() => post(`/accounting/years/${r.fy}/close`)} onDone={reload}
                 confirm={`Close ${r.fy}? Its profit of ₹${inr(r.profit)} moves to Retained Earnings and the year is locked.`}>Close year</ActionButton>
-            ) : r.can_reopen ? (
-              <ActionButton onClick={() => post(`/accounting/years/${r.fy}/reopen`)} onDone={reload} confirm={`Reopen ${r.fy}? The closing entry will be reversed.`}>Reopen</ActionButton>
+            ) : r.can_reopen && !r.reopen_request ? (
+              <ActionButton onClick={() => {
+                const reason = window.prompt(`Why does ${r.fy} need reopening? The owner sees this before approving.`);
+                return reason ? post(`/accounting/years/${r.fy}/reopen-request`, { reason }) : Promise.resolve();
+              }} onDone={reload}>Ask to reopen</ActionButton>
+            ) : r.reopen_request ? <span className="muted small">Asked by {r.reopen_request.by}: {r.reopen_request.reason}. Waiting for the owner.</span> : null) },
+            { key: 'decide', title: '', render: (r) => (r.reopen_request && can('books:reopen') ? (
+              r.reopen_request.by_id === me?.id ? <span className="muted small">You asked; someone else approves.</span> : (
+                <>
+                  <ActionButton kind="primary" onClick={() => post(`/accounting/years/${r.fy}/reopen`)} onDone={reload}
+                    confirm={`Reopen ${r.fy}? ${r.reopen_request.by} asked: "${r.reopen_request.reason}". The closing entry is reversed and the year can be changed again.`}>Approve reopening</ActionButton>
+                  <ActionButton onClick={() => post(`/accounting/years/${r.fy}/reopen-request/drop`)} onDone={reload} confirm="Turn this request down?">Turn down</ActionButton>
+                </>
+              )
             ) : null) },
           ]} />
         </Card>

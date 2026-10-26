@@ -1,4 +1,5 @@
-import { createApp } from './app';
+import { createApp, defaultAppDeps } from './app';
+import { startScheduler } from './core/jobs';
 import { config } from './config';
 import { loadPermissionOverrides } from './core/settings';
 import { createDb, isPostgresUrl, type DbHandle } from './db/client';
@@ -46,6 +47,9 @@ const server = app.listen(config.port, () => {
     console.log(`  password: ${admin.password}\n`);
   }
 });
+
+// The background jobs (core/jobs.ts) run here every 15 minutes, unless another scheduler runs them (SCHEDULER=off).
+if (config.scheduler !== 'off') startScheduler(handle.db, defaultAppDeps);
 
 // The web app passes requests on to this server over connections it keeps open between requests.
 // Node closes an idle one after 5 seconds; if the web app picks it up again at that very moment the

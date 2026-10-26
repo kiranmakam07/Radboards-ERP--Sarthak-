@@ -10,7 +10,7 @@ import { getCompany } from '../core/settings';
 import { locationByType, lockItems, onHand, stockOut, valuation } from '../core/stock';
 import { rows, type DB } from '../db/client';
 import { jobWorkLines, jobWorkReceiptLines, jobWorkReceipts, jobWorks, locations, parties, stockMovements } from '../db/schema';
-import { badRequest, conflict, must } from '../lib/errors';
+import { assertOnce, badRequest, conflict, must } from '../lib/errors';
 import { emptyToNull, inTx, sendList, zDate, zId, zMoney, zQty, zQtyNonNeg, zText, type Ctx } from '../lib/http';
 
 /**
@@ -172,6 +172,7 @@ export async function receiveJobWork(ctx: Ctx, id: string, input: ReceiveInput) 
   must(job, 'Job work challan');
   if (job!.status === 'cancelled') throw conflict('This challan is cancelled');
   if (job!.status === 'closed') throw conflict('Everything sent on this challan is already accounted for');
+  assertOnce(input.lines, (l) => l.lineId, 'challan line');
   const to = await place(tx, input.toLocationId);
   if (input.receivedOn < job!.challanDate) throw badRequest(`This cannot be before the challan date (${formatDate(job!.challanDate)})`);
   if (input.receivedOn > istDate()) throw badRequest('The date cannot be in the future');

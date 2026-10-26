@@ -323,7 +323,10 @@ describe('C. A stock count, closing the year, and the period lock', () => {
     });
     expect((await expense(YESTERDAY).expect(409)).body.error.message).toMatch(/locked/);
     await expense(TODAY).expect(201);
-    await accounts.put('/api/settings/period-lock').send({ period_lock_date: null }).expect(200);
+    // The lock cannot go back into the year closed above: that would reopen it with one person.
+    const closed = (await accounts.get('/api/accounting/years').expect(200)).body.data.find((y: { status: string }) => y.status === 'closed');
+    expect((await accounts.put('/api/settings/period-lock').send({ period_lock_date: null }).expect(403)).body.error.message).toMatch(/closed year/);
+    await accounts.put('/api/settings/period-lock').send({ period_lock_date: closed.to }).expect(200);
     await expectBooksHealthy(c.w);
   });
 });

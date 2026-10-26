@@ -1,12 +1,14 @@
 import { sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { D, STATE_CODES, istDate, money } from '@radcore/shared';
+import { D, GST_RETURNS, GST_RETURN_LABELS, STATE_CODES, istDate, money, monthName } from '@radcore/shared';
+import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { getCompany } from '../core/settings';
 import { rows, type DB } from '../db/client';
-import { badRequest } from '../lib/errors';
-import { sendList, zDate } from '../lib/http';
+import { gstFilings } from '../db/schema';
+import { badRequest, conflict, must } from '../lib/errors';
+import { inTx, sendList, zDate, zId, zText } from '../lib/http';
 
 /**
  * GST returns, read straight from the documents: what we charged from issued invoices and credit
@@ -267,6 +269,50 @@ const zPeriod = z.object({ month: z.string().optional(), from: zDate.optional(),
 
 export function gstRouter(db: DB) {
   const r = Router();
+
+  // ---- returns filed (technical review, 26 Oct 2026) ----------------------------------------------
+  /** The months marked filed, newest first. A filed month is closed for the documents its return reports (core/gst-lock.ts). */
+  r.get('/filings', requirePerm('gst:read'), async (req, res) => {
+    sendList(req, res, await rows(db, sql`
+      select f.id, f.return_type, f.period, f.filed_on, f.arn, f.created_at, u.name as marked_by
+        from gst_filings f left join users u on u.id = f.created_by order by f.period desc, f.return_type`), 'gst-filings');
+  });
+
+  /** Mark a month's GSTR-1 or GSTR-3B as filed on the portal. */
+  r.post('/filings', requirePerm('gst:file'), async (req, res) => {
+    const b = z.object({
+      return_type: z.enum(GST_RETURNS),
+      period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'period must be YYYY-MM'),
+      filed_on: zDate,
+      arn: zText(30).optional(),
+    }).parse(req.body);
+    if (b.filed_on > istDate()) throw badRequest('The filing date cannot be in the future');
+    if (b.filed_on < `${b.period}-01`) throw badRequest('A return is filed after the month it is for');
+    const out = await inTx(db, req, async (ctx) => {
+      const [dup] = await ctx.tx.select({ id: gstFilings.id }).from(gstFilings)
+        .where(sql`${gstFilings.returnType} = ${b.return_type} and ${gstFilings.period} = ${b.period}`);
+      if (dup) throw conflict(`${GST_RETURN_LABELS[b.return_type]} for ${monthName(b.period)} is already marked filed`);
+      const [f] = await ctx.tx.insert(gstFilings).values({
+        returnType: b.return_type, period: b.period, filedOn: b.filed_on, arn: b.arn ?? null, createdBy: ctx.user!.id,
+      }).returning();
+      await audit(ctx, 'gst_filing', f!.id, 'create', null, f);
+      return f!;
+    });
+    res.status(201).json({ data: out });
+  });
+
+  /** Take a mark back (it was marked by mistake, or the return is being revised): the owner or an admin, with a reason. */
+  r.post('/filings/:id/undo', requirePerm('gst:unfile'), async (req, res) => {
+    const id = zId.parse(req.params.id);
+    const b = z.object({ reason: zText(300) }).parse(req.body);
+    await inTx(db, req, async (ctx) => {
+      const [f] = await ctx.tx.select().from(gstFilings).where(sql`${gstFilings.id} = ${id}`).for('update');
+      must(f, 'Filing');
+      await ctx.tx.delete(gstFilings).where(sql`${gstFilings.id} = ${id}`);
+      await audit(ctx, 'gst_filing', id, 'undo', f, { reason: b.reason });
+    });
+    res.json({ data: { ok: true } });
+  });
 
   r.get('/gstr3b', requirePerm('gst:read'), async (req, res) => {
     const p = period(zPeriod.parse(req.query));

@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import { can, D, type Decimal, GST_RATES, isIsoDate, isValidGstin, normaliseGstin, normalisePhone, type Permission, type Role } from '@radcore/shared';
 import type { DB } from '../db/client';
-import { AppError } from './errors';
+import { AppError, forbidden } from './errors';
 import { toXlsx } from './xlsx';
 
 /**
@@ -229,7 +229,21 @@ export function maskPii(req: Request, rowsIn: Record<string, unknown>[]): Record
 }
 
 /** Every list/report can be exported with ?format=csv or ?format=xlsx (PRD 7.11). */
-export function sendList(req: Request, res: Response, rowsIn: Record<string, unknown>[], name = 'export') {
+/** Keys that make a row someone's contact or bank details. */
+const PERSONAL_KEYS = new Set([...PHONE_KEYS, ...ADDRESS_KEYS, 'email', 'bank_account_no', 'pan']);
+
+/**
+ * `paged`: the list was asked for at most `limit` rows. When it comes back full, the answer says so (more: true),
+ * and the screen offers the rest instead of stopping there without a word (technical review, 26 Oct 2026).
+ */
+export function sendList(req: Request, res: Response, rowsIn: Record<string, unknown>[], name = 'export', paged?: { limit: number }) {
+  // A list of people's phone numbers, emails or bank accounts as a file takes the whole list out of the system: that
+  // needs lists:export (technical review, 26 Oct 2026: "any salesperson can download the whole lead list"). The same
+  // list on screen is unaffected.
+  const asFile = req.query.format === 'csv' || req.query.format === 'xlsx';
+  if (asFile && req.user && !can(req.user.role, 'lists:export') && rowsIn.some((r) => Object.keys(r).some((k) => PERSONAL_KEYS.has(k) && r[k] != null && r[k] !== ''))) {
+    throw forbidden('This list holds people\'s phone numbers or other contact details, so downloading it is kept to the owner, marketing, accounts and HR.');
+  }
   // A file skips res.json, so the keys hideCosts hides are taken out here as well.
   const hidden = res.locals.hiddenKeys as ReadonlySet<string> | undefined;
   const data = maskPii(req, hidden ? (withoutKeys(rowsIn, hidden) as Record<string, unknown>[]) : rowsIn);
@@ -245,7 +259,7 @@ export function sendList(req: Request, res: Response, rowsIn: Record<string, unk
     res.send(`﻿${toCsv(data)}`);
     return;
   }
-  res.json({ data });
+  res.json({ data, ...(paged && data.length >= paged.limit ? { more: true, limit: paged.limit } : {}) });
 }
 
 export type { Permission };

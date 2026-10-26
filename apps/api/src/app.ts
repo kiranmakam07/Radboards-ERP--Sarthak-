@@ -2,10 +2,13 @@ import cookieParser from 'cookie-parser';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
+import { idempotent } from './lib/idempotency';
 import { config } from './config';
 import { authenticate, requireAuth } from './core/auth';
 import type { DB } from './db/client';
-import { AppError, errorHandler, forbidden } from './lib/errors';
+import { AppError, errorHandler, forbidden, setProblemReporter } from './lib/errors';
+import { recordProblem } from './core/alerts';
+import { healthRouter, jobsHookRouter } from './modules/health';
 import { hideCosts } from './lib/http';
 import { readMailbox } from './lib/mailbox';
 import { accountingRouter } from './modules/accounting';
@@ -115,6 +118,13 @@ export const defaultAppDeps: AppDeps = { ...defaultDeps, readMailbox: mailboxRea
 
 export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   const app = express();
+  // A request that fails unexpectedly is kept and, when an alert channel is set, reported (core/alerts.ts).
+  setProblemReporter((err, req) => {
+    void recordProblem(db, {
+      source: `${req.method} ${req.originalUrl.split('?')[0]}`, message: (err as Error)?.message ?? String(err),
+      detail: (err as Error)?.stack ?? null, userId: req.user?.id ?? null,
+    });
+  });
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
   // PGlite returns int8 as BigInt; JSON cannot carry that.
@@ -154,6 +164,7 @@ export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   const hookLimiter = rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: true, legacyHeaders: false,
     skip: () => config.env === 'test' });
   app.use('/api/hooks/bank-mail', hookLimiter, bankMailHookRouter(db, deps));
+  app.use('/api/hooks/jobs', hookLimiter, jobsHookRouter(db, deps));
   app.use('/api/hooks/form', express.urlencoded({ extended: false, limit: '100kb' }));
   app.use('/api/hooks', hookLimiter, hooksRouter(db, deps));
 
@@ -162,6 +173,8 @@ export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   app.use('/api/auth', authRouter(db));
   // Everything below needs a signed-in user; each route then names its own permission.
   app.use('/api', requireAuth);
+  // A save repeated with the same key (a double click, a retry) is done once (lib/idempotency.ts).
+  app.use('/api', idempotent(db));
 
   // ---- 6. the modules ----
   // Cost price only for costs:read (lib/http.ts hideCosts). On the stock screens a plain value is stock at cost.
@@ -170,6 +183,7 @@ export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   // Admin and masters
   app.use('/api/files', filesRouter(db));
   app.use('/api/users', usersRouter(db));
+  app.use('/api/settings/health', healthRouter(db));
   app.use('/api/settings', settingsRouter(db));
   app.use('/api/masters', mastersRouter(db));
   app.use('/api/items', itemsRouter(db));

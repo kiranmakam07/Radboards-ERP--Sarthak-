@@ -62,7 +62,7 @@ export function unitsRouter(db: DB) {
          and (${q.in_stock ?? null}::text is null or (u.location_id is not null and u.status in ('available', 'demo')) = (${q.in_stock ?? null} = 'true'))
        order by u.created_at desc, u.serial_no
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'units');
+    sendList(req, res, data, 'units', { limit: q.limit });
   });
 
   /** The owner's daily list: batteries whose storage charge is due. */

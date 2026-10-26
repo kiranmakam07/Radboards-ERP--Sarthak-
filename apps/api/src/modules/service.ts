@@ -477,7 +477,7 @@ export function serviceRouter(db: DB) {
        where (${q.status ?? null}::text is null or j.status::text = ${q.status ?? null})
          and (${q.open ?? null}::text is null or (j.status not in ('delivered', 'cancelled')) = (${q.open ?? null} = 'true'))
          and (${like}::text is null or j.job_no ilike ${like} or u.serial_no ilike ${like} or p.name ilike ${like} or p.phone ilike ${like})
-       order by j.created_at desc limit ${q.limit} offset ${q.offset}`), 'job-cards');
+       order by j.created_at desc limit ${q.limit} offset ${q.offset}`), 'job-cards', { limit: q.limit });
   });
 
   r.get('/technicians', requirePerm('service:read'), async (_req, res) => {

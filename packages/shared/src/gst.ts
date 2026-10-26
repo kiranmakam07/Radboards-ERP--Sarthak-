@@ -19,6 +19,14 @@ export const STATE_CODES: Record<string, string> = {
   '38': 'Ladakh', '97': 'Other Territory',
 };
 
+/**
+ * A party outside India: no GST state (96 is the GST portal's code for other countries). A supplier here is an
+ * import: its invoice carries no Indian GST and none is claimed from it (the IGST on goods is paid at customs).
+ */
+export const OUTSIDE_INDIA = '96';
+/** Where a party can be: one of India's GST states, or outside India. The company's own state is always in India. */
+export const PARTY_STATE_CODES: Record<string, string> = { ...STATE_CODES, [OUTSIDE_INDIA]: 'Outside India' };
+
 /** The GST rates an item can carry: the slabs (40% since 22 Sep 2025) and the 0.25% and 3% special rates. */
 export const GST_RATES = [0, 0.25, 3, 5, 12, 18, 28, 40] as const;
 

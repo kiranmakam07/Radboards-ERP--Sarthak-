@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  round2, D, LANDED_COST_KINDS, PO_STATUSES, ROLES, can, addDays, computeLine, computeTotals, isInterState, istDate, money, qty as fmtQty,
+  round2, D, LANDED_COST_KINDS, OUTSIDE_INDIA, PO_STATUSES, ROLES, can, addDays, computeLine, computeTotals, isInterState, istDate, money, qty as fmtQty,
   type LandedCostKind, type LineTax,
 } from '@radcore/shared';
 import { audit } from '../core/audit';
@@ -10,6 +10,7 @@ import { requirePerm } from '../core/auth';
 import { postJournal, reverseJournals, type JLine } from '../core/journal';
 import { nextNumber } from '../core/numbering';
 import { getCompany } from '../core/settings';
+import { assertGstOpen } from '../core/gst-lock';
 import { locationByType, lockItems, stockIn, stockOut } from '../core/stock';
 import { taxRateOn } from '../core/taxrates';
 import { batchFor, cleanSerials, needsSerials, unitsIn } from '../core/units';
@@ -18,7 +19,7 @@ import {
   goodsReceiptLines, goodsReceipts, importShipments, poApprovalLimits, items, jobWorks, landedCostLines, parties, purchaseBillLines, purchaseBills, purchaseOrderLines,
   purchaseOrders, purchaseReturnLines, purchaseReturns,
 } from '../db/schema';
-import { badRequest, conflict, must } from '../lib/errors';
+import { assertOnce, badRequest, conflict, must } from '../lib/errors';
 import {
   emptyToNull, fxOf, inTx, sendList, zCurrency, zDate, zFxRate, zId, zListQuery, zMoney, zQty, zQtyNonNeg, zSerials, zSignedMoney, zText, type Ctx,
 } from '../lib/http';
@@ -53,10 +54,19 @@ async function loadSupplier(tx: DB, id: string) {
 type PoLineInput = { itemId: string; qty: string; rate?: string | null };
 
 /**
+ * Buying from outside India (a supplier whose state is "Outside India", or a document in a foreign currency) is an
+ * import. The supplier's invoice carries no Indian GST, so none is charged on its PO, bill or debit note and none
+ * is claimed from it (technical review, 26 Oct 2026: bills from foreign suppliers were claiming GST credit). The
+ * IGST on imported goods is paid at customs and claimed there, on the import shipment (modules/imports.ts).
+ * Services bought from abroad owe GST under reverse charge, which is not handled yet.
+ */
+const isImport = (supplier: { stateCode: string | null }, currency: string) => supplier.stateCode === OUTSIDE_INDIA || currency !== 'INR';
+
+/**
  * PO lines, at the GST rate in force on the PO date (core/taxrates.ts). A PO in a foreign currency
  * gives its rates in that currency; they are kept in rupees at the PO's rate.
  */
-async function buildPoLines(tx: DB, input: PoLineInput[], date: string, fxRate: string = '1') {
+async function buildPoLines(tx: DB, input: PoLineInput[], date: string, fxRate: string = '1', noGst = false) {
   if (input.length === 0) throw badRequest('Add at least one item');
   const found = await tx.select().from(items).where(inArray(items.id, [...new Set(input.map((l) => l.itemId))]));
   const byId = new Map(found.map((i) => [i.id, i]));
@@ -66,7 +76,7 @@ async function buildPoLines(tx: DB, input: PoLineInput[], date: string, fxRate: 
     if (!item) throw badRequest('Item not found');
     // Goods come in through the PO -> inward flow; services are booked as a bill or expense.
     if (!item.isStockItem) throw badRequest(`${item.name} is a service. Purchase orders are for goods.`);
-    const { gstRate } = await taxRateOn(tx, item, date);
+    const gstRate = noGst ? '0' : (await taxRateOn(tx, item, date)).gstRate;
     const rate = l.rate != null ? round2(D(l.rate).times(fxRate)) : D(item.purchaseCost);
     lines.push({ itemId: item.id, qty: fmtQty(l.qty), rate: money(rate), gstRate, sort: idx });
   }
@@ -82,9 +92,9 @@ export async function createPurchaseOrder(
   },
 ): Promise<PO> {
   const { tx } = ctx;
-  await loadSupplier(tx, input.supplierId);
+  const supplier = await loadSupplier(tx, input.supplierId);
   const fx = fxOf(input.currency ?? 'INR', input.fxRate);
-  const lines = await buildPoLines(tx, input.lines, input.orderDate, fx.fxRate);
+  const lines = await buildPoLines(tx, input.lines, input.orderDate, fx.fxRate, isImport(supplier, fx.currency));
   const { number } = await nextNumber(tx, 'purchase_order', input.orderDate);
   const [po] = await tx
     .insert(purchaseOrders)
@@ -138,6 +148,7 @@ export async function createGoodsReceipt(
     throw conflict(`PO ${po!.poNo} is ${po!.status.replace('_', ' ')}. Goods can only be received against a sent PO.`);
   }
   if (input.lines.length === 0) throw badRequest('Enter the quantity received for at least one item');
+  assertOnce(input.lines, (l) => l.poLineId, 'PO line');
   const poLines = await tx.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, po!.id));
   const { number } = await nextNumber(tx, 'goods_receipt', istDate());
   const [grn] = await tx
@@ -283,6 +294,8 @@ export async function createPurchaseBill(
   const inter = isInterState(company.state_code, supplier.stateCode ?? company.state_code);
 
   const fx = fxOf(input.currency ?? 'INR', input.fxRate);
+  const imported = isImport(supplier, fx.currency);
+  await assertGstOpen(tx, input.billDate, 'purchases', 'no bill can be dated in it');
   const resolved = input.lines.map((l) => {
     const pol = l.poLineId ? poLines.find((p) => p.id === l.poLineId) : undefined;
     if (l.poLineId && !pol) throw badRequest('A bill line points to a PO line that is not on this purchase order');
@@ -302,13 +315,14 @@ export async function createPurchaseBill(
     const item = itemById.get(l.itemId);
     if (!item) throw badRequest('Item not found');
     if (item.isStockItem && !l.pol) throw badRequest(`${item.name} is a stock item: bill it against its purchase order line`);
-    const tax = computeLine({ qty: l.qty, rate: l.rate, gstRate: l.pol?.gstRate ?? item.gstRate }, inter, false);
+    const gstRate = imported ? '0' : (l.pol?.gstRate ?? item.gstRate);
+    const tax = computeLine({ qty: l.qty, rate: l.rate, gstRate }, inter, false);
     computed.push(tax);
     if (item.isStockItem) stockTaxable = stockTaxable.plus(tax.taxableValue);
     else serviceTaxable = serviceTaxable.plus(tax.taxableValue);
     lineRows.push({
       billId: '', poLineId: l.pol?.id ?? null, itemId: item.id, description: l.description ?? item.name, hsnSac: item.hsnSac,
-      qty: fmtQty(l.qty), rate: money(l.rate), taxableValue: money(tax.taxableValue), gstRate: l.pol?.gstRate ?? item.gstRate,
+      qty: fmtQty(l.qty), rate: money(l.rate), taxableValue: money(tax.taxableValue), gstRate,
       cgst: money(tax.cgst), sgst: money(tax.sgst), igst: money(tax.igst), lineTotal: money(tax.lineTotal), sort: idx,
     });
     if (l.pol) {
@@ -406,6 +420,8 @@ export async function cancelPurchaseBill(ctx: Ctx, id: string, reason: string): 
   must(bill, 'Purchase bill');
   if (bill!.status !== 'posted') throw conflict('Bill is already cancelled');
   if (bill!.docType !== 'bill') throw conflict('A debit note is cancelled by reversing its supplier return');
+  // Already in a filed GSTR-3B: cancelling would take back input tax that return claimed.
+  await assertGstOpen(tx, bill!.billDate, 'purchases', `${bill!.billNo} cannot be cancelled`);
   const [o] = await rows<{ allocated: string; debited: string }>(tx, sql`select allocated::text, debited::text from v_bill_outstanding where bill_id = ${id}`);
   if (D(o?.allocated ?? 0).gt(0)) throw conflict('Payments are allocated to this bill. Cancel them first.');
   if (D(o?.debited ?? 0).gt(0)) throw conflict('This bill has a debit note against it and cannot be cancelled');
@@ -437,6 +453,7 @@ export async function createSupplierReturn(
   const [grn] = await tx.select().from(goodsReceipts).where(eq(goodsReceipts.id, grnId)).for('update');
   must(grn, 'Goods receipt');
   if (grn!.status !== 'inwarded') throw conflict('QC must be recorded before rejects can be returned');
+  if (input.lines) assertOnce(input.lines, (l) => l.grnLineId, 'received line');
   const grnLines = await tx.select().from(goodsReceiptLines).where(eq(goodsReceiptLines.grnId, grnId));
   const want = (input.lines
     ? input.lines.map((l) => {
@@ -464,6 +481,8 @@ export async function createSupplierReturn(
   const company = await getCompany(tx);
   const inter = isInterState(company.state_code, supplier.stateCode ?? company.state_code);
   const date = input.date ?? istDate();
+  await assertGstOpen(tx, date, 'purchases', 'no debit note can be dated in it');
+  const imported = isImport(supplier, bill.currency);
   const rejectedId = await locationByType(tx, 'rejected');
   const itemRows = await lockItems(tx, want.map((w) => w.line.itemId));
   const itemById = new Map(itemRows.map((i) => [i.id, i]));
@@ -480,7 +499,7 @@ export async function createSupplierReturn(
   let stockValue = D(0);
   for (const [idx, w] of want.entries()) {
     const item = itemById.get(w.line.itemId)!;
-    const gstRate = poLines.find((p) => p.id === w.line.poLineId)?.gstRate ?? item.gstRate;
+    const gstRate = imported ? '0' : (poLines.find((p) => p.id === w.line.poLineId)?.gstRate ?? item.gstRate);
     // Out at the same PO rate it came in at, so the stock value and the debit note agree exactly.
     const out = await stockOut(ctx, {
       itemId: item.id, locationId: rejectedId, qty: w.qty, unitCostOverride: w.line.rate, movementType: 'purchase_return_out',
@@ -551,7 +570,7 @@ export function purchasingRouter(db: DB) {
          and (${like}::text is null or po.po_no ilike ${like} or s.name ilike ${like})
        order by po.order_date desc, po.created_at desc
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'purchase-orders');
+    sendList(req, res, data, 'purchase-orders', { limit: q.limit });
   });
 
   /** How many purchase orders are at each status: the counters above the list. */
@@ -701,7 +720,7 @@ export function purchasingRouter(db: DB) {
                select 1 from goods_receipt_lines l where l.grn_id = g.id and coalesce(l.rejected_qty, 0) > l.returned_qty))
        order by g.received_at desc
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'goods-receipts');
+    sendList(req, res, data, 'goods-receipts', { limit: q.limit });
   });
 
   r.get('/receipts/:id', requirePerm('purchasing:read'), async (req, res) => {
@@ -811,7 +830,7 @@ export function purchasingRouter(db: DB) {
          and (${like}::text is null or b.bill_no ilike ${like} or b.supplier_invoice_no ilike ${like} or s.name ilike ${like})
        order by b.bill_date desc, b.created_at desc
        limit ${q.limit} offset ${q.offset}`);
-    sendList(req, res, data, 'purchase-bills');
+    sendList(req, res, data, 'purchase-bills', { limit: q.limit });
   });
 
   r.get('/bills/:id', requirePerm('purchasing:read'), async (req, res) => {

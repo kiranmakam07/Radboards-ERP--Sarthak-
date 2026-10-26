@@ -3,7 +3,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  D, addDays, amountInWords, computePay, istDate, lastDayOfMonth, money, monthName, weekdayOf, type PayrollRules,
+  D, addDays, amountInWords, computePay, fyOf, fyRange, istDate, lastDayOfMonth, leaveEntitlement, money, monthName, weekdayOf, type PayrollRules,
 } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requireAuth, requirePerm } from '../core/auth';
@@ -11,7 +11,8 @@ import { assertMoneyAccount, postJournal, reverseJournals } from '../core/journa
 import { getCompany, getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { advanceRecoveries, employees, payrollRuns, payslips, salaryAdvances } from '../db/schema';
-import { badRequest, conflict, must } from '../lib/errors';
+import { AppError, badRequest, conflict, forbidden, must } from '../lib/errors';
+import { recordSalary } from './hr';
 import { emptyToNull, inTx, sendList, zDate, zId, zMoney, zMoneyPos, zMonth, wantsFile, type Ctx } from '../lib/http';
 
 /**
@@ -47,6 +48,29 @@ async function advancesDue(tx: DB, upTo: string) {
      order by a.given_on, a.created_at`);
 }
 
+type Revision = { employee_id: string; effective_from: string; monthly_salary: string };
+
+/**
+ * The monthly salary a month is paid at: each day at the salary in force that day (salary_revisions), averaged over
+ * the month, so a raise from the 16th counts for the second half only and a past month keeps the salary it had.
+ * Days before the first salary was recorded take that first salary (the person was not on the rolls then anyway).
+ */
+function salaryForMonth(own: Revision[], from: string, to: string, days: number): string {
+  let total = D(0);
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    const inForce = [...own].reverse().find((r) => r.effective_from <= d) ?? own[0]!;
+    total = total.plus(inForce.monthly_salary);
+  }
+  return money(total.div(days).toDecimalPlaces(2));
+}
+
+/** Nobody approves, changes or pays a month with their own salary in it (technical review, 26 Oct 2026). */
+async function assertNotOwnPay(ctx: Ctx, runId: string, what: string): Promise<void> {
+  const [mine] = await rows<{ employee_name: string }>(ctx.tx, sql`
+    select s.employee_name from payslips s join employees e on e.id = s.employee_id where s.run_id = ${runId} and e.user_id = ${ctx.user?.id ?? null} limit 1`);
+  if (mine) throw forbidden(`Your own salary is in this month, so someone else must ${what} it`);
+}
+
 /** Work out (or work out again) every payslip of a draft run from the register as it stands now. */
 export async function calculateRun(ctx: Ctx, run: Run): Promise<void> {
   const { tx } = ctx;
@@ -54,9 +78,19 @@ export async function calculateRun(ctx: Ctx, run: Run): Promise<void> {
   const { from, to, days } = monthSpan(run.month);
   const rules = await getSetting(tx, 'payroll_rules');
   const { weekly_off: weeklyOff } = await getSetting(tx, 'attendance_rules');
+  // Everyone on the rolls in the month with a salary recorded by its last day.
   const staff = await tx.select().from(employees)
-    .where(sql`${employees.monthlySalary} is not null and ${employees.monthlySalary} > 0 and ${employees.joinDate} <= ${to}::date and (${employees.leftOn} is null or ${employees.leftOn} >= ${from}::date)`)
+    .where(sql`${employees.joinDate} <= ${to}::date and (${employees.leftOn} is null or ${employees.leftOn} >= ${from}::date)
+      and exists (select 1 from salary_revisions r where r.employee_id = ${employees.id} and r.effective_from <= ${to}::date)`)
     .orderBy(asc(employees.department), asc(employees.name));
+  const revisions = await rows<Revision>(tx, sql`
+    select employee_id, effective_from::text, monthly_salary::text from salary_revisions where effective_from <= ${to}::date order by employee_id, effective_from`);
+  // Leave is paid up to the person's allowance for the leave year (the financial year); beyond it, it is not.
+  const leaveYear = fyRange(fyOf(from));
+  const leavePolicy = await getSetting(tx, 'annual_leave_days');
+  const leaveBefore = new Map((await rows<{ employee_id: string; n: number }>(tx, sql`
+    select employee_id, count(*)::int as n from attendance
+     where status = 'leave' and date >= ${leaveYear.from}::date and date < ${from}::date group by employee_id`)).map((r) => [r.employee_id, r.n]));
   const marked = await rows<{ employee_id: string; date: string; status: string }>(tx, sql`
     select employee_id, date::text as date, status::text as status from attendance where date between ${from}::date and ${to}::date`);
   const byDay = new Map(marked.map((m) => [`${m.employee_id}:${m.date}`, m.status]));
@@ -75,16 +109,21 @@ export async function calculateRun(ctx: Ctx, run: Run): Promise<void> {
       else if (weeklyOff.includes(weekdayOf(d))) c.autoOff += 1;
       else c.notMarked += 1;
     }
-    const paidDays = c.present + 0.5 * c.half_day + c.leave + c.weekly_off + c.holiday + c.autoOff;
+    const monthlySalary = salaryForMonth(revisions.filter((r) => r.employee_id === e.id), from, to, days);
+    if (D(monthlySalary).lte(0)) continue;
+    const entitled = leaveEntitlement(e.annualLeaveDays === null ? leavePolicy : Number(e.annualLeaveDays), e.joinDate, leaveYear);
+    const paidLeave = Math.max(0, Math.min(c.leave, entitled - (leaveBefore.get(e.id) ?? 0)));
+    const unpaidLeave = c.leave - paidLeave;
+    const paidDays = c.present + 0.5 * c.half_day + paidLeave + c.weekly_off + c.holiday + c.autoOff;
     const old = kept.get(e.id);
     const pay = computePay({
-      monthlySalary: e.monthlySalary!, daysInMonth: days, paidDays, pf: e.pfApplicable, esic: e.esicApplicable, ptMonthly: e.ptMonthly, tdsMonthly: e.tdsMonthly,
+      monthlySalary, daysInMonth: days, paidDays, pf: e.pfApplicable, esic: e.esicApplicable, ptMonthly: e.ptMonthly, tdsMonthly: e.tdsMonthly,
       otherEarning: old?.otherEarning ?? '0', otherDeduction: old?.otherDeduction ?? '0',
       advanceDue: money(due.filter((a) => a.employee_id === e.id).reduce((s, a) => s.plus(a.due), D(0))),
     }, rules);
     const values = {
       employeeName: e.name, employeeNo: e.employeeNo, department: e.department, designation: e.designation, bankAccountNo: e.bankAccountNo, bankIfsc: e.bankIfsc,
-      monthlySalary: e.monthlySalary!, daysInMonth: days, paidDays: paidDays.toFixed(1), present: c.present, halfDays: c.half_day, leaveDays: c.leave,
+      monthlySalary, daysInMonth: days, paidDays: paidDays.toFixed(1), present: c.present, halfDays: c.half_day, leaveDays: c.leave, unpaidLeave: unpaidLeave.toFixed(1),
       weeklyOff: c.weekly_off + c.autoOff, holidays: c.holiday, absent: c.absent, notMarked: c.notMarked,
       grossEarned: pay.grossEarned, basicEarned: pay.basicEarned, allowanceEarned: pay.allowanceEarned, pfEmployee: pay.pfEmployee, pfEmployer: pay.pfEmployer,
       esicEmployee: pay.esicEmployee, esicEmployer: pay.esicEmployer, pt: pay.pt, tds: pay.tds, advanceRecovery: pay.advanceRecovery, netPay: pay.netPay, updatedAt: new Date(),
@@ -108,6 +147,7 @@ export async function approveRun(ctx: Ctx, id: string, opts: { evenIfUnmarked?: 
   const [run] = await tx.select().from(payrollRuns).where(eq(payrollRuns.id, id)).for('update');
   must(run, 'Salary run');
   await calculateRun(ctx, run!); // from the register as it is at this moment
+  await assertNotOwnPay(ctx, id, 'approve');
   const slips = await tx.select().from(payslips).where(eq(payslips.runId, id));
   if (slips.length === 0) throw badRequest('Nobody has a salary set, so there is nothing to approve');
   const unmarked = slips.filter((s) => s.notMarked > 0);
@@ -159,6 +199,7 @@ export async function reopenRun(ctx: Ctx, id: string): Promise<Run> {
   must(run, 'Salary run');
   if (run!.status === 'paid') throw conflict('These salaries have been paid. Correct the difference in next month\'s run, as an addition or a deduction.');
   if (run!.status !== 'approved') throw conflict('Only an approved month can be reopened');
+  await assertNotOwnPay(ctx, id, 'reopen');
   await reverseJournals(ctx, 'payroll', id, istDate(), `Reopened: salaries for ${monthName(run!.month)}`);
   await tx.execute(sql`delete from advance_recoveries where payslip_id in (select id from payslips where run_id = ${id})`);
   const [updated] = await tx.update(payrollRuns).set({ status: 'draft', bookedOn: null, approvedBy: null, approvedAt: null, updatedAt: new Date() }).where(eq(payrollRuns.id, id)).returning();
@@ -172,6 +213,7 @@ export async function payRun(ctx: Ctx, id: string, input: { accountId: string; p
   const [run] = await tx.select().from(payrollRuns).where(eq(payrollRuns.id, id)).for('update');
   must(run, 'Salary run');
   if (run!.status !== 'approved') throw conflict(run!.status === 'paid' ? 'These salaries have already been paid' : 'Approve the salaries before paying them');
+  await assertNotOwnPay(ctx, id, 'record the payment of');
   await assertMoneyAccount(tx, input.accountId);
   const slips = await tx.select().from(payslips).where(eq(payslips.runId, id));
   const net = sum(slips, (s) => s.netPay);
@@ -195,7 +237,7 @@ async function payslipDocument(tx: DB, slip: Slip) {
   const [run] = await tx.select().from(payrollRuns).where(eq(payrollRuns.id, slip.runId));
   const deductions = D(slip.pfEmployee).plus(slip.esicEmployee).plus(slip.pt).plus(slip.tds).plus(slip.advanceRecovery).plus(slip.otherDeduction);
   return {
-    ...slip, token: undefined, month: run!.month, month_name: monthName(run!.month), run_status: run!.status, paid_on: run!.paidOn,
+    ...slip, token: undefined, tokenExpiresAt: undefined, month: run!.month, month_name: monthName(run!.month), run_status: run!.status, paid_on: run!.paidOn,
     total_earnings: money(D(slip.grossEarned).plus(slip.otherEarning)), total_deductions: money(deductions),
     net_in_words: amountInWords(slip.netPay), company: await getCompany(tx),
   };
@@ -226,12 +268,14 @@ export function payrollRouter(db: DB) {
     const id = zId.parse(req.params.id);
     const b = z.object({
       monthly_salary: emptyToNull(zMoney).nullable(), pf_applicable: z.boolean(), esic_applicable: z.boolean(), pt_monthly: zMoney, tds_monthly: zMoney,
+      salary_from: zDate.optional(),
       bank_account_no: emptyToNull(z.string().trim().regex(/^\d{6,20}$/, 'must be 6 to 20 digits')).nullable(),
       bank_ifsc: emptyToNull(z.string().trim().toUpperCase().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'must look like HDFC0001234')).nullable(),
     }).parse(req.body);
     const row = await inTx(db, req, async (ctx) => {
       const [before] = await ctx.tx.select().from(employees).where(eq(employees.id, id)).for('update');
       must(before, 'Employee');
+      await recordSalary(ctx, before!, b.monthly_salary, b.salary_from ?? istDate());
       const [after] = await ctx.tx.update(employees).set({
         monthlySalary: b.monthly_salary, pfApplicable: b.pf_applicable, esicApplicable: b.esic_applicable, ptMonthly: b.pt_monthly, tdsMonthly: b.tds_monthly,
         bankAccountNo: b.bank_account_no, bankIfsc: b.bank_ifsc, updatedAt: new Date(),
@@ -378,6 +422,8 @@ export function payrollRouter(db: DB) {
       const [slip] = await ctx.tx.select().from(payslips).where(eq(payslips.id, id)).for('update');
       must(slip, 'Payslip');
       const [run] = await ctx.tx.select().from(payrollRuns).where(eq(payrollRuns.id, slip!.runId)).for('update');
+      const [own] = await ctx.tx.select({ id: employees.id }).from(employees).where(and(eq(employees.id, slip!.employeeId), eq(employees.userId, ctx.user!.id)));
+      if (own) throw forbidden('Someone else must add to or take off your own salary');
       await ctx.tx.update(payslips).set({ otherEarning: b.other_earning, otherDeduction: b.other_deduction, note: b.note, updatedAt: new Date() }).where(eq(payslips.id, id));
       await calculateRun(ctx, run!);
       await audit(ctx, 'payslip', id, 'adjust', { otherEarning: slip!.otherEarning, otherDeduction: slip!.otherDeduction }, { otherEarning: b.other_earning, otherDeduction: b.other_deduction, note: b.note });
@@ -442,8 +488,13 @@ export function payrollRouter(db: DB) {
       must(slip, 'Payslip');
       const [run] = await ctx.tx.select().from(payrollRuns).where(eq(payrollRuns.id, slip!.runId));
       if (run!.status === 'draft') throw conflict('Approve the salaries first; a draft payslip can still change');
-      const token = slip!.token ?? crypto.randomBytes(16).toString('base64url');
-      if (!slip!.token) await ctx.tx.update(payslips).set({ token }).where(eq(payslips.id, id));
+      // A link lasts PAYSLIP_LINK_DAYS (technical review, 26 Oct 2026: links "never expire"). Sent again while it
+      // still works, the same link goes; after that, a new one, and the old one stops working.
+      const live = slip!.token && slip!.tokenExpiresAt && slip!.tokenExpiresAt > new Date();
+      const token = live ? slip!.token! : crypto.randomBytes(16).toString('base64url');
+      if (!live) {
+        await ctx.tx.update(payslips).set({ token, tokenExpiresAt: new Date(Date.now() + PAYSLIP_LINK_DAYS * 86_400_000) }).where(eq(payslips.id, id));
+      }
       const [e] = await ctx.tx.select({ phone: employees.phone }).from(employees).where(eq(employees.id, slip!.employeeId));
       return { token, phone: e?.phone ?? null, name: slip!.employeeName, month_name: monthName(run!.month), net_pay: slip!.netPay };
     });
@@ -452,6 +503,9 @@ export function payrollRouter(db: DB) {
 
   return r;
 }
+
+/** How long a payslip link sent on WhatsApp keeps working. */
+export const PAYSLIP_LINK_DAYS = 30;
 
 // ---------------------------------------------------------------------------
 // Payslips as their owner sees them
@@ -475,10 +529,13 @@ export function publicPayslipRouter(db: DB) {
   r.get('/:token', async (req, res) => {
     const [slip] = await db.select().from(payslips).where(eq(payslips.token, String(req.params.token)));
     if (!slip) throw must(null, 'This link');
+    if (!slip.tokenExpiresAt || slip.tokenExpiresAt <= new Date()) throw new AppError(410, 'expired', 'This payslip link has expired. Ask HR to send it again.');
     const doc = await payslipDocument(db, slip);
     // A month taken back to draft is being corrected: its payslips are not shown until it is approved again.
     if (doc.run_status === 'draft') throw must(null, 'This link');
-    res.json({ data: { ...doc, createdBy: undefined, runId: undefined, employeeId: undefined } });
+    // A forwarded link must not give away the bank account: only its last four digits show.
+    const bank = slip.bankAccountNo ? `${'•'.repeat(Math.max(0, slip.bankAccountNo.length - 4))}${slip.bankAccountNo.slice(-4)}` : null;
+    res.json({ data: { ...doc, bankAccountNo: bank, tokenExpiresAt: undefined, createdBy: undefined, runId: undefined, employeeId: undefined } });
   });
   return r;
 }
