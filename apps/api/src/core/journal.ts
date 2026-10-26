@@ -24,7 +24,8 @@ export type SystemAccount =
   | 'capital' | 'opening_equity' | 'retained_earnings'
   | 'sales' | 'other_income' | 'cogs' | 'purchases' | 'stock_adjustment' | 'round_off'
   | 'staff_advances' | 'salaries_payable' | 'pf_payable' | 'esic_payable' | 'pt_payable' | 'tds_payable' | 'salaries'
-  | 'tds_receivable' | 'tds_payable_vendors' | 'job_work_accrued' | 'forex_gain_loss';
+  | 'tds_receivable' | 'tds_payable_vendors' | 'job_work_accrued' | 'forex_gain_loss'
+  | 'warranty_expense';
 
 export type JLine = {
   /** A system key, or an explicit account id (cash/bank accounts, expense accounts, manual journals). */

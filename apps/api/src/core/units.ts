@@ -211,6 +211,19 @@ export async function batchFor(
   return made!.id;
 }
 
+/**
+ * A unit's status changes where it stands (a customer's vehicle taken into the workshop, and given
+ * back): the unit and every part fitted inside it take the new status, and its history records why.
+ */
+export async function setUnitStatus(ctx: Ctx, unitId: string, status: UnitStatus, e: { event: string; refType: string; refId: string; note?: string | null }) {
+  const [u] = await ctx.tx.select().from(units).where(eq(units.id, unitId)).for('update');
+  if (!u) throw badRequest('Unit not found');
+  if (u.status !== status) await ctx.tx.update(units).set({ status, updatedAt: new Date() }).where(eq(units.id, unitId));
+  await unitEvent(ctx, { unitId, event: e.event, from: { locationId: u.locationId, status: u.status }, to: { locationId: u.locationId, status }, refType: e.refType, refId: e.refId, note: e.note });
+  await cascadeStatus(ctx, unitId, status, e.refType, e.refId);
+  return u;
+}
+
 /** Serialised stock must be moved by serial: the quantity on the line is checked against the serials. */
 export function needsSerials(item: Pick<Item, 'isSerialised' | 'isStockItem'>): boolean {
   return item.isSerialised && item.isStockItem;

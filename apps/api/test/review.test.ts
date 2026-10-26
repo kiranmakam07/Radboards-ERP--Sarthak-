@@ -41,7 +41,8 @@ describe('a review copy', () => {
       select (select count(*) from users)::int as users, (select count(*) from leads)::int as leads, (select count(*) from items)::int as items,
              (select count(*) from employees)::int as employees, (select count(*) from projects)::int as projects,
              (select count(*) from allocations)::int as allocations, (select count(*) from applicants)::int as applicants`);
-    expect(counts).toEqual({ users: ROLES.length, leads: 4, items: 9, employees: 5, projects: 2, allocations: 8, applicants: 6 });
+    // The workshop sample (db/demo-service.ts) adds labour and brake pads, and two walk-in buyers of scooters as leads.
+    expect(counts).toEqual({ users: ROLES.length, leads: 6, items: 11, employees: 5, projects: 2, allocations: 8, applicants: 6 });
 
     const app = createApp(handle.db);
     await request(app).post('/api/auth/login').send({ identifier: '9000000006', password: 'radcore-demo' }).expect(401);
@@ -50,7 +51,7 @@ describe('a review copy', () => {
     expect(login.body).toMatchObject({ user: { role: 'admin' }, sample_data: true });
     expect((await admin.get('/api/auth/me').expect(200)).body.sample_data).toBe(true);
     for (const [i, role] of ROLES.entries()) {
-      const res = await request(app).post('/api/auth/login').send({ identifier: `900000000${i}`, password: PASSWORD }).expect(200);
+      const res = await request(app).post('/api/auth/login').send({ identifier: `9000000${String(i).padStart(3, '0')}`, password: PASSWORD }).expect(200);
       expect(res.body.user.role).toBe(role);
     }
 

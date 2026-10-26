@@ -9,7 +9,7 @@ import {
   INTERVAL_UNITS, INTERVIEW_MODES, INTERVIEW_RESULTS, INTERVIEW_STATUSES, INVOICE_DOC_TYPES, INVOICE_STATUSES, ITEM_TYPES,
   LEAD_ACTIVITY_TYPES, LEAD_STAGES, LOCATION_TYPES, MOVEMENT_TYPES, OPENING_STATUSES, ORDER_STATUSES, PARTY_TYPES,
   PAYMENT_DIRECTIONS, PAYMENT_MODES, PO_STATUSES, PROJECT_STATUSES, REJECT_REASONS, ROLES, TASK_FREQUENCIES, TASK_STATUSES,
-  RESERVATION_STATUSES, UNIT_STATUSES,
+  RESERVATION_STATUSES, UNIT_STATUSES, CLAIM_STATUSES, JOB_CARD_STATUSES, JOB_LINE_KINDS,
 } from '@radcore/shared';
 
 // Money is numeric(12,2) in INR, quantities numeric(12,3) (PRD section 8).
@@ -1237,7 +1237,7 @@ export const files = pgTable('files', {
   size: integer('size').notNull(),
   sha256: text('sha256').notNull(),
   ...stamps,
-}, (t) => [check('files_purpose_chk', sql`${t.purpose} in ('resume', 'bill', 'item_image', 'share', 'other')`)]);
+}, (t) => [check('files_purpose_chk', sql`${t.purpose} in ('resume', 'bill', 'item_image', 'share', 'other', 'service')`)]);
 
 /**
  * A file sent to a lead through a link of its own, and whether they have opened it. The token is
@@ -1785,3 +1785,129 @@ export const maintenanceLogs = pgTable('maintenance_logs', {
   nextDueOn: date('next_due_on'),
   ...stamps,
 }, (t) => [index('maintenance_logs_asset_idx').on(t.assetId)]);
+
+// ----------------------------------------------------------------------------
+// Service and warranty: units in the workshop (modules/service.ts)
+// ----------------------------------------------------------------------------
+export const jobCardStatusEnum = pgEnum('job_card_status', JOB_CARD_STATUSES);
+export const jobLineKindEnum = pgEnum('job_line_kind', JOB_LINE_KINDS);
+export const claimStatusEnum = pgEnum('claim_status', CLAIM_STATUSES);
+
+/**
+ * How long an item is under warranty from the day it was sold: a vehicle, or a component fitted in one
+ * (a battery pack is an item too, with its own rule). Optional limits in km and in battery charge cycles.
+ * One active rule per item; a new one replaces it and the old one stays on record.
+ */
+export const warrantyRules = pgTable('warranty_rules', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  itemId: uuid('item_id').notNull().references(() => items.id),
+  months: integer('months').notNull(),
+  kmLimit: integer('km_limit'),
+  cycleLimit: integer('cycle_limit'),
+  active: boolean('active').notNull().default(true),
+  ...stamps,
+}, (t) => [
+  uniqueIndex('warranty_rules_item_uq').on(t.itemId).where(sql`${t.active}`),
+  check('warranty_rules_limits_chk', sql`${t.months} > 0 and (${t.kmLimit} is null or ${t.kmLimit} > 0) and (${t.cycleLimit} is null or ${t.cycleLimit} > 0)`),
+]);
+
+/** The workshop's list of faults: a code, the component it is in, and what it means. */
+export const faultCodes = pgTable('fault_codes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  code: text('code').notNull().unique(),
+  component: text('component').notNull(),
+  description: text('description').notNull(),
+  active: boolean('active').notNull().default(true),
+  ...stamps,
+});
+
+/** One visit of a unit (a vehicle, or a component on its own) to the workshop, from taking it in to handing it back. */
+export const jobCards = pgTable('job_cards', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  jobNo: text('job_no').notNull().unique(),
+  entityId: entityId(),
+  unitId: uuid('unit_id').notNull().references(() => units.id),
+  partyId: uuid('party_id').notNull().references(() => parties.id),
+  /** The workshop place (a service bay) the parts are taken from. */
+  locationId: uuid('location_id').notNull().references(() => locations.id),
+  status: jobCardStatusEnum('status').notNull().default('open'),
+  complaint: text('complaint').notNull(),
+  diagnosis: text('diagnosis'),
+  technicianId: uuid('technician_id').references(() => users.id),
+  /** Readings at intake, for the warranty rules with a km or a charge-cycle limit. */
+  odometerKm: integer('odometer_km'),
+  batteryCycles: integer('battery_cycles'),
+  promisedAt: ts('promised_at'),
+  closedAt: ts('closed_at'),
+  /** The link the customer opens to see and approve the estimate (/e/<token>). */
+  estimateToken: text('estimate_token').unique(),
+  approvedAt: ts('approved_at'),
+  /** 'link' (the customer, from the estimate link), 'staff' (recorded by the workshop) or 'warranty' (nothing to pay). */
+  approvedVia: text('approved_via'),
+  /** The unit's status before it came in, given back when it goes out. */
+  unitStatusBefore: unitStatusEnum('unit_status_before'),
+  taxInclusive: boolean('tax_inclusive').notNull().default(true),
+  salesOrderId: uuid('sales_order_id').references(() => salesOrders.id),
+  invoiceId: uuid('invoice_id').references(() => invoices.id),
+  cancelReason: text('cancel_reason'),
+  ...stamps,
+}, (t) => [
+  index('job_cards_unit_idx').on(t.unitId),
+  index('job_cards_status_idx').on(t.status),
+]);
+
+/** A part or some labour on a job card. Warranty lines cost the customer nothing. */
+export const jobCardLines = pgTable('job_card_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  jobCardId: uuid('job_card_id').notNull().references(() => jobCards.id),
+  kind: jobLineKindEnum('kind').notNull(),
+  itemId: uuid('item_id').notNull().references(() => items.id),
+  qty: qty('qty').notNull(),
+  rate: money('rate').notNull(),
+  gstRate: pct('gst_rate').notNull(),
+  isWarranty: boolean('is_warranty').notNull().default(false),
+  /** For a part: how much has gone from the workshop shelf onto the unit, and what it cost. */
+  issuedQty: qty('issued_qty').notNull().default('0'),
+  issuedValue: money('issued_value').notNull().default('0'),
+  /** Serials fitted from this line, for a part kept by serial. */
+  serials: jsonb('serials').$type<string[]>(),
+  sort: integer('sort').notNull().default(0),
+  ...stamps,
+}, (t) => [
+  index('job_card_lines_job_idx').on(t.jobCardId),
+  check('job_card_lines_qty_chk', sql`${t.qty} > 0 and ${t.issuedQty} >= 0 and ${t.issuedQty} <= ${t.qty}`),
+]);
+
+/** Photos and documents on a job card (files of purpose 'service'). */
+export const jobCardMedia = pgTable('job_card_media', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  jobCardId: uuid('job_card_id').notNull().references(() => jobCards.id),
+  fileId: uuid('file_id').notNull().references(() => files.id),
+  caption: text('caption'),
+  ...stamps,
+}, (t) => [index('job_card_media_job_idx').on(t.jobCardId)]);
+
+/** A fault found on a job, in the unit or in a component inside it. */
+export const jobCardFaults = pgTable('job_card_faults', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  jobCardId: uuid('job_card_id').notNull().references(() => jobCards.id),
+  faultCodeId: uuid('fault_code_id').notNull().references(() => faultCodes.id),
+  unitId: uuid('unit_id').references(() => units.id),
+  notes: text('notes'),
+  ...stamps,
+}, (t) => [index('job_card_faults_job_idx').on(t.jobCardId)]);
+
+/** A warranty claim on the supplier of a failed unit, with the evidence from its job card. */
+export const supplierClaims = pgTable('supplier_claims', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  jobCardId: uuid('job_card_id').notNull().references(() => jobCards.id),
+  supplierId: uuid('supplier_id').notNull().references(() => parties.id),
+  unitId: uuid('unit_id').notNull().references(() => units.id),
+  status: claimStatusEnum('status').notNull().default('draft'),
+  /** File ids: the photos and documents sent with the claim. */
+  evidence: jsonb('evidence').$type<string[]>(),
+  amount: money('amount'),
+  creditNoteRef: text('credit_note_ref'),
+  notes: text('notes'),
+  ...stamps,
+}, (t) => [index('supplier_claims_job_idx').on(t.jobCardId)]);

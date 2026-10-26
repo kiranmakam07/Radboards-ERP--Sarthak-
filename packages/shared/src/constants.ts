@@ -10,7 +10,7 @@
  */
 
 // New roles are added at the end: the database enum only ever grows, and the order is relied on by the demo logins.
-export const ROLES = ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin', 'hr', 'operations'] as const;
+export const ROLES = ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin', 'hr', 'operations', 'technician', 'service_manager'] as const;
 export type Role = (typeof ROLES)[number];
 
 // A franchisee buys from us like a dealer does (the dealer price list, credit terms), under its own name.
@@ -72,7 +72,8 @@ export function canMoveLead(from: LeadStage, to: LeadStage): boolean {
 export const LEAD_ACTIVITY_TYPES = ['call', 'whatsapp', 'meeting', 'note', 'enquiry', 'stage_change'] as const;
 export type LeadActivityType = (typeof LEAD_ACTIVITY_TYPES)[number];
 
-export const CHANNELS = ['store', 'dealer', 'shopify', 'amazon', 'flipkart', 'website'] as const;
+// 'service': the bill for chargeable work on a job card (modules/service.ts).
+export const CHANNELS = ['store', 'dealer', 'shopify', 'amazon', 'flipkart', 'website', 'service'] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 export const ORDER_STATUSES = ['draft', 'confirmed', 'delivered', 'invoiced', 'cancelled'] as const;
@@ -92,10 +93,46 @@ export const BILL_STATUSES = ['posted', 'cancelled'] as const;
 
 export const MOVEMENT_TYPES = [
   'opening', 'purchase_in', 'sale_out', 'sales_return_in', 'purchase_return_out', 'transfer', 'adjustment', 'job_work',
+  // Parts fitted on a job card, from the workshop shelf (modules/service.ts).
+  'service_issue',
 ] as const;
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
 
 export const ADJUSTMENT_STATUSES = ['pending', 'approved', 'rejected'] as const;
+
+// ---------------------------------------------------------------------------
+// Service and warranty: job cards for units in the workshop (modules/service.ts)
+// ---------------------------------------------------------------------------
+/** open -> diagnosed -> estimate_sent -> approved -> in_progress -> ready -> delivered, or cancelled. */
+export const JOB_CARD_STATUSES = ['open', 'diagnosed', 'estimate_sent', 'approved', 'in_progress', 'ready', 'delivered', 'cancelled'] as const;
+export type JobCardStatus = (typeof JOB_CARD_STATUSES)[number];
+export const JOB_CARD_STATUS_LABELS: Record<JobCardStatus, string> = {
+  open: 'Open', diagnosed: 'Diagnosed', estimate_sent: 'Estimate sent', approved: 'Approved', in_progress: 'In progress',
+  ready: 'Ready', delivered: 'Delivered', cancelled: 'Cancelled',
+};
+/**
+ * The order the brief gives, plus two ways back: an estimate changed after it was sent, and more work found
+ * after approval, both go back to diagnosed so that the customer approves again. Work with nothing
+ * chargeable (all under warranty) needs no estimate. Delivery is its own step: it makes the bill.
+ */
+export const JOB_CARD_TRANSITIONS: Record<JobCardStatus, readonly JobCardStatus[]> = {
+  open: ['diagnosed', 'cancelled'],
+  diagnosed: ['estimate_sent', 'approved', 'cancelled'],
+  estimate_sent: ['approved', 'diagnosed', 'cancelled'],
+  approved: ['in_progress', 'diagnosed', 'cancelled'],
+  in_progress: ['ready', 'diagnosed', 'cancelled'],
+  ready: ['delivered'],
+  delivered: [],
+  cancelled: [],
+};
+export const canMoveJobCard = (from: JobCardStatus, to: JobCardStatus) => JOB_CARD_TRANSITIONS[from].includes(to);
+export const JOB_LINE_KINDS = ['part', 'labour'] as const;
+export const CLAIM_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'credited'] as const;
+export type ClaimStatus = (typeof CLAIM_STATUSES)[number];
+/** draft -> sent -> accepted / rejected; accepted -> credited. */
+export const CLAIM_TRANSITIONS: Record<ClaimStatus, readonly ClaimStatus[]> = {
+  draft: ['sent'], sent: ['accepted', 'rejected'], accepted: ['credited'], rejected: [], credited: [],
+};
 
 /**
  * Where one serialised unit (a vehicle, a battery pack, a motor) stands. available, demo and reserved
@@ -208,14 +245,14 @@ export const PERMISSIONS = {
   'masters:manage': ['admin'],
   'audit:read': ['admin', 'owner'],
 
-  'items:read': ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin'],
+  'items:read': ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin', 'technician', 'service_manager'],
   // What stock cost us (purchase cost, average cost, stock value, margins). Everyone else sees selling prices only.
   'costs:read': ['owner', 'stores', 'accounts', 'admin'],
   'items:write': ['admin'],
   'pricelists:write': ['admin'],
   'pricelists:approve': ['owner', 'admin'],
 
-  'parties:read': ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin'],
+  'parties:read': ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin', 'technician', 'service_manager'],
   // Adding a new customer or supplier in the middle of the work (a walk-in at the counter, a new supplier on a bill).
   'parties:write': ['store', 'sales', 'stores', 'accounts', 'admin'],
   // Changing one afterwards, and its price list, credit limit and payment terms.
@@ -247,7 +284,7 @@ export const PERMISSIONS = {
   'stock:approve': ['owner', 'admin'],
   // Serialised units: looking them up (the counter and sales pick serials when they sell), and describing
   // them (fitting a component, a battery's BPAN, firmware, its storage charge).
-  'units:read': ['owner', 'store', 'sales', 'stores', 'accounts', 'operations', 'admin'],
+  'units:read': ['owner', 'store', 'sales', 'stores', 'accounts', 'operations', 'admin', 'technician', 'service_manager'],
   'units:write': ['stores', 'operations', 'admin'],
   // Job work: material sent to an outside worker on a challan, and what comes back.
   'jobwork:read': ['owner', 'stores', 'accounts', 'operations', 'admin'],
@@ -278,6 +315,13 @@ export const PERMISSIONS = {
   // Operations: everyone can see and finish the tasks given to them; these are for running the whole board.
   'ops:read': ['owner', 'operations', 'admin'],
   'ops:manage': ['operations', 'admin'],
+
+  // Service and warranty. The technician works the job cards (and never sees cost price); the service
+  // manager also sets the warranty rules and fault codes, changes what is under warranty, and handles
+  // the claims made on suppliers.
+  'service:read': ['owner', 'stores', 'accounts', 'technician', 'service_manager', 'admin'],
+  'service:write': ['technician', 'service_manager', 'admin'],
+  'service:approve': ['owner', 'service_manager', 'admin'],
 } as const satisfies Record<string, readonly Role[]>;
 
 // A new permission is one line in the table above, named in a route with requirePerm('area:action')

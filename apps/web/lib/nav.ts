@@ -65,6 +65,12 @@ export const NAV: NavSection[] = [
     { href: '/hr/attendance', label: 'Attendance', perm: 'hr:read' },
     { href: '/hr/payroll', label: 'Payroll', perm: 'payroll:read' },
   ] },
+  { group: 'Service', icon: 'service', blurb: 'Job cards, warranty and supplier claims', items: [
+    { href: '/service', label: 'Job cards', perm: 'service:read' },
+    { href: '/service/claims', label: 'Supplier claims', perm: 'service:read' },
+    { href: '/service/reports', label: 'Service reports', perm: 'service:read' },
+    { href: '/service/setup', label: 'Warranty & fault codes', perm: 'service:read' },
+  ] },
   { group: 'Operations', icon: 'operations', blurb: 'Projects, tasks, routines and assets', items: [
     { href: '/dashboards/ops', label: 'Operations dashboard', perm: 'ops:read' },
     { href: '/ops/projects', label: 'Projects', perm: 'ops:read' },

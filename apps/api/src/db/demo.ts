@@ -10,6 +10,7 @@ import { captureLead, sourceIdByName } from '../modules/leads';
 import { fromShopify, takeOrder, type OnlineOrder } from '../modules/online';
 import { createParty } from '../modules/parties';
 import { rows, sql, type DB } from './client';
+import { seedService } from './demo-service';
 import {
   adSpends, allocations, assets, campaigns, channelEvents, items, jobOpenings, maintenanceSchedules, projects, taskTemplates, tasks, units, users,
 } from './schema';
@@ -28,7 +29,8 @@ const gstin = (state: string, pan: string) => `${state}${pan}1Z${gstinCheckChar(
 export async function seedDemo(db: DB, password: string = DEMO_PASSWORD): Promise<void> {
   const hash = await hashPassword(password);
   await db.insert(users).values(
-    ROLES.map((role, i) => ({ name: role === 'hr' ? 'Demo HR' : `Demo ${role[0]!.toUpperCase()}${role.slice(1)}`, phone: `+91900000000${i}`, passwordHash: hash, role })),
+    // Phones 9000000000, 9000000001, ... one per role in the order of ROLES (9000000010 for the eleventh).
+    ROLES.map((role, i) => ({ name: role === 'hr' ? 'Demo HR' : `Demo ${role[0]!.toUpperCase()}${role.slice(1).replace('_', ' ')}`, phone: `+919000000${String(i).padStart(3, '0')}`, passwordHash: hash, role })),
   );
   const [admin] = await rows<{ id: string; name: string; phone: string }>(db, sql`select id, name, phone from users where role = 'admin' limit 1`);
 
@@ -128,6 +130,7 @@ export async function seedDemo(db: DB, password: string = DEMO_PASSWORD): Promis
 
     await seedPeopleAndOperations(ctx);
     await seedOnlineOrders(ctx);
+    await seedService(ctx);
   });
   console.log(`Demo data loaded (${istDate()}). Sign in with phone 9000000006 (admin) and the demo password.`);
 }

@@ -339,8 +339,12 @@ export async function deliverOrder(
   orderId: string,
   input: {
     locationId?: string | null;
-    /** Partial delivery, or a serialised item: which lines, how much, and which serials. */
-    lines?: { orderLineId: string; qty: string; serials?: string[] | null }[];
+    /**
+     * Partial delivery, or a serialised item: which lines, how much, and which serials. `issuedUnitCost`
+     * marks parts that already left stock on a job card (modules/service.ts): the delivery records them
+     * at that cost and moves no stock, since their cost was booked when they were fitted.
+     */
+    lines?: { orderLineId: string; qty: string; serials?: string[] | null; issuedUnitCost?: string }[];
     notes?: string | null;
     date?: string;
   },
@@ -349,11 +353,11 @@ export async function deliverOrder(
   const { order, lines } = await lockOrder(tx, orderId);
   if (order.status !== 'confirmed') throw conflict(`Order ${order.orderNo} is ${order.status}; only a confirmed order can be delivered`);
 
-  const want: { line: OrderLine; qty: Decimal; serials?: string[] | null }[] = input.lines
+  const want: { line: OrderLine; qty: Decimal; serials?: string[] | null; issuedUnitCost?: string }[] = input.lines
     ? input.lines.map((l) => {
         const line = lines.find((x) => x.id === l.orderLineId);
         if (!line) throw badRequest('Line does not belong to this order');
-        return { line, qty: D(l.qty), serials: l.serials };
+        return { line, qty: D(l.qty), serials: l.serials, issuedUnitCost: l.issuedUnitCost };
       })
     : lines.map((line) => ({ line, qty: D(line.qty).minus(line.deliveredQty) })).filter((x) => x.qty.gt(0));
   if (want.length === 0) throw conflict('Nothing left to deliver on this order');
@@ -365,8 +369,12 @@ export async function deliverOrder(
   const locationId = input.locationId ?? (await locationByType(tx, order.channel === 'store' ? 'showroom' : 'stores'));
   const [location] = await tx.select().from(locations).where(eq(locations.id, locationId));
   if (!location || !location.active) throw badRequest('Location not found');
-  if (location.type === 'rejected') throw badRequest('Rejected stock cannot be sold');
-  if ((UNSELLABLE_LOCATION_TYPES as readonly string[]).includes(location.type)) throw badRequest(`Goods at ${location.name} cannot be delivered from there`);
+  // Parts already fitted on a job card left the workshop shelf then: where they are "delivered from" is only a record.
+  const alreadyIssued = want.every((w) => w.issuedUnitCost !== undefined);
+  if (!alreadyIssued) {
+    if (location.type === 'rejected') throw badRequest('Rejected stock cannot be sold');
+    if ((UNSELLABLE_LOCATION_TYPES as readonly string[]).includes(location.type)) throw badRequest(`Goods at ${location.name} cannot be delivered from there`);
+  }
 
   const date = input.date ?? istDate();
   await expireReservations(ctx);
@@ -383,9 +391,11 @@ export async function deliverOrder(
     const item = itemById.get(w.line.itemId)!;
     let unitCost = D(0);
     // A serialised item is handed over by serial: each named unit leaves the shelf and is marked sold.
-    const serials = needsSerials(item) ? cleanSerials(item, w.qty, w.serials) : null;
+    const serials = w.issuedUnitCost === undefined && needsSerials(item) ? cleanSerials(item, w.qty, w.serials) : null;
     let soldUnits: string[] = [];
-    if (serials) {
+    if (w.issuedUnitCost !== undefined) {
+      unitCost = D(w.issuedUnitCost);
+    } else if (serials) {
       // A unit reserved can go only on the order it is reserved for.
       const held = await rows<{ serial_no: string; sales_order_id: string }>(tx, sql`
         select u.serial_no, r.sales_order_id from units u join stock_reservations r on r.unit_id = u.id and r.status = 'open'
@@ -415,7 +425,7 @@ export async function deliverOrder(
     if (soldUnits.length) {
       await tx.update(units).set({ soldDeliveryLineId: dl!.id, soldInvoiceLineId: null }).where(inArray(units.id, soldUnits));
     }
-    if (item.isStockItem) await fulfil(ctx, w.line.id, locationId, w.qty, soldUnits);
+    if (item.isStockItem && w.issuedUnitCost === undefined) await fulfil(ctx, w.line.id, locationId, w.qty, soldUnits);
     await tx
       .update(salesOrderLines)
       .set({ deliveredQty: fmtQty(D(w.line.deliveredQty).plus(w.qty)) })

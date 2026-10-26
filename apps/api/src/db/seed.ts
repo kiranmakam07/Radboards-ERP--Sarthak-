@@ -64,6 +64,8 @@ const COA: Coa[] = [
   { code: '5100', name: 'Cost of Goods Sold', type: 'expense', key: 'cogs', parent: '5000' },
   { code: '5110', name: 'Purchases (Non-stock)', type: 'expense', key: 'purchases', parent: '5000' },
   { code: '5120', name: 'Stock Adjustment', type: 'expense', key: 'stock_adjustment', parent: '5000' },
+  // Parts fitted free under warranty; what a supplier credits back on a claim comes off it.
+  { code: '5130', name: 'Warranty Expense', type: 'expense', key: 'warranty_expense', parent: '5000' },
   { code: '5200', name: 'Rent', type: 'expense', parent: '5000' },
   { code: '5210', name: 'Salaries & Wages', type: 'expense', key: 'salaries', parent: '5000' },
   { code: '5220', name: 'Electricity & Utilities', type: 'expense', parent: '5000' },

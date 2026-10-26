@@ -232,6 +232,13 @@
       "when": 1792688731113,
       "tag": "0032_einvoice_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793017313779,
+      "tag": "0033_service",
+      "breakpoints": true
     }
   ]
 }

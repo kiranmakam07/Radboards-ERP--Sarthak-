@@ -98,7 +98,8 @@ with sample customers, stock, leads, staff, tasks and a project, and one sign-in
 | Marketing | 9000000001 | Admin | 9000000006 |
 | Store | 9000000002 | HR | 9000000007 |
 | Sales | 9000000003 | Operations | 9000000008 |
-| Stores | 9000000004 | | |
+| Stores | 9000000004 | Technician | 9000000009 |
+| | | Service manager | 9000000010 |
 
 All use `DEMO_PASSWORD`. A banner on every screen says it is sample data. Everything works as in
 the real system and is saved, so reviewers can enter things and see them the next day.

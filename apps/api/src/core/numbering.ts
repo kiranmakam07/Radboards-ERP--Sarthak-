@@ -35,6 +35,7 @@ export const SERIES = {
   stock_adjustment: { prefix: (fy) => `SA/${fy}/`, pad: 5, perFy: true },
   job_work: { prefix: (fy) => `JW/${fy}/`, pad: 5, perFy: true },
   job_work_receipt: { prefix: (fy) => `JWR/${fy}/`, pad: 5, perFy: true },
+  job_card: { prefix: (fy) => `JC/${fy}/`, pad: 5, perFy: true },
   lead: { prefix: () => 'L', pad: 0, perFy: false, start: 1001 },
   applicant: { prefix: () => 'A', pad: 0, perFy: false, start: 1001 },
   employee: { prefix: () => 'EMP', pad: 3, perFy: false },

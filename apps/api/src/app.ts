@@ -36,6 +36,7 @@ import { salesRouter } from './modules/sales';
 import { publicSharesRouter, sharesRouter } from './modules/shares';
 import { tdsRouter } from './modules/tds';
 import { unitsRouter } from './modules/units';
+import { publicEstimateRouter, serviceRouter } from './modules/service';
 
 /**
  * The API's front door. createApp builds the Express app: every router in the system is mounted
@@ -141,6 +142,7 @@ export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   app.use('/api/public/shares', publicLimiter, publicSharesRouter(db));
   app.use('/api/public/invoices', publicLimiter, publicInvoiceRouter(db));
   app.use('/api/public/payslips', publicLimiter, publicPayslipRouter(db));
+  app.use('/api/public/estimates', publicLimiter, publicEstimateRouter(db));
   app.use('/api/public', publicLimiter, publicLeadsRouter(db));
 
   // ---- 2. webhooks: no sign-in, each request proves itself with a signature or a key ----
@@ -184,6 +186,9 @@ export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   app.use('/api/stock', inventoryRouter(db));
   app.use('/api/jobwork', jobWorkRouter(db));
   app.use('/api/units', unitsRouter(db));
+  // The workshop. What a fitted part cost stays with costs:read, as everywhere else.
+  app.use('/api/service', hideCosts(['issued_value']));
+  app.use('/api/service', serviceRouter(db));
   // Accounts
   app.use('/api/payments', collectRouter(db));
   app.use('/api/payments', paymentsRouter(db));
