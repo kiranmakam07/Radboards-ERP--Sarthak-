@@ -41,8 +41,9 @@ describe('a review copy', () => {
       select (select count(*) from users)::int as users, (select count(*) from leads)::int as leads, (select count(*) from items)::int as items,
              (select count(*) from employees)::int as employees, (select count(*) from projects)::int as projects,
              (select count(*) from allocations)::int as allocations, (select count(*) from applicants)::int as applicants`);
-    // The workshop sample (db/demo-service.ts) adds labour and brake pads, and two walk-in buyers of scooters as leads.
-    expect(counts).toEqual({ users: ROLES.length, leads: 6, items: 11, employees: 5, projects: 2, allocations: 8, applicants: 6 });
+    // The workshop sample (db/demo-service.ts) adds labour and brake pads and two walk-in buyers of scooters as leads;
+    // the imports sample (db/demo-imports.ts) adds cells and a freight service.
+    expect(counts).toEqual({ users: ROLES.length, leads: 6, items: 13, employees: 5, projects: 2, allocations: 8, applicants: 6 });
 
     const app = createApp(handle.db);
     await request(app).post('/api/auth/login').send({ identifier: '9000000006', password: 'radcore-demo' }).expect(401);

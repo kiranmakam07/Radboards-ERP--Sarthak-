@@ -36,6 +36,7 @@ export const productFields = (categories: { id: string; name: string }[], { cost
   { name: 'barcode', label: 'Barcode' },
   { name: 'is_serialised', label: 'Kept by serial number (vehicles, battery packs): each unit is received, moved and sold by its serial', type: 'checkbox' },
   { name: 'charge_every_days', label: 'Storage charge every (days)', type: 'number', help: 'Batteries: the owner is told when one is due' },
+  { name: 'weight_kg', label: 'Weight of one (kg)', type: 'number', help: 'For spreading the freight of an import by weight' },
 ];
 
 /** The first letters of a product's name, shown where it has no picture yet. */

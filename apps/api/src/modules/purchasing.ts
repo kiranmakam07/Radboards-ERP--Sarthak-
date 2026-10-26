@@ -1,9 +1,9 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  round2, D, PO_STATUSES, addDays, computeLine, computeTotals, isInterState, istDate, money, qty as fmtQty,
-  type LineTax,
+  round2, D, LANDED_COST_KINDS, PO_STATUSES, addDays, computeLine, computeTotals, isInterState, istDate, money, qty as fmtQty,
+  type LandedCostKind, type LineTax,
 } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
@@ -15,8 +15,8 @@ import { taxRateOn } from '../core/taxrates';
 import { batchFor, cleanSerials, needsSerials, unitsIn } from '../core/units';
 import { rows, type DB } from '../db/client';
 import {
-  goodsReceiptLines, goodsReceipts, items, jobWorks, parties, purchaseBillLines, purchaseBills, purchaseOrderLines, purchaseOrders,
-  purchaseReturnLines, purchaseReturns,
+  goodsReceiptLines, goodsReceipts, importShipments, items, jobWorks, landedCostLines, parties, purchaseBillLines, purchaseBills, purchaseOrderLines,
+  purchaseOrders, purchaseReturnLines, purchaseReturns,
 } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
 import {
@@ -237,7 +237,11 @@ export async function qcGoodsReceipt(ctx: Ctx, grnId: string, input: { lines: Qc
 // ---------------------------------------------------------------------------
 // Purchase bills
 // ---------------------------------------------------------------------------
-export type BillLineInput = { poLineId?: string | null; itemId?: string | null; qty: string; rate: string; description?: string | null };
+export type BillLineInput = {
+  poLineId?: string | null; itemId?: string | null; qty: string; rate: string; description?: string | null;
+  /** On a bill for an import shipment: what kind of landed cost this service line is (freight, cha, port...). */
+  landedKind?: LandedCostKind | null;
+};
 
 /**
  * Supplier invoice (purchase bill). Posts Dr Goods-Received-Not-Billed (or Purchases for
@@ -253,6 +257,8 @@ export async function createPurchaseBill(
     currency?: string; fxRate?: string | null;
     /** The job work challan this bill is the job worker's charge for. */
     jobWorkId?: string | null;
+    /** The import shipment this bill (a forwarder's, a customs agent's) is a cost of landing. */
+    importShipmentId?: string | null;
   },
 ): Promise<Bill> {
   const { tx } = ctx;
@@ -334,6 +340,16 @@ export async function createPurchaseBill(
     jobWorkCleared = open.lte(0) ? D(0) : serviceTaxable.lt(open) ? serviceTaxable : open;
   }
 
+  // A forwarder's or customs agent's bill for an import: its service lines are that shipment's landed cost, so
+  // they go to Landed Costs Clearing (and from there onto the goods), not to Purchases.
+  if (input.importShipmentId) {
+    const [shipment] = await tx.select().from(importShipments).where(eq(importShipments.id, input.importShipmentId)).for('update');
+    must(shipment, 'Import shipment');
+    if (input.jobWorkId) throw badRequest('A bill is for a job work challan or for an import shipment, not both');
+    if (serviceTaxable.lte(0)) throw badRequest('A bill for an import shipment needs at least one service line (freight, clearing, port charges)');
+  }
+  const landedCleared = input.importShipmentId ? serviceTaxable : D(0);
+
   const { number, fy } = await nextNumber(tx, 'purchase_bill', input.billDate);
   const [bill] = await tx
     .insert(purchaseBills)
@@ -344,10 +360,17 @@ export async function createPurchaseBill(
       taxableTotal: money(totals.taxableTotal), cgstTotal: money(totals.cgstTotal), sgstTotal: money(totals.sgstTotal),
       igstTotal: money(totals.igstTotal), roundOff: money(roundOff), grandTotal: money(grand),
       mismatches: mismatches.length ? mismatches : null, notes: input.notes ?? null, createdBy: ctx.user?.id ?? null,
-      jobWorkId: input.jobWorkId ?? null, jobWorkCleared: money(jobWorkCleared),
+      jobWorkId: input.jobWorkId ?? null, jobWorkCleared: money(jobWorkCleared), importShipmentId: input.importShipmentId ?? null,
     })
     .returning();
   await tx.insert(purchaseBillLines).values(lineRows.map((l) => ({ ...l, billId: bill!.id })));
+  if (input.importShipmentId) {
+    const costs = resolved.map((l, idx) => ({ l, idx, item: itemById.get(l.itemId)! })).filter((x) => !x.item.isStockItem);
+    await tx.insert(landedCostLines).values(costs.map((x) => ({
+      shipmentId: input.importShipmentId!, kind: x.l.landedKind ?? 'other', description: x.l.description ?? x.item.name,
+      amount: money(computed[x.idx]!.taxableValue), purchaseBillId: bill!.id, createdBy: ctx.user?.id ?? null,
+    })));
+  }
 
   await postJournal(ctx, {
     date: input.billDate,
@@ -357,7 +380,8 @@ export async function createPurchaseBill(
     lines: [
       { account: 'grni', debit: stockTaxable },
       { account: 'job_work_accrued', partyId: supplier.id, debit: jobWorkCleared },
-      { account: 'purchases', debit: serviceTaxable.minus(jobWorkCleared) },
+      { account: 'landed_cost_clearing', debit: landedCleared },
+      { account: 'purchases', debit: serviceTaxable.minus(jobWorkCleared).minus(landedCleared) },
       { account: 'input_cgst', debit: totals.cgstTotal },
       { account: 'input_sgst', debit: totals.sgstTotal },
       { account: 'input_igst', debit: totals.igstTotal },
@@ -379,6 +403,11 @@ export async function cancelPurchaseBill(ctx: Ctx, id: string, reason: string): 
   const [o] = await rows<{ allocated: string; debited: string }>(tx, sql`select allocated::text, debited::text from v_bill_outstanding where bill_id = ${id}`);
   if (D(o?.allocated ?? 0).gt(0)) throw conflict('Payments are allocated to this bill. Cancel them first.');
   if (D(o?.debited ?? 0).gt(0)) throw conflict('This bill has a debit note against it and cannot be cancelled');
+  // A shipment's costs from this bill go with it, unless they are already on the goods.
+  const [applied] = await tx.select({ id: landedCostLines.id }).from(landedCostLines)
+    .where(and(eq(landedCostLines.purchaseBillId, id), isNotNull(landedCostLines.applicationId))).limit(1);
+  if (applied) throw conflict('The costs on this bill are already on the goods of its import shipment, so it cannot be cancelled');
+  await tx.delete(landedCostLines).where(eq(landedCostLines.purchaseBillId, id));
   const [updated] = await tx.update(purchaseBills).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(purchaseBills.id, id)).returning();
   await reverseJournals(ctx, 'purchase_bill', id, istDate(), `Cancelled bill ${bill!.billNo}: ${reason}`);
   await audit(ctx, 'purchase_bill', id, 'cancel', { status: 'posted' }, { status: 'cancelled', reason });
@@ -762,17 +791,19 @@ export function purchasingRouter(db: DB) {
       round_off: emptyToNull(zSignedMoney).optional(),
       notes: emptyToNull(z.string().trim().max(2000)).optional(),
       job_work_id: emptyToNull(zId).optional(),
+      import_shipment_id: emptyToNull(zId).optional(),
       currency: zCurrency, fx_rate: emptyToNull(zFxRate).optional(),
       lines: z.array(z.object({
         po_line_id: emptyToNull(zId).optional(), item_id: emptyToNull(zId).optional(), qty: zQty, rate: zMoney,
-        description: emptyToNull(z.string().trim().max(300)).optional(),
+        description: emptyToNull(z.string().trim().max(300)).optional(), landed_kind: z.enum(LANDED_COST_KINDS).nullish(),
       })).min(1).max(200),
     }).parse(req.body);
     const bill = await inTx(db, req, (ctx) =>
       createPurchaseBill(ctx, {
         supplierId: b.supplier_id, purchaseOrderId: b.purchase_order_id, supplierInvoiceNo: b.supplier_invoice_no, billDate: b.bill_date,
         dueDate: b.due_date, roundOff: b.round_off, notes: b.notes, jobWorkId: b.job_work_id, currency: b.currency, fxRate: b.fx_rate,
-        lines: b.lines.map((l) => ({ poLineId: l.po_line_id, itemId: l.item_id, qty: l.qty, rate: l.rate, description: l.description })),
+        importShipmentId: b.import_shipment_id,
+        lines: b.lines.map((l) => ({ poLineId: l.po_line_id, itemId: l.item_id, qty: l.qty, rate: l.rate, description: l.description, landedKind: l.landed_kind })),
       }));
     res.status(201).json({ data: bill });
   });

@@ -67,6 +67,8 @@ export const zSignedMoney = decimalString(2).refine(moneyFits, 'too large');
 export const zQty = decimalString(3).refine(sized((d) => d.gt(0)), 'must be more than 0').refine(qtyFits, 'too large');
 export const zQtyNonNeg = decimalString(3).refine(sized((d) => d.gte(0)), 'cannot be negative').refine(qtyFits, 'too large');
 export const zSignedQty = decimalString(3).refine(qtyFits, 'too large');
+/** Kg for one unit of an item (spreading an import's freight by weight). */
+export const zWeight = decimalString(3).refine(sized((d) => d.gt(0) && d.lt(1_000_000)), 'must be more than 0 and under 10 lakh kg');
 export const zGstRate = z.union([z.string(), z.number()]).transform((v, c) => {
   const n = Number(v);
   if (!(GST_RATES as readonly number[]).includes(n)) {

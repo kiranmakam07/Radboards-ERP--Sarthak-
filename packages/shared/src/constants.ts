@@ -95,6 +95,8 @@ export const MOVEMENT_TYPES = [
   'opening', 'purchase_in', 'sale_out', 'sales_return_in', 'purchase_return_out', 'transfer', 'adjustment', 'job_work',
   // Parts fitted on a job card, from the workshop shelf (modules/service.ts).
   'service_issue',
+  // A change of value with no change of quantity: landed cost added to goods already received (modules/imports.ts).
+  'revaluation',
 ] as const;
 export type MovementType = (typeof MOVEMENT_TYPES)[number];
 
@@ -133,6 +135,22 @@ export type ClaimStatus = (typeof CLAIM_STATUSES)[number];
 export const CLAIM_TRANSITIONS: Record<ClaimStatus, readonly ClaimStatus[]> = {
   draft: ['sent'], sent: ['accepted', 'rejected'], accepted: ['credited'], rejected: [], credited: [],
 };
+
+// ---------------------------------------------------------------------------
+// Imports: shipments from abroad and their landed cost (modules/imports.ts)
+// ---------------------------------------------------------------------------
+export const IMPORT_STAGES = ['pi', 'advance_paid', 'production', 'shipped', 'at_port', 'boe_filed', 'cleared', 'received'] as const;
+export type ImportStage = (typeof IMPORT_STAGES)[number];
+export const IMPORT_STAGE_LABELS: Record<ImportStage, string> = {
+  pi: 'Proforma invoice', advance_paid: 'Advance paid', production: 'In production', shipped: 'Shipped', at_port: 'At port',
+  boe_filed: 'Bill of entry filed', cleared: 'Cleared customs', received: 'Received',
+};
+/** bcd: basic customs duty; sws: social welfare surcharge; igst: IGST paid at customs, input credit and never cost; cha: customs agent. */
+export const LANDED_COST_KINDS = ['freight', 'insurance', 'bcd', 'sws', 'igst', 'cha', 'port', 'inland', 'other'] as const;
+export type LandedCostKind = (typeof LANDED_COST_KINDS)[number];
+/** How a cost is spread over the shipment's goods: by their value, their quantity or their weight. */
+export const LANDED_COST_BASES = ['value', 'qty', 'weight'] as const;
+export type LandedCostBasis = (typeof LANDED_COST_BASES)[number];
 
 /**
  * Where one serialised unit (a vehicle, a battery pack, a motor) stands. available, demo and reserved
@@ -322,6 +340,11 @@ export const PERMISSIONS = {
   'service:read': ['owner', 'stores', 'accounts', 'technician', 'service_manager', 'admin'],
   'service:write': ['technician', 'service_manager', 'admin'],
   'service:approve': ['owner', 'service_manager', 'admin'],
+
+  // Imports: shipments and their landed cost. Booking costs paid and putting them on the goods is for Accounts.
+  'imports:read': ['owner', 'stores', 'accounts', 'admin'],
+  'imports:write': ['stores', 'accounts', 'admin'],
+  'imports:post': ['accounts', 'admin'],
 } as const satisfies Record<string, readonly Role[]>;
 
 // A new permission is one line in the table above, named in a route with requirePerm('area:action')

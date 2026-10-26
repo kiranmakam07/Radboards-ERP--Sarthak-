@@ -37,6 +37,7 @@ import { publicSharesRouter, sharesRouter } from './modules/shares';
 import { tdsRouter } from './modules/tds';
 import { unitsRouter } from './modules/units';
 import { publicEstimateRouter, serviceRouter } from './modules/service';
+import { importsRouter } from './modules/imports';
 
 /**
  * The API's front door. createApp builds the Express app: every router in the system is mounted
@@ -185,6 +186,7 @@ export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   app.use('/api/purchasing', purchasingRouter(db));
   app.use('/api/stock', inventoryRouter(db));
   app.use('/api/jobwork', jobWorkRouter(db));
+  app.use('/api/imports', importsRouter(db));
   app.use('/api/units', unitsRouter(db));
   // The workshop. What a fitted part cost stays with costs:read, as everywhere else.
   app.use('/api/service', hideCosts(['issued_value']));

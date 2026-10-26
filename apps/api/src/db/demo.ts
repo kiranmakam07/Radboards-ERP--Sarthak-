@@ -10,6 +10,7 @@ import { captureLead, sourceIdByName } from '../modules/leads';
 import { fromShopify, takeOrder, type OnlineOrder } from '../modules/online';
 import { createParty } from '../modules/parties';
 import { rows, sql, type DB } from './client';
+import { seedImports } from './demo-imports';
 import { seedService } from './demo-service';
 import {
   adSpends, allocations, assets, campaigns, channelEvents, items, jobOpenings, maintenanceSchedules, projects, taskTemplates, tasks, units, users,
@@ -131,6 +132,7 @@ export async function seedDemo(db: DB, password: string = DEMO_PASSWORD): Promis
     await seedPeopleAndOperations(ctx);
     await seedOnlineOrders(ctx);
     await seedService(ctx);
+    await seedImports(ctx);
   });
   console.log(`Demo data loaded (${istDate()}). Sign in with phone 9000000006 (admin) and the demo password.`);
 }

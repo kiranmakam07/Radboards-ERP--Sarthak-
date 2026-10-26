@@ -9,7 +9,7 @@ import {
   INTERVAL_UNITS, INTERVIEW_MODES, INTERVIEW_RESULTS, INTERVIEW_STATUSES, INVOICE_DOC_TYPES, INVOICE_STATUSES, ITEM_TYPES,
   LEAD_ACTIVITY_TYPES, LEAD_STAGES, LOCATION_TYPES, MOVEMENT_TYPES, OPENING_STATUSES, ORDER_STATUSES, PARTY_TYPES,
   PAYMENT_DIRECTIONS, PAYMENT_MODES, PO_STATUSES, PROJECT_STATUSES, REJECT_REASONS, ROLES, TASK_FREQUENCIES, TASK_STATUSES,
-  RESERVATION_STATUSES, UNIT_STATUSES, CLAIM_STATUSES, JOB_CARD_STATUSES, JOB_LINE_KINDS,
+  RESERVATION_STATUSES, UNIT_STATUSES, CLAIM_STATUSES, JOB_CARD_STATUSES, JOB_LINE_KINDS, IMPORT_STAGES, LANDED_COST_BASES, LANDED_COST_KINDS,
 } from '@radcore/shared';
 
 // Money is numeric(12,2) in INR, quantities numeric(12,3) (PRD section 8).
@@ -354,6 +354,8 @@ export const items = pgTable('items', {
   isSerialised: boolean('is_serialised').notNull().default(false),
   /** Batteries: a storage charge is due this many days after the last one (the owner is told when it is late). */
   chargeEveryDays: integer('charge_every_days'),
+  /** Weight of one unit in kg, for spreading an import's freight by weight. */
+  weightKg: numeric('weight_kg', { precision: 10, scale: 3 }),
   active: boolean('active').notNull().default(true),
   ...stamps,
 }, (t) => [
@@ -432,7 +434,8 @@ export const stockMovements = pgTable('stock_movements', {
   index('stock_movements_item_loc_idx').on(t.itemId, t.locationId),
   index('stock_movements_unit_idx').on(t.unitId),
   index('stock_movements_ref_idx').on(t.refType, t.refId),
-  check('stock_movements_qty_nonzero', sql`${t.qty} <> 0`),
+  // A revaluation (landed cost added later) changes value only, so it alone may carry no quantity.
+  check('stock_movements_qty_nonzero', sql`${t.qty} <> 0 or ${t.movementType}::text = 'revaluation'`),
   check('stock_movements_unit_qty_chk', sql`${t.unitId} is null or abs(${t.qty}) = 1`),
 ]);
 
@@ -868,6 +871,8 @@ export const purchaseBills = pgTable('purchase_bills', {
   jobWorkCleared: money('job_work_cleared').notNull().default('0'),
   status: billStatusEnum('status').notNull().default('posted'),
   notes: text('notes'),
+  /** A forwarder's or customs agent's bill for an import shipment: its service lines are that shipment's landed cost. */
+  importShipmentId: uuid('import_shipment_id').references((): AnyPgColumn => importShipments.id),
   ...stamps,
 }, (t) => [
   unique('purchase_bills_no_fy_uq').on(t.docType, t.billNo, t.fy),
@@ -1911,3 +1916,80 @@ export const supplierClaims = pgTable('supplier_claims', {
   notes: text('notes'),
   ...stamps,
 }, (t) => [index('supplier_claims_job_idx').on(t.jobCardId)]);
+
+// ----------------------------------------------------------------------------
+// Imports: a shipment from abroad and what it cost to land (modules/imports.ts)
+// ----------------------------------------------------------------------------
+export const importStageEnum = pgEnum('import_stage', IMPORT_STAGES);
+export const landedCostKindEnum = pgEnum('landed_cost_kind', LANDED_COST_KINDS);
+export const landedCostBasisEnum = pgEnum('landed_cost_basis', LANDED_COST_BASES);
+
+/** One shipment from a foreign supplier, from the proforma invoice to the goods received. */
+export const importShipments = pgTable('import_shipments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  shipmentNo: text('shipment_no').notNull().unique(),
+  entityId: entityId(),
+  supplierId: uuid('supplier_id').notNull().references(() => parties.id),
+  currency: char('currency', { length: 3 }).notNull().default('USD'),
+  fxRate: numeric('fx_rate', { precision: 12, scale: 6 }),
+  stage: importStageEnum('stage').notNull().default('pi'),
+  /** The day each stage was reached: { shipped: '2026-10-02', at_port: '2026-10-19' }. */
+  stageDates: jsonb('stage_dates').$type<Record<string, string>>().notNull().default({}),
+  blAwbNo: text('bl_awb_no'),
+  boeNo: text('boe_no'),
+  boeDate: date('boe_date'),
+  /** File ids: the proforma, the bill of lading, the bill of entry. */
+  documents: jsonb('documents').$type<string[]>(),
+  notes: text('notes'),
+  ...stamps,
+});
+
+export const importShipmentOrders = pgTable('import_shipment_orders', {
+  shipmentId: uuid('shipment_id').notNull().references(() => importShipments.id),
+  purchaseOrderId: uuid('purchase_order_id').notNull().references(() => purchaseOrders.id),
+}, (t) => [unique('import_shipment_orders_uq').on(t.shipmentId, t.purchaseOrderId)]);
+
+/** Once spread over the goods and booked, a set of cost lines is an application. Applied lines never change. */
+export const landedCostApplications = pgTable('landed_cost_applications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  shipmentId: uuid('shipment_id').notNull().references(() => importShipments.id),
+  appliedOn: date('applied_on').notNull(),
+  total: money('total').notNull(),
+  toStock: money('to_stock').notNull(),
+  toCogs: money('to_cogs').notNull(),
+  ...stamps,
+}, (t) => [index('landed_cost_applications_shipment_idx').on(t.shipmentId)]);
+
+/**
+ * A cost of landing a shipment, and where it was booked from: paid from a cash or bank account (customs
+ * duty, port charges), or a supplier's bill that names the shipment (the forwarder, the customs agent).
+ * IGST is recorded for the record but never spread: it is input credit.
+ */
+export const landedCostLines = pgTable('landed_cost_lines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  shipmentId: uuid('shipment_id').notNull().references(() => importShipments.id),
+  kind: landedCostKindEnum('kind').notNull(),
+  description: text('description'),
+  amount: money('amount').notNull(),
+  basis: landedCostBasisEnum('basis').notNull().default('value'),
+  paidFromAccountId: uuid('paid_from_account_id').references(() => accounts.id),
+  purchaseBillId: uuid('purchase_bill_id').references(() => purchaseBills.id),
+  applicationId: uuid('application_id').references(() => landedCostApplications.id),
+  ...stamps,
+}, (t) => [
+  index('landed_cost_lines_shipment_idx').on(t.shipmentId),
+  check('landed_cost_lines_amount_chk', sql`${t.amount} > 0`),
+  check('landed_cost_lines_source_chk', sql`(${t.paidFromAccountId} is null) <> (${t.purchaseBillId} is null)`),
+]);
+
+/** How one applied cost line was spread: each goods receipt line's share, and how much went to stock or to goods already sold. */
+export const landedCostAllocations = pgTable('landed_cost_allocations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  applicationId: uuid('application_id').notNull().references(() => landedCostApplications.id),
+  costLineId: uuid('cost_line_id').notNull().references(() => landedCostLines.id),
+  grnLineId: uuid('grn_line_id').notNull().references(() => goodsReceiptLines.id),
+  itemId: uuid('item_id').notNull().references(() => items.id),
+  amount: money('amount').notNull(),
+  toStock: money('to_stock').notNull(),
+  toCogs: money('to_cogs').notNull(),
+}, (t) => [index('landed_cost_allocations_application_idx').on(t.applicationId)]);

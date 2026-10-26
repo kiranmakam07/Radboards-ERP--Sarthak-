@@ -110,6 +110,24 @@ export async function stockIn(ctx: Ctx, m: MoveBase & { unitCost: Num }): Promis
 }
 
 /**
+ * A change of value with no change of quantity: cost found after the goods came in (an import's freight and
+ * duty, modules/imports.ts). One row of quantity 0 carrying the value, at the place holding most of the item,
+ * so the item's moving-average cost rises for every unit held. The caller posts the same value to Stock in Hand.
+ */
+export async function revalue(ctx: Ctx, m: { itemId: string; value: Num; refType: string; refId: string; reason?: string | null }): Promise<Decimal> {
+  const value = round2(m.value);
+  if (value.isZero()) return value;
+  const [most] = await rows<{ location_id: string }>(ctx.tx, sql`
+    select location_id from stock_movements where item_id = ${m.itemId} group by location_id having sum(qty) > 0 order by sum(qty) desc limit 1`);
+  const locationId = most?.location_id ?? (await locationByType(ctx.tx, 'stores'));
+  await ctx.tx.insert(stockMovements).values({
+    itemId: m.itemId, locationId, qty: '0', unitCost: '0', value: money(value), movementType: 'revaluation',
+    refType: m.refType, refId: m.refId, reason: m.reason ?? null, createdBy: ctx.user?.id ?? null,
+  });
+  return value;
+}
+
+/**
  * Stock out at the moving-average rate (or at a specific cost, e.g. a supplier return at
  * the PO rate). Blocks negative stock unless the admin setting allows it (PRD 8.5).
  * The caller must already hold the item lock (lockItems).

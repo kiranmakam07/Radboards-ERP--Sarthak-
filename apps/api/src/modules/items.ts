@@ -7,7 +7,7 @@ import { requirePerm } from '../core/auth';
 import { rows, type DB } from '../db/client';
 import { channelItemMap, itemImages, items, priceListItems, priceLists } from '../db/schema';
 import { badRequest, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zCessRate, zGstRate, zLink, zId, zListQuery, zMoney, zQtyNonNeg, zText } from '../lib/http';
+import { emptyToNull, inTx, sendList, zCessRate, zGstRate, zLink, zId, zListQuery, zMoney, zQtyNonNeg, zText, zWeight } from '../lib/http';
 
 /**
  * The item master: what we buy, make and sell, with HSN, GST rate, unit, prices, pictures and the
@@ -69,6 +69,8 @@ const zItem = z.object({
   barcode: emptyToNull(z.string().trim().max(60)).optional(),
   is_serialised: z.boolean().optional(),
   charge_every_days: emptyToNull(z.coerce.number().int().min(1).max(3650)).optional(),
+  /** Kg per unit, for spreading an import's freight by weight. */
+  weight_kg: emptyToNull(zWeight).optional(),
   active: z.boolean().optional(),
 });
 
@@ -77,6 +79,7 @@ function toRow(b: Partial<z.infer<typeof zItem>>) {
     sku: b.sku, name: b.name, itemType: b.item_type, categoryId: b.category_id, hsnSac: b.hsn_sac, gstRate: b.gst_rate, cessRate: b.cess_rate,
     unit: b.unit, purchaseCost: b.purchase_cost, mrp: b.mrp, retailPrice: b.retail_price, dealerPrice: b.dealer_price,
     reorderLevel: b.reorder_level, barcode: b.barcode, active: b.active, isSerialised: b.is_serialised, chargeEveryDays: b.charge_every_days,
+    weightKg: b.weight_kg,
     // Services are never stock items (PRD 8.4).
     ...(b.item_type ? { isStockItem: b.item_type !== 'service' } : {}),
   };
