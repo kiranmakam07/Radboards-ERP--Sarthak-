@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addDays, istDate } from '@radcore/shared';
 import { rows, sql } from '../src/db/client';
-import { expectBooksHealthy, gstin, openingStock, setup, type World } from './helpers';
+import { deliveryChecksDone, expectBooksHealthy, gstin, openingStock, setup, type World } from './helpers';
 
 /**
  * P1 of the founder's brief (21 Oct 2026): the schema foundations that get expensive once real
@@ -45,8 +45,10 @@ describe('0026 EV kinds of item, place and party', () => {
     await sales.post(`/api/sales/orders/${order.id}/confirm`).send({}).expect(200);
     const refused = await sales.post(`/api/sales/orders/${order.id}/deliver`).send({ location_id: id.in_transit }).expect(400);
     expect(refused.body.error.message).toMatch(/On the road cannot be delivered from/);
-    // A demo unit can be sold as such.
-    await sales.post(`/api/sales/orders/${order.id}/deliver`).send({ location_id: id.demo }).expect(201);
+    // A demo unit can be sold as such, once its delivery checklist is done (brief P2).
+    const checks = await deliveryChecksDone(w, 'sales');
+    await (await w.as('sales')).put(`/api/sales/orders/${order.id}/delivery-checks`).send(checks).expect(200);
+    await (await w.as('sales')).post(`/api/sales/orders/${order.id}/deliver`).send({ location_id: id.demo }).expect(201);
   });
 
   it('sells to a franchisee at the dealer price, like a dealer', async () => {
@@ -147,9 +149,10 @@ describe('0027 unit serials and batches', () => {
   });
 
   it('the quick bill sells by serial, and the serial goes on the bill', async () => {
+    const checks = await deliveryChecksDone(w, 'store');
     const store = await w.as('store');
     const bill = (serials?: string[]) => store.post('/api/sales/quick-bill').send({
-      customer: { phone: '9811000099', name: 'Kiran' }, lines: [{ item_id: id.ev, qty: 1, serials }], payments: [{ mode: 'upi', amount: 84000 }],
+      customer: { phone: '9811000099', name: 'Kiran' }, lines: [{ item_id: id.ev, qty: 1, serials }], payments: [{ mode: 'upi', amount: 84000 }], delivery_checks: checks,
     });
     expect((await bill().expect(400)).body.error.message).toMatch(/give one serial for each of the 1 \(0 given\)/);
     expect((await bill(['EV002']).expect(409)).body.error.message).toMatch(/EV-X1 EV002 is not at this place/);
@@ -162,9 +165,11 @@ describe('0027 unit serials and batches', () => {
   });
 
   it('a delivery picks serials; without them it is refused', async () => {
+    const checks = await deliveryChecksDone(w, 'sales');
     const sales = await w.as('sales');
     const order = (await sales.post('/api/sales/orders').send({ channel: 'dealer', party_id: id.dealer, lines: [{ item_id: id.ev, qty: 1 }] }).expect(201)).body.data;
     await sales.post(`/api/sales/orders/${order.id}/confirm`).send({}).expect(200);
+    await sales.put(`/api/sales/orders/${order.id}/delivery-checks`).send(checks).expect(200);
     await sales.post(`/api/sales/orders/${order.id}/deliver`).send({}).expect(400);
     const lineId = (await sales.get(`/api/sales/orders/${order.id}`).expect(200)).body.data.lines[0].id;
     const d = (await sales.post(`/api/sales/orders/${order.id}/deliver`).send({ lines: [{ order_line_id: lineId, qty: 1, serials: ['EV002'] }] }).expect(201)).body.data;
@@ -306,7 +311,8 @@ describe('0028 stock reservations', () => {
     const res = await sales.post(`/api/sales/orders/${o.id}/reservations`).send({ lines: [{ order_line_id: o.lines[0].id, qty: 1, location_id: id.showroom, serials: ['EV002'] }] }).expect(201);
     const [ev002] = await rows<{ status: string }>(w.db, sql`select status::text from units where serial_no = 'EV002'`);
     expect(ev002!.status).toBe('reserved');
-    const quick = await (await w.as('store')).post('/api/sales/quick-bill').send({ lines: [{ item_id: id.ev, qty: 1, serials: ['EV002'] }], payments: [{ mode: 'upi', amount: 84000 }] }).expect(409);
+    const checks = await deliveryChecksDone(w, 'store');
+    const quick = await (await w.as('store')).post('/api/sales/quick-bill').send({ lines: [{ item_id: id.ev, qty: 1, serials: ['EV002'] }], payments: [{ mode: 'upi', amount: 84000 }], delivery_checks: checks }).expect(409);
     expect(quick.body.error.message).toMatch(/EV-X1 EV002 is reserved for another order/);
     await (await w.as('stores')).post('/api/stock/transfers').send({ from_location_id: id.showroom, to_location_id: id.stores, reason: 'Back', lines: [{ item_id: id.ev, qty: 1, serials: ['EV002'] }] }).expect(409);
 

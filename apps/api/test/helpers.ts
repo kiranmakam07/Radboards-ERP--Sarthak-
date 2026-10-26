@@ -134,3 +134,16 @@ export async function expectBooksHealthy(w: World) {
   if (!bs.body.balanced) throw new Error(`Balance sheet does not balance: ${JSON.stringify(bs.body)}`);
   return d;
 }
+
+/** A tiny PNG, for anything that needs a photo attached. */
+export const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4b60000000049454e44ae426082', 'hex');
+
+/**
+ * A vehicle's delivery checklist, done: the three ticks and two photos (the delivery photo and the signed note)
+ * uploaded by `role`. Sent with a quick bill, or saved on an order before it is delivered.
+ */
+export async function deliveryChecksDone(w: World, role: Role = 'store') {
+  const agent = await w.as(role);
+  const upload = async (name: string) => (await agent.post('/api/files?purpose=delivery').set('Content-Type', 'image/png').set('X-File-Name', name).send(PNG).expect(201)).body.data.id as string;
+  return { pdi_done: true, rider_briefing: true, warranty_registered: true, photo_file_id: await upload('handover.png'), signed_note_file_id: await upload('note.png') };
+}

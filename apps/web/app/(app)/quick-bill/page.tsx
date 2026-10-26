@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { LineEditor, toApiLines, type ItemLite, type Line } from '@/components/lines';
+import { DeliveryChecklist, NO_CHECKS, type Checks } from '@/components/delivery-checks';
 import { Card, ErrorBox, Page, PriceWarning, inr } from '@/components/ui';
 import { ApiError, api, post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
@@ -28,6 +29,9 @@ function QuickBill() {
   // Refused for credit (over the limit, or bills overdue): someone with sales:override_credit can bill it anyway.
   const [creditRefused, setCreditRefused] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Selling a vehicle: its delivery checklist goes with the bill (brief P2).
+  const [checks, setChecks] = useState<Checks>(NO_CHECKS);
+  const vehicle = lines.some((l) => Number(l.qty) > 0 && (items.data?.data ?? []).find((i) => i.id === l.item_id)?.item_type === 'vehicle');
   const can = useCan();
 
   useEffect(() => {
@@ -73,6 +77,7 @@ function QuickBill() {
         lines: toApiLines(lines.filter((l) => Number(l.qty) > 0)),
         payments: MODES.filter((m) => Number(pay[m]) > 0).map((m) => ({ mode: m, amount: pay[m] })),
         override_credit: overrideCredit,
+        delivery_checks: vehicle ? checks : null,
       });
       router.push(`/invoices/${res.data.invoice.id}?new=1`);
     } catch (e) {
@@ -106,6 +111,13 @@ function QuickBill() {
         <LineEditor items={items.data?.data ?? []} lines={lines} onChange={setLines} priceKey="retail_price" serialsFrom={showroom}
           stockKey="showroom_qty" stockLabel="in showroom" filter={(i) => i.item_type !== 'raw_material'} />
       </Card>
+
+      {vehicle ? (
+        <Card title="Delivery checklist">
+          <p className="muted small" style={{ marginTop: 0 }}>A vehicle is handed over only once all five are done.</p>
+          <DeliveryChecklist value={checks} onChange={setChecks} />
+        </Card>
+      ) : null}
 
       <Card title="3. Payment">
         {preview ? (

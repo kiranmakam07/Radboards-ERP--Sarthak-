@@ -8,6 +8,7 @@ import { zDate } from '../lib/http';
 import { gstSummary } from './gst';
 import { LATE, ensureTasks } from './ops';
 import { chargeDue } from './units';
+import { OPEN_STAGES, WORKING_STAGES } from '../core/stages';
 
 /**
  * Dashboards. Read-only: every figure is worked out from the records at the moment it is asked for,
@@ -55,8 +56,8 @@ export function dashboardsRouter(db: DB) {
     if (can(role, 'leads:read')) {
       data.leads = await one(sql`
         select count(*) filter (where stage = 'new')::int as fresh,
-               count(*) filter (where stage in ('contacted','interested','meeting_booked'))::int as in_progress,
-               count(*) filter (where stage in ('new','contacted','interested','meeting_booked')
+               count(*) filter (where stage in (${WORKING_STAGES}))::int as in_progress,
+               count(*) filter (where stage in (${OPEN_STAGES})
                                   and (next_follow_up_at at time zone ${IST})::date <= ${today}::date)::int as follow_ups_due,
                count(*) filter (where stage = 'converted'
                                   and (converted_at at time zone ${IST})::date >= date_trunc('month', ${today}::date))::int as converted_this_month
@@ -129,7 +130,7 @@ export function dashboardsRouter(db: DB) {
     if (can(role, 'leads:write')) {
       data.my_leads = await one(sql`
         select count(*) filter (where stage = 'new')::int as fresh,
-               count(*) filter (where stage in ('contacted','interested','meeting_booked')
+               count(*) filter (where stage in (${WORKING_STAGES})
                                   and (next_follow_up_at at time zone ${IST})::date <= ${today}::date)::int as follow_ups_due
           from leads where owner_id = ${req.user!.id}`);
     }
@@ -169,7 +170,7 @@ export function dashboardsRouter(db: DB) {
         pipeline: await rows(db, sql`
           select l.stage, count(*)::int as count,
                  coalesce(sum((select sum(i.retail_price) from items i where i.id = any(l.interested_item_ids))), 0) as value
-            from leads l where l.stage in ('new','contacted','interested','meeting_booked') group by l.stage`),
+            from leads l where l.stage in (${OPEN_STAGES}) group by l.stage`),
         conversion: await rows(db, sql`
           select u.id as owner_id, coalesce(u.name, 'Unassigned') as owner, count(*)::int as leads,
                  count(*) filter (where l.stage = 'converted')::int as converted,
@@ -183,7 +184,7 @@ export function dashboardsRouter(db: DB) {
                  count(*) filter (where (l.next_follow_up_at at time zone ${IST})::date = ${today}::date)::int as due_today,
                  count(*) filter (where l.next_follow_up_at < now())::int as overdue
             from leads l left join users u on u.id = l.owner_id
-           where l.stage in ('new','contacted','interested','meeting_booked') and l.next_follow_up_at is not null
+           where l.stage in (${OPEN_STAGES}) and l.next_follow_up_at is not null
            group by u.id, u.name
           having count(*) filter (where (l.next_follow_up_at at time zone ${IST})::date <= ${today}::date) > 0
            order by 4 desc`),
@@ -303,12 +304,12 @@ export function dashboardsRouter(db: DB) {
              round(avg(extract(epoch from (l.first_contacted_at - l.created_at)) / 60)
                filter (where (l.created_at at time zone ${IST})::date between ${from}::date and ${to}::date and l.first_contacted_at is not null))::int as avg_response_min,
              count(l.id) filter (where (l.converted_at at time zone ${IST})::date between ${from}::date and ${to}::date)::int as converted,
-             count(l.id) filter (where l.stage in ('new', 'contacted', 'interested', 'meeting_booked'))::int as open_now,
-             count(l.id) filter (where l.stage in ('new', 'contacted', 'interested', 'meeting_booked') and l.next_follow_up_at < now())::int as overdue
+             count(l.id) filter (where l.stage in (${OPEN_STAGES}))::int as open_now,
+             count(l.id) filter (where l.stage in (${OPEN_STAGES}) and l.next_follow_up_at < now())::int as overdue
         from users u join leads l on l.owner_id = u.id
        group by u.id, u.name
       having count(l.id) filter (where (l.created_at at time zone ${IST})::date between ${from}::date and ${to}::date) > 0
-          or count(l.id) filter (where l.stage in ('new', 'contacted', 'interested', 'meeting_booked')) > 0
+          or count(l.id) filter (where l.stage in (${OPEN_STAGES})) > 0
        order by 3 desc, u.name`);
     res.json({ data });
   });

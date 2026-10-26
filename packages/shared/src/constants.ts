@@ -37,33 +37,55 @@ export type LocationType = (typeof LOCATION_TYPES)[number];
 /** Places goods cannot be delivered to a customer from (job work has its own rule: only its challan moves that stock). */
 export const UNSELLABLE_LOCATION_TYPES = ['rejected', 'service_bay', 'in_transit'] as const satisfies readonly LocationType[];
 
-export const LEAD_STAGES = ['new', 'contacted', 'interested', 'meeting_booked', 'converted', 'lost'] as const;
+// The vehicle stages (brief P2) sit between meeting_booked and converted: a test ride booked and done, a
+// quote, a booking (an order with an advance and the scooter held by serial), and the vehicle delivered.
+export const LEAD_STAGES = [
+  'new', 'contacted', 'interested', 'meeting_booked', 'test_ride_booked', 'test_ride_done', 'quoted', 'booked', 'delivered', 'converted', 'lost',
+] as const;
 export type LeadStage = (typeof LEAD_STAGES)[number];
-export const OPEN_LEAD_STAGES: LeadStage[] = ['new', 'contacted', 'interested', 'meeting_booked'];
+export const OPEN_LEAD_STAGES: LeadStage[] = ['new', 'contacted', 'interested', 'meeting_booked', 'test_ride_booked', 'test_ride_done', 'quoted', 'booked'];
 /** Stages where next_follow_up_at is mandatory (PRD 7.3). */
-export const FOLLOW_UP_REQUIRED_STAGES: LeadStage[] = ['contacted', 'interested', 'meeting_booked'];
+export const FOLLOW_UP_REQUIRED_STAGES: LeadStage[] = ['contacted', 'interested', 'meeting_booked', 'quoted'];
+/** Stages a lead reaches only through what happens (a test ride booked or done, a booking, a delivery), never by a move. */
+export const EVENT_LEAD_STAGES: LeadStage[] = ['test_ride_booked', 'test_ride_done', 'booked', 'delivered'];
 
 export const LEAD_STAGE_LABELS: Record<LeadStage, string> = {
   new: 'New',
   contacted: 'Contacted',
   interested: 'Interested',
   meeting_booked: 'Meeting Booked',
+  test_ride_booked: 'Test Ride Booked',
+  test_ride_done: 'Test Ride Done',
+  quoted: 'Quoted',
+  booked: 'Booked',
+  delivered: 'Delivered',
   converted: 'Converted',
   lost: 'Lost',
 };
 
 /**
- * Lead stage machine. `converted` is only reachable through the convert action
- * (which creates the party); `lost` can be reopened to `contacted`.
+ * Lead stage machine, for moves made by hand. `converted` is only reachable through the convert action
+ * (which creates the party); the event stages (EVENT_LEAD_STAGES) only by what happens; `lost` can be
+ * reopened to `contacted`. A booked lead can still be lost (the booking cancelled) or converted.
  */
+const BY_HAND: LeadStage[] = ['contacted', 'interested', 'meeting_booked', 'quoted', 'converted', 'lost'];
 export const LEAD_TRANSITIONS: Record<LeadStage, LeadStage[]> = {
-  new: ['contacted', 'interested', 'meeting_booked', 'converted', 'lost'],
-  contacted: ['interested', 'meeting_booked', 'converted', 'lost'],
-  interested: ['contacted', 'meeting_booked', 'converted', 'lost'],
-  meeting_booked: ['contacted', 'interested', 'converted', 'lost'],
+  new: BY_HAND,
+  contacted: BY_HAND.filter((s) => s !== 'contacted'),
+  interested: BY_HAND.filter((s) => s !== 'interested'),
+  meeting_booked: BY_HAND.filter((s) => s !== 'meeting_booked'),
+  test_ride_booked: BY_HAND,
+  test_ride_done: BY_HAND,
+  quoted: BY_HAND.filter((s) => s !== 'quoted'),
+  booked: ['converted', 'lost'],
+  delivered: ['converted'],
   converted: [],
   lost: ['contacted'],
 };
+
+/** A test ride on a demo unit: booked for a slot, then done, not turned up, or cancelled. */
+export const TEST_RIDE_OUTCOMES = ['booked', 'done', 'no_show', 'cancelled'] as const;
+export type TestRideOutcome = (typeof TEST_RIDE_OUTCOMES)[number];
 
 export function canMoveLead(from: LeadStage, to: LeadStage): boolean {
   return LEAD_TRANSITIONS[from].includes(to);

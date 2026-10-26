@@ -20,17 +20,20 @@ import { zId } from '../lib/http';
  */
 export const MAX_BYTES = config.maxUploadBytes;
 
-const PURPOSES = ['resume', 'bill', 'item_image', 'share', 'other', 'service'] as const;
+const PURPOSES = ['resume', 'bill', 'item_image', 'share', 'other', 'service', 'delivery'] as const;
 type Purpose = (typeof PURPOSES)[number];
 
 /** Who may attach, and who may open, each kind of file. */
 const UPLOAD: Record<Purpose, Permission[] | null> = {
   resume: ['hr:write'], bill: ['expenses:write', 'bills:write'], item_image: ['items:write'], share: ['leads:write'], other: null,
   service: ['service:write'],
+  // The photo at a vehicle's delivery and the signed delivery note (the delivery checklist).
+  delivery: ['sales:write', 'quickbill:create'],
 };
 const OPEN: Record<Purpose, Permission[] | null> = {
   resume: ['hr:read'], bill: ['expenses:read', 'purchasing:read', 'accounts:read'], item_image: null, share: ['leads:read'], other: null,
   service: ['service:read'],
+  delivery: ['sales:read'],
 };
 
 /** What the bytes really are, from their signature. Null when it is not a kind we keep. */

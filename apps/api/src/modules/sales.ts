@@ -17,7 +17,8 @@ import { taxRateOn } from '../core/taxrates';
 import { cleanSerials, needsSerials, unitEvent, unitsIn, unitsOut } from '../core/units';
 import { rows, type DB } from '../db/client';
 import {
-  deliveries, deliveryLines, entities, invoiceLines, invoiceLinks, invoices, items, locations, parties, salesOrderLines, salesOrders, units,
+  deliveries, deliveryChecks, deliveryLines, entities, files, invoiceLines, invoiceLinks, invoices, items, leadActivities, leads, locations, parties,
+  salesOrderLines, salesOrders, units,
 } from '../db/schema';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
 import {
@@ -380,6 +381,9 @@ export async function deliverOrder(
   await expireReservations(ctx);
   const itemRows = await lockItems(tx, want.map((w) => w.line.itemId));
   const itemById = new Map(itemRows.map((i) => [i.id, i]));
+  // A vehicle is handed over only once its delivery checklist is complete (brief P2).
+  const vehicles = want.filter((w) => w.issuedUnitCost === undefined && itemById.get(w.line.itemId)!.itemType === 'vehicle');
+  if (vehicles.length) await assertDeliveryChecks(tx, orderId, itemById.get(vehicles[0]!.line.itemId)!.name);
   const { number } = await nextNumber(tx, 'delivery', date, order.entityId);
   const [delivery] = await tx
     .insert(deliveries)
@@ -439,8 +443,49 @@ export async function deliverOrder(
     lines: [{ account: 'cogs', debit: cogs }, { account: 'stock', credit: cogs }],
   });
   await audit(ctx, 'delivery', delivery!.id, 'create', null, { ...delivery, lines: want.map((w) => ({ orderLineId: w.line.id, qty: fmtQty(w.qty) })) });
+  // The lead that booked this vehicle has now taken delivery.
+  if (vehicles.length && order.leadId) {
+    const [lead] = await tx.select({ id: leads.id, stage: leads.stage }).from(leads).where(eq(leads.id, order.leadId)).for('update');
+    if (lead?.stage === 'booked') {
+      await tx.update(leads).set({ stage: 'delivered', nextFollowUpAt: null, updatedAt: new Date() }).where(eq(leads.id, lead.id));
+      await tx.insert(leadActivities).values({ leadId: lead.id, type: 'stage_change', note: `Booked -> Delivered (${number})`, userId: ctx.user?.id ?? null });
+    }
+  }
   const updatedOrder = await refreshOrderStatus(ctx, orderId);
   return { delivery: delivery!, order: updatedOrder };
+}
+
+/** The five checks before a vehicle is handed over; refused with the ones still missing named. */
+export async function assertDeliveryChecks(tx: DB, orderId: string, vehicle: string) {
+  const [c] = await tx.select().from(deliveryChecks).where(eq(deliveryChecks.salesOrderId, orderId));
+  const missing = [
+    !c?.pdiDone && 'the pre-delivery inspection', !c?.riderBriefing && 'the rider briefing', !c?.warrantyRegistered && 'the warranty registration',
+    !c?.photoFileId && 'a photo at delivery', !c?.signedNoteFileId && 'the signed delivery note',
+  ].filter(Boolean);
+  if (missing.length) throw conflict(`${vehicle} is a vehicle: it is handed over once its delivery checklist is done. Still to do: ${missing.join(', ')}.`);
+}
+
+export type DeliveryChecksInput = { pdiDone?: boolean; riderBriefing?: boolean; warrantyRegistered?: boolean; photoFileId?: string | null; signedNoteFileId?: string | null };
+
+/** Record the delivery checklist of an order (a vehicle's), ticking what is done and attaching the photo and the signed note. */
+export async function saveDeliveryChecks(ctx: Ctx, orderId: string, input: DeliveryChecksInput) {
+  const { tx } = ctx;
+  const [order] = await tx.select().from(salesOrders).where(eq(salesOrders.id, orderId)).for('update');
+  must(order, 'Sales order');
+  for (const fileId of [input.photoFileId, input.signedNoteFileId].filter(Boolean) as string[]) {
+    const [f] = await tx.select({ purpose: files.purpose }).from(files).where(eq(files.id, fileId));
+    if (!f) throw badRequest('That file was not found');
+  }
+  const values = {
+    ...(input.pdiDone !== undefined ? { pdiDone: input.pdiDone } : {}), ...(input.riderBriefing !== undefined ? { riderBriefing: input.riderBriefing } : {}),
+    ...(input.warrantyRegistered !== undefined ? { warrantyRegistered: input.warrantyRegistered } : {}),
+    ...(input.photoFileId !== undefined ? { photoFileId: input.photoFileId } : {}), ...(input.signedNoteFileId !== undefined ? { signedNoteFileId: input.signedNoteFileId } : {}),
+    checkedBy: ctx.user?.id ?? null, updatedAt: new Date(),
+  };
+  const [row] = await tx.insert(deliveryChecks).values({ salesOrderId: orderId, ...values, createdBy: ctx.user?.id ?? null })
+    .onConflictDoUpdate({ target: deliveryChecks.salesOrderId, set: values }).returning();
+  await audit(ctx, 'sales_order', orderId, 'delivery_checks', null, row);
+  return row!;
 }
 
 // ---------------------------------------------------------------------------
@@ -562,6 +607,8 @@ export type QuickBillInput = {
   notes?: string | null;
   /** Accounts / the owner: bill on credit past the limit or with bills overdue (sales:override_credit). */
   overrideCredit?: boolean;
+  /** Selling a vehicle at the counter: its delivery checklist, done before it is handed over. */
+  deliveryChecks?: DeliveryChecksInput | null;
 };
 
 /**
@@ -601,6 +648,7 @@ export async function quickBill(ctx: Ctx, input: QuickBillInput) {
   // paid in full skips the credit check, and a part-paid one is checked on the unpaid part.
   const paid = input.payments.reduce((a, p) => a.plus(p.amount), D(0));
   await confirmOrder(ctx, order.id, { paidNow: paid, overrideCredit: input.overrideCredit, quickBill: true });
+  if (input.deliveryChecks) await saveDeliveryChecks(ctx, order.id, input.deliveryChecks);
   // The lines are delivered in full, each with the serials picked at the counter (order lines keep the bill's order).
   const orderLines = await tx.select().from(salesOrderLines).where(eq(salesOrderLines.orderId, order.id)).orderBy(asc(salesOrderLines.sort));
   await deliverOrder(ctx, order.id, {
@@ -984,6 +1032,14 @@ const toLine = (l: z.infer<typeof zLine>): OrderLineInput => ({
   itemId: l.item_id, qty: l.qty, rate: l.rate ?? null, discount: l.discount ?? null, serials: l.serials ?? null,
 });
 
+const zDeliveryChecks = z.object({
+  pdi_done: z.boolean().optional(), rider_briefing: z.boolean().optional(), warranty_registered: z.boolean().optional(),
+  photo_file_id: emptyToNull(zId).optional(), signed_note_file_id: emptyToNull(zId).optional(),
+});
+const deliveryChecksIn = (b: z.infer<typeof zDeliveryChecks>): DeliveryChecksInput => ({
+  pdiDone: b.pdi_done, riderBriefing: b.rider_briefing, warrantyRegistered: b.warranty_registered, photoFileId: b.photo_file_id, signedNoteFileId: b.signed_note_file_id,
+});
+
 export function salesRouter(db: DB) {
   const r = Router();
 
@@ -1048,6 +1104,9 @@ export function salesRouter(db: DB) {
         invoices: await rows(db, sql`
           select id, doc_type, invoice_no, invoice_date, grand_total, status from invoices where order_id = ${id} order by created_at`),
         reservations: await reservationsOf(db, id),
+        // A vehicle on the order: its delivery checklist, done before it is handed over.
+        has_vehicle: (await rows(db, sql`select 1 from sales_order_lines l join items i on i.id = l.item_id where l.order_id = ${id} and i.item_type = 'vehicle' limit 1`)).length > 0,
+        delivery_checks: (await db.select().from(deliveryChecks).where(eq(deliveryChecks.salesOrderId, id)))[0] ?? null,
         company: await getCompany(db, order!.entityId),
       },
     });
@@ -1145,6 +1204,12 @@ export function salesRouter(db: DB) {
 
   // ---- quick bill ----
   /** Store quick bill - the whole sale in one request and one transaction (PRD 7.4). */
+  /** The delivery checklist of an order with a vehicle on it: ticks, and the photo and signed note as files. */
+  r.put('/orders/:id/delivery-checks', requirePerm('sales:write'), async (req, res) => {
+    const b = zDeliveryChecks.parse(req.body);
+    res.json({ data: await inTx(db, req, (ctx) => saveDeliveryChecks(ctx, zId.parse(req.params.id), deliveryChecksIn(b))) });
+  });
+
   r.post('/quick-bill', requirePerm('quickbill:create'), async (req, res) => {
     const b = z.object({
       party_id: emptyToNull(zId).optional(),
@@ -1157,12 +1222,13 @@ export function salesRouter(db: DB) {
       location_id: emptyToNull(zId).optional(),
       notes: emptyToNull(z.string().trim().max(1000)).optional(),
       override_credit: z.boolean().default(false),
+      delivery_checks: zDeliveryChecks.nullish(),
     }).parse(req.body);
     if (b.override_credit && !can(req.user!.role, 'sales:override_credit')) throw forbidden('Only Accounts or the owner can override a credit limit');
     const result = await inTx(db, req, (ctx) =>
       quickBill(ctx, {
         partyId: b.party_id, customer: b.customer, lines: b.lines.map(toLine), locationId: b.location_id, notes: b.notes,
-        overrideCredit: b.override_credit,
+        overrideCredit: b.override_credit, deliveryChecks: b.delivery_checks ? deliveryChecksIn(b.delivery_checks) : null,
         payments: b.payments.map((p) => ({ mode: p.mode, amount: p.amount, accountId: p.account_id, reference: p.reference })),
       }));
     res.status(201).json({ data: result });

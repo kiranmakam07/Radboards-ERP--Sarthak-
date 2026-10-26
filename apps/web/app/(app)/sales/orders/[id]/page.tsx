@@ -9,6 +9,7 @@ import {
 } from '@/components/ui';
 import { EditLines, linesKey } from '@/components/edit-lines';
 import { SerialPicker } from '@/components/serials';
+import { DeliveryChecksCard } from '@/components/delivery-checks';
 import { post, useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
@@ -110,6 +111,9 @@ export default function OrderPage() {
         <EditLines key={linesKey(o.lines)} path={`/sales/orders/${id}/lines`} lines={o.lines} onDone={reload}
           priceKey={isTradeParty(o.party?.party_type) ? 'dealer_price' : 'retail_price'} filter={(i) => i.item_type !== 'raw_material'} />
       )}
+      {o.has_vehicle && (pendingDelivery || o.delivery_checks) ? (
+        <DeliveryChecksCard orderId={id} checks={o.delivery_checks} canEdit={write && o.status !== 'cancelled' && pendingDelivery} onDone={reload} />
+      ) : null}
       {write && o.status === 'confirmed' && pendingDelivery && (
         bySerial
           ? <Card title="Deliver: pick the serials"><PartialDelivery order={o} onDone={reload} /></Card>

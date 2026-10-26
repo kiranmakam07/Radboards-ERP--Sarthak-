@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { addMonths, istDate } from '@radcore/shared';
 import type { Ctx } from '../lib/http';
@@ -5,7 +6,22 @@ import { createAdjustment, decideAdjustment } from '../modules/inventory';
 import { quickBill } from '../modules/sales';
 import { addJobLine, createJobCard, moveJob } from '../modules/service';
 import type { DB } from './client';
-import { faultCodes, items, locations, users, warrantyRules } from './schema';
+import { faultCodes, fileContents, files, items, locations, users, warrantyRules } from './schema';
+
+/** A tiny picture standing in for a delivery photo or a signed note in the sample data. */
+const SAMPLE_PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4b60000000049454e44ae426082', 'hex');
+
+/** A scooter sold at the counter in the sample data, with its delivery checklist done (brief P2). */
+export async function sampleDeliveryChecks(tx: DB, by: string | null) {
+  const file = async (name: string) => {
+    const [f] = await tx.insert(files).values({
+      purpose: 'delivery', originalName: name, mime: 'image/png', size: SAMPLE_PNG.length, sha256: crypto.createHash('sha256').update(SAMPLE_PNG).digest('hex'), createdBy: by,
+    }).returning();
+    await tx.insert(fileContents).values({ fileId: f!.id, bytes: SAMPLE_PNG });
+    return f!.id;
+  };
+  return { pdiDone: true, riderBriefing: true, warrantyRegistered: true, photoFileId: await file('handover (sample).png'), signedNoteFileId: await file('signed note (sample).png') };
+}
 
 /**
  * Sample data for the workshop (part of `npm run demo`, see demo.ts): a workshop place with spare parts,
@@ -37,8 +53,8 @@ export async function seedService(ctx: Ctx) {
   await decideAdjustment(ctx, shelf.id, true);
 
   // Two scooters sold from the showroom: to Rohit eight months ago (in warranty), to Meera thirty months ago (out of it).
-  await quickBill(ctx, { customer: { phone: '+919820088888', name: 'Rohit Patil' }, lines: [{ itemId: scooter, qty: '1', serials: ['S1-24A0102'] }], payments: [{ mode: 'upi', amount: '89250' }] });
-  await quickBill(ctx, { customer: { phone: '+919820066666', name: 'Meera Joshi' }, lines: [{ itemId: scooter, qty: '1', serials: ['S1-24A0103'] }], payments: [{ mode: 'upi', amount: '89250' }] });
+  await quickBill(ctx, { customer: { phone: '+919820088888', name: 'Rohit Patil' }, lines: [{ itemId: scooter, qty: '1', serials: ['S1-24A0102'] }], payments: [{ mode: 'upi', amount: '89250' }], deliveryChecks: await sampleDeliveryChecks(tx, ctx.user?.id ?? null) });
+  await quickBill(ctx, { customer: { phone: '+919820066666', name: 'Meera Joshi' }, lines: [{ itemId: scooter, qty: '1', serials: ['S1-24A0103'] }], payments: [{ mode: 'upi', amount: '89250' }], deliveryChecks: await sampleDeliveryChecks(tx, ctx.user?.id ?? null) });
   await tx.execute(sql`update units set sold_on = ${addMonths(istDate(), -8)}::date where serial_no = 'S1-24A0102'`);
   await tx.execute(sql`update units set sold_on = ${addMonths(istDate(), -30)}::date where serial_no = 'S1-24A0103'`);
   const [tech] = await tx.select({ id: users.id }).from(users).where(eq(users.role, 'technician'));

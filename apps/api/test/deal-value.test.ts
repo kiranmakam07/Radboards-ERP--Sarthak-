@@ -59,7 +59,9 @@ describe('deal value on a lead', () => {
 
 describe('the pipeline board', () => {
   it('has a column for won and lost leads as well as the open stages', async () => {
-    expect((await board()).stages).toEqual(['new', 'contacted', 'interested', 'meeting_booked', 'converted', 'lost']);
+    expect((await board()).stages).toEqual([
+      'new', 'contacted', 'interested', 'meeting_booked', 'test_ride_booked', 'test_ride_done', 'quoted', 'booked', 'delivered', 'converted', 'lost',
+    ]);
   });
 
   it('shows leads won or lost in the last 30 days, not older ones', async () => {

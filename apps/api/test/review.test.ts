@@ -60,7 +60,7 @@ describe('a review copy', () => {
     const health = (await admin.get('/api/accounting/reports/integrity').expect(200)).body.data;
     expect(health).toMatchObject({ journal_balanced: true, unbalanced_entries: 0, stock_matches_gl: true });
     const home = (await admin.get('/api/dashboards/overview').expect(200)).body.data;
-    expect(home.leads.fresh).toBe(4);
+    expect(home.leads.fresh).toBe(2); // of the four sample leads, Asha has a test ride booked and Vikram a scooter (db/demo-pipeline.ts)
     expect(home.hiring.open_positions).toBe(2);
     expect(home.ops.maintenance_due).toBe(2);
     const board = (await admin.get('/api/ops/resources').expect(200)).body.data;

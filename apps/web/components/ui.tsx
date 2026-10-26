@@ -257,6 +257,7 @@ export function usePresence(open: boolean, ms = 160) {
 
 const TONES: Record<string, string> = {
   new: 'blue', contacted: 'blue', interested: 'amber', meeting_booked: 'amber', converted: 'green', lost: 'red',
+  test_ride_booked: 'amber', test_ride_done: 'amber', quoted: 'amber', booked: 'green',
   draft: 'grey', confirmed: 'blue', delivered: 'amber', invoiced: 'green', cancelled: 'red',
   issued: 'green', paid: 'green', partly_paid: 'amber', unpaid: 'red', posted: 'green',
   sent: 'blue', partly_received: 'amber', received: 'amber', inwarded: 'green', closed: 'grey',

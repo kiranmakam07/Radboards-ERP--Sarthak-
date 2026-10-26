@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { LEAD_STAGE_LABELS, type LeadStage } from '@radcore/shared';
+import { LEAD_STAGE_LABELS, OPEN_LEAD_STAGES, type LeadStage } from '@radcore/shared';
 import { Board } from '@/components/board';
 import { Score } from '@/components/crm';
 import { LeadMoveDialog, cannotMove, moveNow, needsAsking, type MovingLead } from '@/components/lead-move';
@@ -12,7 +12,10 @@ import { useGet } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
 /** The won and lost columns hold the last 30 days only, as the API's pipeline does. */
-const HINTS: Partial<Record<LeadStage, string>> = { converted: 'Won in the last 30 days', lost: 'Lost in the last 30 days' };
+const HINTS: Partial<Record<LeadStage, string>> = {
+  test_ride_booked: 'Booked from the lead', booked: 'Booked from the lead, with an advance', delivered: 'Delivered in the last 30 days',
+  converted: 'Won in the last 30 days', lost: 'Lost in the last 30 days',
+};
 const TITLES: Record<LeadStage, string> = { ...LEAD_STAGE_LABELS, converted: 'Won' };
 const rupees = (n: number) => `₹${inr(n).replace(/\.00$/, '')}`;
 
@@ -84,7 +87,7 @@ export default function PipelinePage() {
                 <strong style={{ color: 'var(--text)' }} title={l.value_from === 'items' ? 'No deal value yet: the price of what it asked about' : 'Deal value'}>
                   {l.value_from === 'items' && Number(l.value) > 0 ? '≈ ' : ''}{rupees(Number(l.value))}
                 </strong>
-                {['new', 'contacted', 'interested', 'meeting_booked'].includes(l.stage) ? (
+                {OPEN_LEAD_STAGES.includes(l.stage) ? (
                   <span className={l.overdue ? 'late' : undefined}>{l.next_follow_up_at ? `${l.overdue ? 'Late · ' : 'Next '}${date(l.next_follow_up_at)}` : 'No follow-up'}</span>
                 ) : null}
               </div>

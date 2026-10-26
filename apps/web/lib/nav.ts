@@ -20,6 +20,7 @@ export const NAV: NavSection[] = [
   { group: 'CRM', icon: 'crm', blurb: 'Leads, the pipeline and follow-ups', items: [
     { href: '/leads/pipeline', label: 'Pipeline', perm: 'leads:read' },
     { href: '/leads', label: 'Leads', perm: 'leads:read' },
+    { href: '/leads/test-rides', label: 'Test rides', perm: 'leads:read' },
     { href: '/crm/sources', label: 'Lead sources', perm: 'crm:manage' },
     { href: '/campaigns', label: 'Campaign links', perm: 'leads:write' },
     { href: '/crm/replies', label: 'Quick replies', perm: 'leads:read' },

@@ -1,6 +1,6 @@
 'use client';
 
-import { FOLLOW_UP_REQUIRED_STAGES, LEAD_STAGE_LABELS, LEAD_TRANSITIONS, type LeadStage } from '@radcore/shared';
+import { EVENT_LEAD_STAGES, FOLLOW_UP_REQUIRED_STAGES, LEAD_STAGE_LABELS, LEAD_TRANSITIONS, type LeadStage } from '@radcore/shared';
 import { FormModal } from '@/components/ui';
 import { post } from '@/lib/api';
 
@@ -20,6 +20,13 @@ export type MovingLead = { id: string; name: string; stage: LeadStage; next_foll
 /** Why a lead cannot go to a stage at all, or null when it can. */
 export function cannotMove(lead: MovingLead, to: LeadStage): string | null {
   if (lead.stage === to) return null;
+  // Reached only by what happens, from the lead's page: a test ride booked or ridden, a booking, a delivery.
+  if (EVENT_LEAD_STAGES.includes(to)) {
+    return to === 'test_ride_booked' ? `Book a test ride from ${lead.name}'s page: the lead moves there by itself.`
+      : to === 'test_ride_done' ? 'Mark the test ride done on the lead page: the lead moves there by itself.'
+        : to === 'booked' ? `Book the vehicle from ${lead.name}'s page (with the advance): the lead moves there by itself.`
+          : 'A lead is delivered when its booked vehicle is handed over.';
+  }
   if (!LEAD_TRANSITIONS[lead.stage].includes(to)) {
     return lead.stage === 'converted'
       ? `${lead.name} is already won; a won lead stays won.`

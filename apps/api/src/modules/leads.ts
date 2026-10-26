@@ -17,6 +17,7 @@ import {
   emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zMoney, zPhone, zStateCode, zText, type Ctx,
 } from '../lib/http';
 import { createParty, type Party } from './parties';
+import { OPEN_STAGES } from '../core/stages';
 
 /**
  * Leads: every enquiry, from first contact to won or lost.
@@ -99,7 +100,7 @@ export async function captureLead(ctx: Ctx, input: CaptureInput): Promise<{ lead
     .select()
     .from(leads)
     .where(eq(leads.phone, input.phone))
-    .orderBy(sql`case when ${leads.stage} in ('new','contacted','interested','meeting_booked') then 0 else 1 end`, desc(leads.createdAt))
+    .orderBy(sql`case when ${leads.stage} in (${OPEN_STAGES}) then 0 else 1 end`, desc(leads.createdAt))
     .limit(1)
     .for('update');
 
@@ -275,10 +276,10 @@ export async function sourceIdByName(tx: DB, name: string): Promise<string> {
 // ---------------------------------------------------------------------------
 /** Saved views (PRD 7.3) as SQL filters - "saved filters, not questions". */
 const VIEWS: Record<string, ReturnType<typeof sql>> = {
-  followups_due: sql`l.stage in ('new','contacted','interested','meeting_booked') and l.next_follow_up_at < (date_trunc('day', now() at time zone 'Asia/Kolkata') + interval '1 day') at time zone 'Asia/Kolkata'`,
-  overdue: sql`l.stage in ('new','contacted','interested','meeting_booked') and l.next_follow_up_at < now()`,
-  interested_not_bought: sql`l.stage in ('interested','meeting_booked')`,
-  open: sql`l.stage in ('new','contacted','interested','meeting_booked')`,
+  followups_due: sql`l.stage in (${OPEN_STAGES}) and l.next_follow_up_at < (date_trunc('day', now() at time zone 'Asia/Kolkata') + interval '1 day') at time zone 'Asia/Kolkata'`,
+  overdue: sql`l.stage in (${OPEN_STAGES}) and l.next_follow_up_at < now()`,
+  interested_not_bought: sql`l.stage in ('interested', 'meeting_booked', 'test_ride_booked', 'test_ride_done', 'quoted')`,
+  open: sql`l.stage in (${OPEN_STAGES})`,
   converted: sql`l.stage = 'converted'`,
   lost: sql`l.stage = 'lost'`,
 };
@@ -286,7 +287,8 @@ const VIEWS: Record<string, ReturnType<typeof sql>> = {
 /**
  * How likely a lead is to buy, as a number from 0 to 100, from what is already on record. The
  * rules are deliberately few and visible (the lead's page lists the points behind its score):
- *   - how far it has come: new 10, contacted 20, interested 40, meeting booked 55
+ *   - how far it has come: new 10, contacted 20, interested 40, meeting booked 55, test ride booked 60, test ride
+ *     done 65, quoted 70, booked 85
  *   - what it wants: 5 for naming an item, 15 if one of them sells for 5,000 or more
  *   - is it talking to us: 5 for each call, message, meeting or repeat enquiry in the last week
  *     (up to 15), and 10 more if they wrote to us in the last three days
@@ -298,7 +300,8 @@ const VIEWS: Record<string, ReturnType<typeof sql>> = {
 const SCORE_JOIN = sql`
   left join lateral (
     select
-      case l.stage when 'new' then 10 when 'contacted' then 20 when 'interested' then 40 when 'meeting_booked' then 55 end as stage_pts,
+      case l.stage when 'new' then 10 when 'contacted' then 20 when 'interested' then 40 when 'meeting_booked' then 55
+                   when 'test_ride_booked' then 60 when 'test_ride_done' then 65 when 'quoted' then 70 when 'booked' then 85 end as stage_pts,
       (select case when count(*) = 0 then 0 when max(i.retail_price) >= 5000 then 15 else 5 end
          from items i where i.id = any(l.interested_item_ids)) as interest_pts,
       (select least(15, 5 * count(*))::int from lead_activities a
@@ -312,7 +315,7 @@ const SCORE_JOIN = sql`
            else 0 end as fresh_pts,
       case when exists (select 1 from parties bp join invoices inv on inv.party_id = bp.id
                          where bp.phone = l.phone and inv.status <> 'cancelled') then 10 else 0 end as repeat_pts
-  ) pts on l.stage in ('new', 'contacted', 'interested', 'meeting_booked')
+  ) pts on l.stage in (${OPEN_STAGES})
   left join lateral (
     select greatest(0, least(100, pts.stage_pts + pts.interest_pts + pts.contact_pts + pts.fresh_pts + pts.repeat_pts))::int as score
   ) sc on pts.stage_pts is not null`;
@@ -341,7 +344,7 @@ export function leadsRouter(db: DB) {
     const owner = q.mine === 'true' ? req.user!.id : (q.owner_id ?? null);
     const data = await rows(db, sql`
       select l.*, s.name as source_name, o.name as owner_name, lr.name as lost_reason, ${SCORE_COLS},
-             (l.stage in ('new','contacted','interested','meeting_booked') and l.next_follow_up_at < now()) as overdue,
+             (l.stage in (${OPEN_STAGES}) and l.next_follow_up_at < now()) as overdue,
              (select coalesce(array_agg(i.name order by i.name), '{}') from items i where i.id = any(l.interested_item_ids)) as interested_items
         from leads l
         join lead_sources s on s.id = l.source_id
@@ -427,17 +430,18 @@ export function leadsRouter(db: DB) {
     const data = await rows(db, sql`
       select l.id, l.lead_no, l.name, l.phone, l.stage, l.next_follow_up_at, l.owner_id, o.name as owner_name,
              s.name as source_name, l.deal_value, l.party_id, ${SCORE_COLS},
-             (l.stage in ('new','contacted','interested','meeting_booked') and l.next_follow_up_at < now()) as overdue,
+             (l.stage in (${OPEN_STAGES}) and l.next_follow_up_at < now()) as overdue,
              coalesce(l.deal_value, (select coalesce(sum(i.retail_price), 0) from items i where i.id = any(l.interested_item_ids))) as value,
              case when l.deal_value is null then 'items' else 'deal' end as value_from
         from leads l join lead_sources s on s.id = l.source_id left join users o on o.id = l.owner_id
         ${SCORE_JOIN}
-       where (l.stage in ('new','contacted','interested','meeting_booked')
+       where (l.stage in (${OPEN_STAGES})
               or (l.stage = 'converted' and l.converted_at >= now() - interval '30 days')
+              or (l.stage = 'delivered' and l.updated_at >= now() - interval '30 days')
               or (l.stage = 'lost' and l.updated_at >= now() - interval '30 days'))
          and (${owner}::uuid is null or l.owner_id = ${owner}::uuid)
        order by l.next_follow_up_at asc nulls last`);
-    res.json({ data, stages: ['new', 'contacted', 'interested', 'meeting_booked', 'converted', 'lost'] });
+    res.json({ data, stages: LEAD_STAGES });
   });
 
   r.get('/:id', requirePerm('leads:read'), async (req, res) => {

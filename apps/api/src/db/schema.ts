@@ -10,6 +10,7 @@ import {
   LEAD_ACTIVITY_TYPES, LEAD_STAGES, LOCATION_TYPES, MOVEMENT_TYPES, OPENING_STATUSES, ORDER_STATUSES, PARTY_TYPES,
   PAYMENT_DIRECTIONS, PAYMENT_MODES, PO_STATUSES, PROJECT_STATUSES, REJECT_REASONS, ROLES, TASK_FREQUENCIES, TASK_STATUSES,
   RESERVATION_STATUSES, UNIT_STATUSES, CLAIM_STATUSES, JOB_CARD_STATUSES, JOB_LINE_KINDS, IMPORT_STAGES, LANDED_COST_BASES, LANDED_COST_KINDS,
+  TEST_RIDE_OUTCOMES,
 } from '@radcore/shared';
 
 // Money is numeric(12,2) in INR, quantities numeric(12,3) (PRD section 8).
@@ -1242,7 +1243,7 @@ export const files = pgTable('files', {
   size: integer('size').notNull(),
   sha256: text('sha256').notNull(),
   ...stamps,
-}, (t) => [check('files_purpose_chk', sql`${t.purpose} in ('resume', 'bill', 'item_image', 'share', 'other', 'service')`)]);
+}, (t) => [check('files_purpose_chk', sql`${t.purpose} in ('resume', 'bill', 'item_image', 'share', 'other', 'service', 'delivery')`)]);
 
 /**
  * A file sent to a lead through a link of its own, and whether they have opened it. The token is
@@ -1993,3 +1994,42 @@ export const landedCostAllocations = pgTable('landed_cost_allocations', {
   toStock: money('to_stock').notNull(),
   toCogs: money('to_cogs').notNull(),
 }, (t) => [index('landed_cost_allocations_application_idx').on(t.applicationId)]);
+
+// ----------------------------------------------------------------------------
+// Sales pipeline for vehicles: test rides and the delivery checklist (modules/pipeline.ts)
+// ----------------------------------------------------------------------------
+export const testRideOutcomeEnum = pgEnum('test_ride_outcome', TEST_RIDE_OUTCOMES);
+
+/** A test ride for a lead on a demo unit, in a slot. No demo unit is booked twice for the same time. */
+export const testRides = pgTable('test_rides', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  leadId: uuid('lead_id').notNull().references(() => leads.id),
+  unitId: uuid('unit_id').notNull().references(() => units.id),
+  slotAt: ts('slot_at').notNull(),
+  minutes: integer('minutes').notNull().default(30),
+  staffId: uuid('staff_id').references(() => users.id),
+  outcome: testRideOutcomeEnum('outcome').notNull().default('booked'),
+  notes: text('notes'),
+  ...stamps,
+}, (t) => [
+  index('test_rides_unit_idx').on(t.unitId, t.slotAt),
+  index('test_rides_lead_idx').on(t.leadId),
+  check('test_rides_minutes_chk', sql`${t.minutes} between 5 and 480`),
+]);
+
+/**
+ * The checks before a vehicle is handed over: the pre-delivery inspection, the rider briefing, the
+ * warranty registered, a photo at delivery and the signed delivery note. A delivery of a vehicle item
+ * cannot post until every one is done (modules/sales.ts deliverOrder).
+ */
+export const deliveryChecks = pgTable('delivery_checks', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  salesOrderId: uuid('sales_order_id').notNull().unique().references(() => salesOrders.id),
+  pdiDone: boolean('pdi_done').notNull().default(false),
+  riderBriefing: boolean('rider_briefing').notNull().default(false),
+  warrantyRegistered: boolean('warranty_registered').notNull().default(false),
+  photoFileId: uuid('photo_file_id').references(() => files.id),
+  signedNoteFileId: uuid('signed_note_file_id').references(() => files.id),
+  checkedBy: uuid('checked_by').references(() => users.id),
+  ...stamps,
+});

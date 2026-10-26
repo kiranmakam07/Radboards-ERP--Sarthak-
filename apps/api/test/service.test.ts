@@ -2,7 +2,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addMonths, formatDate, istDate } from '@radcore/shared';
 import { rows, sql } from '../src/db/client';
-import { expectBooksHealthy, gstin, masters, setup, type World } from './helpers';
+import { deliveryChecksDone, expectBooksHealthy, gstin, masters, setup, type World } from './helpers';
 
 /**
  * Service and warranty (P2 of the brief), with figures worked out by hand.
@@ -50,7 +50,8 @@ beforeAll(async () => {
     kind: 'opening', location_id: m.showroom, reason: 'Opening', lines: [{ item_id: id.scooter, qty_change: '2', unit_cost: '60000', serials: ['SC-1', 'SC-2'] }],
   }).expect(201);
   await admin.post(`/api/stock/adjustments/${scooters.body.data.id}/approve`).send({}).expect(200);
-  await (await w.as('store')).post('/api/sales/quick-bill').send({ party_id: id.customer, lines: [{ item_id: id.scooter, qty: 2, serials: ['SC-1', 'SC-2'] }], payments: [{ mode: 'upi', amount: 168000 }] }).expect(201);
+  const checks = await deliveryChecksDone(w);
+  await (await w.as('store')).post('/api/sales/quick-bill').send({ party_id: id.customer, lines: [{ item_id: id.scooter, qty: 2, serials: ['SC-1', 'SC-2'] }], payments: [{ mode: 'upi', amount: 168000 }], delivery_checks: checks }).expect(201);
   await stores.post(`/api/units/${(await unit('SC-1')).id}/components`).send({ item_id: id.pack, serial_no: 'BP-OLD', batch_no: 'CELLS-9' }).expect(201);
   await w.db.execute(sql`update units set sold_on = ${addMonths(today, -13)}::date where serial_no in ('SC-1', 'BP-OLD')`);
   await w.db.execute(sql`update units set sold_on = ${addMonths(today, -30)}::date where serial_no = 'SC-2'`);

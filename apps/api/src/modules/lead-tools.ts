@@ -11,6 +11,7 @@ import { badRequest, must } from '../lib/errors';
 import { emptyToNull, inTx, zId, zText } from '../lib/http';
 import { captureLead } from './leads';
 import { plansWithCounts, startPlan, stopPlan, type PlanStep } from './plans';
+import { OPEN_STAGES } from '../core/stages';
 
 /**
  * Working leads in numbers rather than one at a time: bringing a list in from a spreadsheet,
@@ -103,7 +104,7 @@ export function leadToolsRouter(db: DB) {
       const [owner] = await ctx.tx.select().from(users).where(eq(users.id, b.owner_id));
       if (!owner || !owner.active) throw badRequest('That person does not have an active sign-in');
       const changed = await ctx.tx.update(leads).set({ ownerId: b.owner_id, updatedAt: new Date() })
-        .where(sql`${inArray(leads.id, b.ids)} and ${leads.stage} in ('new', 'contacted', 'interested', 'meeting_booked') and ${leads.ownerId} is distinct from ${b.owner_id}`)
+        .where(sql`${inArray(leads.id, b.ids)} and ${leads.stage} in (${OPEN_STAGES}) and ${leads.ownerId} is distinct from ${b.owner_id}`)
         .returning({ id: leads.id });
       await audit(ctx, 'lead', 'bulk', 'bulk_assign', null, { owner_id: b.owner_id, owner: owner.name, leads: changed.map((c) => c.id) });
       return { moved: changed.length, owner: owner.name };

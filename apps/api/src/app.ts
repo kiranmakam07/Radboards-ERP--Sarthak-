@@ -38,6 +38,7 @@ import { tdsRouter } from './modules/tds';
 import { unitsRouter } from './modules/units';
 import { publicEstimateRouter, serviceRouter } from './modules/service';
 import { importsRouter } from './modules/imports';
+import { pipelineRouter } from './modules/pipeline';
 
 /**
  * The API's front door. createApp builds the Express app: every router in the system is mounted
@@ -178,6 +179,8 @@ export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   app.use('/api/leads', leadToolsRouter(db));
   app.use('/api/leads', leadsRouter(db));
   app.use('/api/crm', crmRouter(db, deps));
+  // Test rides and bookings for vehicles (the leads' pipeline).
+  app.use('/api/pipeline', pipelineRouter(db));
   // Sales
   app.use('/api/sales/online', onlineRouter(db, deps));
   app.use('/api/sales', reservationsRouter(db));
