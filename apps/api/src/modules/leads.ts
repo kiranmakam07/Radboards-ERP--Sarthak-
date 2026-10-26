@@ -18,6 +18,7 @@ import {
 } from '../lib/http';
 import { createParty, type Party } from './parties';
 import { OPEN_STAGES } from '../core/stages';
+import { logAccess } from '../core/access';
 
 /**
  * Leads: every enquiry, from first contact to won or lost.
@@ -52,6 +53,8 @@ export type CaptureInput = {
   ownerId?: string | null;
   nextFollowUpAt?: Date | null;
   attendedBy?: string | null;
+  /** DPDP: how the person agreed to be contacted (their own enquiry form, told our staff); none when not known. */
+  consentSource?: string | null;
   address?: unknown;
   gstin?: string | null;
 };
@@ -114,6 +117,7 @@ export async function captureLead(ctx: Ctx, input: CaptureInput): Promise<{ lead
     });
     const merged = [...new Set([...existing.interestedItemIds, ...(input.interestedItemIds ?? [])])];
     const patch: Partial<typeof leads.$inferInsert> = { interestedItemIds: merged, updatedAt: new Date() };
+    if (input.consentSource && !existing.consentAt) Object.assign(patch, { consentAt: new Date(), consentSource: input.consentSource });
     // "It can be reopened to Contacted if the person comes back" (PRD 6.1).
     if (existing.stage === 'lost') {
       patch.stage = 'contacted';
@@ -153,6 +157,8 @@ export async function captureLead(ctx: Ctx, input: CaptureInput): Promise<{ lead
       address: (input.address as object) ?? null,
       gstin: input.gstin ?? null,
       notes: input.notes ?? null,
+      consentAt: input.consentSource ? new Date() : null,
+      consentSource: input.consentSource ?? null,
       createdBy: ctx.user?.id ?? null,
     })
     .returning();
@@ -246,6 +252,9 @@ export async function convertLead(
       shipping_address: null,
       lead_id: lead!.id,
     });
+  }
+  if (lead!.consentAt && !party.consentAt) {
+    await tx.update(parties).set({ consentAt: lead!.consentAt, consentSource: lead!.consentSource }).where(eq(parties.id, party.id));
   }
   const [updated] = await tx
     .update(leads)
@@ -462,6 +471,7 @@ export function leadsRouter(db: DB) {
         ${SCORE_JOIN}
        where l.id = ${id}`);
     must(lead, 'Lead');
+    await logAccess(db, req.user!.id, 'lead', id);
     const activities = await rows(db, sql`
       select a.id, a.type, a.note, a.at, u.name as user_name
         from lead_activities a left join users u on u.id = a.user_id
@@ -487,6 +497,8 @@ export function leadsRouter(db: DB) {
     next_follow_up_at: emptyToNull(zWhen).optional(),
     address: zAddress.nullish(),
     gstin: emptyToNull(zGstin).optional(),
+    /** The person agreed, to our staff, to be contacted (DPDP). */
+    consent: z.boolean().optional(),
   });
 
   /** Manual capture: quick add by any sales or store user (PRD 7.1). */
@@ -496,7 +508,7 @@ export function leadsRouter(db: DB) {
       captureLead(ctx, {
         name: b.name, phone: b.phone, email: b.email, sourceId: b.source_id, sourceDetail: b.source_detail,
         campaignId: b.campaign_id, interestedItemIds: b.interested_item_ids, notes: b.notes, ownerId: b.owner_id,
-        nextFollowUpAt: b.next_follow_up_at, address: b.address, gstin: b.gstin,
+        nextFollowUpAt: b.next_follow_up_at, address: b.address, gstin: b.gstin, consentSource: b.consent ? 'told our staff' : null,
       }));
     res.status(result.duplicate ? 200 : 201).json({ data: result.lead, duplicate: result.duplicate });
   });
@@ -513,12 +525,14 @@ export function leadsRouter(db: DB) {
       interested_item_ids: z.array(zId).max(20).default([]),
       notes: emptyToNull(z.string().trim().max(2000)).optional(),
       outcome: z.enum(['enquiry', 'buying_now']),
+      /** The person agreed, at the counter, to be contacted (DPDP). */
+      consent: z.boolean().optional(),
     }).parse(req.body);
     const result = await inTx(db, req, async (ctx) => {
       const sourceId = await sourceIdByName(ctx.tx, 'Walk-in');
       const captured = await captureLead(ctx, {
         name: b.name, phone: b.phone, sourceId, interestedItemIds: b.interested_item_ids, notes: b.notes,
-        attendedBy: ctx.user!.id,
+        attendedBy: ctx.user!.id, consentSource: b.consent ? 'told our staff (walk-in)' : null,
       });
       if (b.outcome === 'buying_now') {
         const { lead, party } = await convertLead(ctx, captured.lead.id, { partyType: 'customer', name: b.name });
@@ -680,7 +694,7 @@ export function publicLeadsRouter(db: DB) {
     await db.transaction(async (tx) => {
       await captureLead({ tx: tx as unknown as DB, user: null }, {
         name: b.name, phone: b.phone, email: b.email, sourceId: c.sourceId, sourceDetail: c.name, campaignId: c.id,
-        interestedItemIds: b.interested_item_ids, notes: b.message,
+        interestedItemIds: b.interested_item_ids, notes: b.message, consentSource: `their own enquiry form (${c.name})`,
       });
     });
     res.status(201).json({ ok: true });

@@ -1,7 +1,7 @@
 import { createApp } from './app';
 import { config } from './config';
 import { loadPermissionOverrides } from './core/settings';
-import { createDb, isPostgresUrl } from './db/client';
+import { createDb, isPostgresUrl, type DbHandle } from './db/client';
 import { seedReviewCopy } from './db/demo';
 import { ensureAdmin, seedDefaults } from './db/seed';
 
@@ -20,7 +20,16 @@ if (config.isProd && !isPostgresUrl(config.databaseUrl)) {
   process.exit(1);
 }
 
-const handle = await createDb(config.databaseUrl, config.migrationsFolder);
+// Migrations change the tables, so with a separate owner login they run as the owner, and the API then
+// works as a user that can only read and write rows (brief P3, least privilege).
+let handle: DbHandle;
+if (isPostgresUrl(config.migrationDatabaseUrl)) {
+  const owner = await createDb(config.migrationDatabaseUrl, config.migrationsFolder, { poolSize: 1 });
+  await owner.close();
+  handle = await createDb(config.databaseUrl, config.migrationsFolder, { migrate: false });
+} else {
+  handle = await createDb(config.databaseUrl, config.migrationsFolder);
+}
 await seedDefaults(handle.db);
 await loadPermissionOverrides(handle.db);
 // A review copy starts with sample data and its own sign-ins instead of a single empty admin.

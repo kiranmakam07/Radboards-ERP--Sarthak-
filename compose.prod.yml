@@ -12,8 +12,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
       POSTGRES_DB: radcore
       TZ: Asia/Kolkata
+      # The login the API uses: rows only, no CREATE, ALTER or DROP (deploy/db-app-user.sh, brief P3).
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env.production}
     volumes:
       - db_data:/var/lib/postgresql/data
+      - ./deploy/db-app-user.sh:/docker-entrypoint-initdb.d/20-app-user.sh:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U radcore -d radcore']
       interval: 10s
@@ -31,7 +34,9 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: postgres://radcore:${POSTGRES_PASSWORD}@db:5432/radcore
+      # Least privilege: the API works as radcore_app; only the migrations at start use the owner.
+      DATABASE_URL: postgres://radcore_app:${APP_DB_PASSWORD}@db:5432/radcore
+      MIGRATION_DATABASE_URL: postgres://radcore:${POSTGRES_PASSWORD}@db:5432/radcore
       WEB_ORIGIN: https://${DOMAIN:?set DOMAIN in .env.production}
       COOKIE_SECURE: 'true'
       # The API sits behind exactly one proxy (Caddy), so the caller's real address is one hop back.
@@ -91,7 +96,9 @@ services:
       - caddy_config:/config
 
   backup:
-    image: postgres:16
+    build:
+      context: .
+      dockerfile: deploy/backup.Dockerfile
     restart: unless-stopped
     depends_on:
       db:
@@ -103,6 +110,11 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD}
       TZ: Asia/Kolkata
       KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+      # Off-site copies (blank = none): an S3 bucket in Mumbai and a key that may only put files in it.
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-ap-south-1}
     volumes:
       - ./deploy/backup.sh:/backup.sh:ro
       - ./backups:/backups

@@ -37,6 +37,12 @@ export const config = {
    * give two addresses; where there is only one, it is the same as databaseUrl.
    */
   directDatabaseUrl: env.DATABASE_URL_UNPOOLED ?? env.POSTGRES_URL_NON_POOLING ?? env.DATABASE_URL ?? env.POSTGRES_URL ?? '',
+  /**
+   * Least privilege (brief P3): the database owner's address, used only to apply migrations at start.
+   * When set, the API itself connects with DATABASE_URL as a user that can read and write rows but
+   * cannot drop or alter anything (deploy/db-app-user.sh makes it). Unset: one user does both.
+   */
+  migrationDatabaseUrl: env.MIGRATION_DATABASE_URL ?? '',
   /** True on a host that runs the API once per request instead of as a server (Vercel). */
   serverless: Boolean(env.VERCEL),
   sessionTtlDays: Number(env.SESSION_TTL_DAYS ?? 14),

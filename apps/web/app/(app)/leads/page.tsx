@@ -53,10 +53,11 @@ function Leads() {
               { name: 'owner_id', label: 'Owner (blank = auto-assign)', type: 'select', options: (users.data?.data ?? []).map((u) => ({ value: u.id, label: `${u.name} (${u.role})` })) },
               { name: 'next_follow_up_at', label: 'First follow-up', type: 'datetime-local' },
               { name: 'notes', label: 'Notes', type: 'textarea' },
+              { name: 'consent', label: 'They agreed to be contacted by us (calls, WhatsApp)', type: 'checkbox' },
             ]}
             onSubmit={async ({ item, next_follow_up_at, deal_value, ...v }) => {
               const made = await post<{ data: { id: string } }>('/leads', {
-                ...v, interested_item_ids: item ? [item] : [],
+                ...v, consent: Boolean(v.consent), interested_item_ids: item ? [item] : [],
                 next_follow_up_at: next_follow_up_at ? new Date(next_follow_up_at).toISOString() : null,
               });
               if (deal_value) await patch(`/leads/${made.data.id}`, { deal_value });

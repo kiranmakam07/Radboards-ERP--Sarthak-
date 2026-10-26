@@ -98,6 +98,7 @@ export default function LeadPage() {
           ['Interested in', (lead.interested_items ?? []).map((i: any) => i.name).join(', ')],
           ['Party', lead.party_id ? <Link href={`/parties/${lead.party_id}`}>{lead.party_name}</Link> : null],
           ['Captured', dateTime(lead.created_at)], ['Converted', dateTime(lead.converted_at)],
+          ['Agreed to be contacted', lead.consent_at ? `${dateTime(lead.consent_at)} · ${lead.consent_source}` : <span className="muted">Not recorded</span>],
           ['Notes', lead.notes],
         ]} />
       </Card>

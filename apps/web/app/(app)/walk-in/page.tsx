@@ -23,6 +23,8 @@ export default function WalkInPage() {
   const [name, setName] = useState('');
   const [interested, setInterested] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
+  // DPDP: the person agreed, at the counter, to be contacted.
+  const [consent, setConsent] = useState(false);
   const [found, setFound] = useState<Lookup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -46,13 +48,13 @@ export default function WalkInPage() {
   async function save(outcome: 'enquiry' | 'buying_now') {
     setBusy(true); setError(null); setSaved(null);
     try {
-      const res = await post('/leads/walk-in', { phone, name, interested_item_ids: interested, notes, outcome });
+      const res = await post('/leads/walk-in', { phone, name, interested_item_ids: interested, notes, outcome, consent });
       if (outcome === 'buying_now') {
         router.push(`/quick-bill?party_id=${res.data.party.id}&items=${interested.join(',')}`);
         return;
       }
       setSaved(`Saved ${res.data.lead.lead_no}${res.data.duplicate ? ' (added to their existing enquiry)' : ''}.`);
-      setPhone(''); setName(''); setInterested([]); setNotes(''); setFound(null);
+      setPhone(''); setName(''); setInterested([]); setNotes(''); setFound(null); setConsent(false);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -100,6 +102,7 @@ export default function WalkInPage() {
             </div>
           )}
           <label><span>Notes</span><textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+          <label className="check"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> <span>They agreed to be contacted by us (calls, WhatsApp)</span></label>
           <div className="choice">
             <button type="button" disabled={busy || !phone || !name} onClick={() => save('enquiry')}>Just enquiring</button>
             <button type="button" className="on" disabled={busy || !phone || !name} onClick={() => save('buying_now')}>Buying now →</button>

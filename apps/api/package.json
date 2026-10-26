@@ -10,6 +10,7 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "prepare:db": "tsx src/prepare.ts",
+    "integrity": "tsx src/integrity-cli.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json",
     "demo": "tsx src/demo-server.ts"

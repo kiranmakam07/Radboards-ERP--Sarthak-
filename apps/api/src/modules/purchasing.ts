@@ -1,8 +1,8 @@
-import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  round2, D, LANDED_COST_KINDS, PO_STATUSES, addDays, computeLine, computeTotals, isInterState, istDate, money, qty as fmtQty,
+  round2, D, LANDED_COST_KINDS, PO_STATUSES, ROLES, can, addDays, computeLine, computeTotals, isInterState, istDate, money, qty as fmtQty,
   type LandedCostKind, type LineTax,
 } from '@radcore/shared';
 import { audit } from '../core/audit';
@@ -15,7 +15,7 @@ import { taxRateOn } from '../core/taxrates';
 import { batchFor, cleanSerials, needsSerials, unitsIn } from '../core/units';
 import { rows, type DB } from '../db/client';
 import {
-  goodsReceiptLines, goodsReceipts, importShipments, items, jobWorks, landedCostLines, parties, purchaseBillLines, purchaseBills, purchaseOrderLines,
+  goodsReceiptLines, goodsReceipts, importShipments, poApprovalLimits, items, jobWorks, landedCostLines, parties, purchaseBillLines, purchaseBills, purchaseOrderLines,
   purchaseOrders, purchaseReturnLines, purchaseReturns,
 } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
@@ -103,6 +103,12 @@ async function setPoStatus(ctx: Ctx, po: PO, status: PO['status'], extra: object
   const [updated] = await ctx.tx.update(purchaseOrders).set({ status, updatedAt: new Date() }).where(eq(purchaseOrders.id, po.id)).returning();
   await audit(ctx, 'purchase_order', po.id, 'status_change', { status: po.status }, { status, ...extra });
   return updated!;
+}
+
+/** What a PO comes to with GST, in rupees: what its approval limit is measured against. */
+async function poTotal(tx: DB, poId: string) {
+  const lines = await tx.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, poId));
+  return computeTotals(lines.map((l) => computeLine({ qty: l.qty, rate: l.rate, gstRate: l.gstRate }, false, false)), false).grandTotal;
 }
 
 async function refreshPoStatus(ctx: Ctx, poId: string): Promise<void> {
@@ -270,7 +276,7 @@ export async function createPurchaseBill(
     const [po] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, input.purchaseOrderId)).for('update');
     must(po, 'Purchase order');
     if (po!.supplierId !== supplier.id) throw badRequest('That purchase order is for a different supplier');
-    if (po!.status === 'draft' || po!.status === 'cancelled') throw conflict(`PO ${po!.poNo} is ${po!.status}`);
+    if (['draft', 'cancelled', 'pending_approval'].includes(po!.status)) throw conflict(`PO ${po!.poNo} is ${po!.status.replace('_', ' ')}`);
     poLines = await tx.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, po!.id));
   }
   // Supplier in another state charges IGST; same state charges CGST + SGST.
@@ -608,6 +614,47 @@ export function purchasingRouter(db: DB) {
   });
 
   /** draft -> sent (placed with the supplier) | sent -> closed (short-close) | cancel before any receipt. */
+  /** Approve a PO waiting above its sender's limit: it is sent. Or send it back to draft, with the reason. */
+  r.post('/orders/:id/approve', requirePerm('po:approve'), async (req, res) => {
+    const id = zId.parse(req.params.id);
+    res.json({ data: await inTx(db, req, async (ctx) => {
+      const [row] = await ctx.tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).for('update');
+      must(row, 'Purchase order');
+      if (row!.status !== 'pending_approval') throw conflict(`PO ${row!.poNo} is not waiting for approval`);
+      return setPoStatus(ctx, row!, 'sent', { approved: true });
+    }) });
+  });
+  r.post('/orders/:id/reject', requirePerm('po:approve'), async (req, res) => {
+    const id = zId.parse(req.params.id);
+    const b = z.object({ reason: zText(500) }).parse(req.body);
+    res.json({ data: await inTx(db, req, async (ctx) => {
+      const [row] = await ctx.tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).for('update');
+      must(row, 'Purchase order');
+      if (row!.status !== 'pending_approval') throw conflict(`PO ${row!.poNo} is not waiting for approval`);
+      return setPoStatus(ctx, row!, 'draft', { rejected: b.reason });
+    }) });
+  });
+
+  /** The amount each role may send a PO for (with GST); above it the PO waits for approval. */
+  r.get('/approval-limits', requirePerm('purchasing:read'), async (_req, res) => {
+    res.json({ data: await db.select().from(poApprovalLimits).orderBy(asc(poApprovalLimits.role)) });
+  });
+  r.put('/approval-limits', requirePerm('settings:manage'), async (req, res) => {
+    const b = z.object({ limits: z.array(z.object({ role: z.enum(ROLES), max_amount: emptyToNull(zMoney) })).max(ROLES.length) }).parse(req.body);
+    await inTx(db, req, async (ctx) => {
+      const before = await ctx.tx.select().from(poApprovalLimits);
+      for (const l of b.limits) {
+        if (l.max_amount == null) await ctx.tx.delete(poApprovalLimits).where(eq(poApprovalLimits.role, l.role));
+        else {
+          await ctx.tx.insert(poApprovalLimits).values({ role: l.role, maxAmount: money(l.max_amount), createdBy: ctx.user!.id })
+            .onConflictDoUpdate({ target: poApprovalLimits.role, set: { maxAmount: money(l.max_amount), updatedAt: new Date() } });
+        }
+      }
+      await audit(ctx, 'settings', 'po_approval_limits', 'update', before, b.limits);
+    });
+    res.json({ data: await db.select().from(poApprovalLimits).orderBy(asc(poApprovalLimits.role)) });
+  });
+
   r.post('/orders/:id/:action', requirePerm('po:write'), async (req, res, next) => {
     const action = req.params.action;
     if (!['send', 'close', 'cancel'].includes(String(action))) return next();
@@ -616,14 +663,20 @@ export function purchasingRouter(db: DB) {
       const [row] = await ctx.tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).for('update');
       must(row, 'Purchase order');
       if (action === 'send') {
-        if (row!.status !== 'draft') throw conflict(`PO is already ${row!.status}`);
+        if (row!.status !== 'draft') throw conflict(`PO is already ${row!.status.replace('_', ' ')}`);
+        // Over the sender's limit (with GST), it waits for someone who may approve it; they send it straight away.
+        const total = await poTotal(ctx.tx, row!.id);
+        const [limit] = await ctx.tx.select().from(poApprovalLimits).where(eq(poApprovalLimits.role, ctx.user!.role));
+        if (limit && total.gt(limit.maxAmount) && !can(ctx.user!.role, 'po:approve')) {
+          return setPoStatus(ctx, row!, 'pending_approval', { total: money(total), limit: limit.maxAmount });
+        }
         return setPoStatus(ctx, row!, 'sent');
       }
       if (action === 'close') {
         if (!['sent', 'partly_received', 'received'].includes(row!.status)) throw conflict(`A ${row!.status} PO cannot be closed`);
         return setPoStatus(ctx, row!, 'closed');
       }
-      if (!['draft', 'sent'].includes(row!.status)) throw conflict('Goods have been received against this PO, so it cannot be cancelled. Close it instead.');
+      if (!['draft', 'sent', 'pending_approval'].includes(row!.status)) throw conflict('Goods have been received against this PO, so it cannot be cancelled. Close it instead.');
       const [grn] = await rows(ctx.tx, sql`select 1 as x from goods_receipts where purchase_order_id = ${id} and status <> 'cancelled' limit 1`);
       if (grn) throw conflict('There is a goods receipt against this PO');
       return setPoStatus(ctx, row!, 'cancelled');

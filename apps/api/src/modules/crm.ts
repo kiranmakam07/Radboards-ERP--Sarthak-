@@ -93,6 +93,8 @@ async function capture(
   const { lead } = await captureLead(ctx, {
     name: (incoming.name ?? o.fallbackName).slice(0, 150), phone, email: incoming.email, sourceId: o.sourceId,
     sourceDetail: o.sourceDetail?.slice(0, 200) ?? null, campaignId: o.campaignId ?? null, externalRef: o.externalRef, notes,
+    // They sent this enquiry themselves (a lead form, a message): DPDP consent, and how it was given.
+    consentSource: `their own enquiry${o.sourceDetail ? ` (${o.sourceDetail.slice(0, 100)})` : ''}`,
   });
   return lead;
 }
@@ -501,6 +503,7 @@ export function hooksRouter(db: DB, deps: CrmDeps = defaultDeps) {
       await captureLead({ tx: tx as unknown as DB, user: null }, {
         name: name.slice(0, 150), phone, email: isEmail(pick('email', 'email_address')), sourceId: c.sourceId, sourceDetail: c.name, campaignId: c.id,
         notes: pick('message', 'notes', 'comments', 'enquiry', 'requirement')?.slice(0, 1000) ?? null,
+        consentSource: `their own enquiry form (${c.name})`,
       });
     });
     res.status(201).json({ ok: true });

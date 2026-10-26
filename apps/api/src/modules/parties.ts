@@ -1,13 +1,14 @@
 import { eq, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { PARTY_TYPES, STATE_CODES, can, isValidPan, normalisePan, stateCodeFromGstin } from '@radcore/shared';
+import { PARTY_TYPES, STATE_CODES, can, isValidPan, istDate, normalisePan, stateCodeFromGstin } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
 import { getCompany } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { parties } from '../db/schema';
 import { badRequest, forbidden, must } from '../lib/errors';
+import { logAccess } from '../core/access';
 import {
   emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zMoney, zPhone, zStateCode, zText, wantsFile, type Ctx,
 } from '../lib/http';
@@ -123,6 +124,7 @@ export function partiesRouter(db: DB) {
     const id = zId.parse(req.params.id);
     const [party] = await db.select().from(parties).where(eq(parties.id, id));
     must(party, 'Party');
+    await logAccess(db, req.user!.id, 'party', id);
     const open_invoices = await rows(db, sql`
       select invoice_id, invoice_no, invoice_date, due_date, grand_total, outstanding, payment_status
         from v_invoice_outstanding where party_id = ${id} and outstanding > 0 order by invoice_date`);
@@ -149,6 +151,7 @@ export function partiesRouter(db: DB) {
   r.patch('/:id', requirePerm('parties:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const body = zParty.omit({ party_type: true }).partial().parse(req.body);
+    const consent = z.object({ consent: z.boolean().optional() }).parse(req.body);
     const updated = await inTx(db, req, async (ctx) => {
       const [before] = await ctx.tx.select().from(parties).where(eq(parties.id, id)).for('update');
       must(before, 'Party');
@@ -167,6 +170,9 @@ export function partiesRouter(db: DB) {
       if (body.credit_limit !== undefined) patch.creditLimit = body.credit_limit;
       if (body.payment_terms_days !== undefined) patch.paymentTermsDays = body.payment_terms_days;
       if (body.active !== undefined) patch.active = body.active;
+      // DPDP: record that the customer agreed to be contacted (told our staff), or that they withdrew it.
+      if (consent.consent === true && !before!.consentAt) Object.assign(patch, { consentAt: new Date(), consentSource: 'told our staff' });
+      if (consent.consent === false) Object.assign(patch, { consentAt: null, consentSource: `withdrawn ${istDate()}` });
       const [row] = await ctx.tx.update(parties).set(patch).where(eq(parties.id, id)).returning();
       await audit(ctx, 'party', id, 'update', before, row);
       return row;

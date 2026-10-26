@@ -65,7 +65,7 @@ whose DNS points at the server.
 cp .env.production.example .env.production
 ```
 
-Fill in `DOMAIN`, `POSTGRES_PASSWORD` and the first admin's phone and password, then:
+Fill in `DOMAIN`, `POSTGRES_PASSWORD`, `APP_DB_PASSWORD` and the first admin's phone and password, then:
 
 ```bash
 docker compose --env-file .env.production -f compose.prod.yml up -d --build
@@ -75,9 +75,19 @@ docker compose --env-file .env.production -f compose.prod.yml up -d --build
   Setup → Company profile and add the users.
 - **Updating:** `git pull`, then the same `up -d --build` command. Database migrations are
   applied automatically when the API starts.
+- **Least privilege:** the API works as `radcore_app`, a database login that can read and write rows
+  but cannot create, alter or drop anything; only the migrations at start run as the owner
+  (`MIGRATION_DATABASE_URL`). `deploy/db-app-user.sh` makes that login on a new database by itself;
+  on a database made before it, run it once:
+  `docker compose --env-file .env.production -f compose.prod.yml exec db bash /docker-entrypoint-initdb.d/20-app-user.sh`
 - **Backups:** one compressed dump per day in `./backups` on the server, kept for
-  `BACKUP_KEEP_DAYS` (30). They are on the same disk as the database, so also copy that
-  folder off the server (provider snapshots or object storage).
+  `BACKUP_KEEP_DAYS` (30). With `BACKUP_S3_BUCKET` and an AWS key set, each dump and each copy of the
+  attached files also goes to that bucket in Mumbai (`db/` and `uploads/`), so a lost server does not
+  take the backups with it. Make the bucket private, give the key permission only to put and list files
+  in it, and set how long copies are kept with a lifecycle rule on the bucket (for example 90 days).
+- **Restore drill:** `./deploy/restore-drill.sh` restores the newest backup into a scratch database
+  and checks the books in it (`--from-s3` takes the newest off-site copy instead). Run it monthly from
+  cron: `30 3 1 * * cd /opt/radcore && ./deploy/restore-drill.sh >> backups/restore-drill.log 2>&1`.
 - **Attached files** (resumes, bill photos) are kept on their own volume, not in the database, and are
   copied into `./backups` as `uploads_<date>.tar.gz` alongside the database dump.
 - **Restore:** `docker compose --env-file .env.production -f compose.prod.yml exec -T db pg_restore --clean --if-exists -U radcore -d radcore < backups/<file>.dump`
@@ -261,6 +271,7 @@ the bank's CSV download still works.
 | `npm run build:web` | Production build of the web app |
 | `npm run db:generate` | Generate a SQL migration after editing `apps/api/src/db/schema.ts` |
 | `npm run db:migrate` | Apply pending migrations |
+| `npm run integrity -w @radcore/api -- postgres://…` | The books health check against any database (used by the restore drill) |
 
 ## How the backend keeps the books right
 

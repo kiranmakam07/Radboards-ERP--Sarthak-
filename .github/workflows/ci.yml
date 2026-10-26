@@ -58,6 +58,7 @@ jobs:
     env:
       DOMAIN: ci.localhost
       POSTGRES_PASSWORD: ci0only0password
+      APP_DB_PASSWORD: ci0only0apppassword
       SEED_ADMIN_PHONE: '+919000000000'
       SEED_ADMIN_PASSWORD: ci-only-admin-password
     steps:
@@ -98,6 +99,12 @@ jobs:
           if (report.status !== 200) throw new Error(`trial balance returned ${report.status}`);
           console.log('API: signed in on PostgreSQL and read the trial balance');
           JS
+      - name: The API's own database login cannot change or drop tables
+        run: |
+          if docker compose -f compose.prod.yml exec -T db psql -U radcore_app -d radcore -c 'DROP TABLE users'; then
+            echo 'radcore_app was able to drop a table'; exit 1
+          fi
+          echo 'Least privilege: radcore_app is refused DROP TABLE'
       - name: Web app serves the login page
         run: |
           docker compose -f compose.prod.yml exec -T web node -e "fetch('http://127.0.0.1:3000/login').then(async r => { const t = await r.text(); if (r.status !== 200 || !t.includes('RadCore')) process.exit(1); console.log('Web: login page served'); }).catch(() => process.exit(1))"

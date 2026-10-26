@@ -206,11 +206,33 @@ export function hideCosts(extra: string[] = []) {
   };
 }
 
+/** The keys of a list that hold someone's phone number or address. */
+const PHONE_KEYS = new Set(['phone', 'party_phone', 'lead_phone', 'customer_phone']);
+const ADDRESS_KEYS = new Set(['address', 'billing_address', 'shipping_address']);
+/** A phone number with all but its last four digits hidden: ••••••••3333. */
+export const maskPhone = (v: unknown) => (typeof v === 'string' && v.length > 4 ? `${'•'.repeat(v.length - 4)}${v.slice(-4)}` : v);
+
+/**
+ * DPDP (brief P3): in a list, phone numbers and addresses are masked for anyone without pii:read. The
+ * record itself still shows them to whoever may open it, and opening it is logged (access_log).
+ */
+export function maskPii(req: Request, rowsIn: Record<string, unknown>[]): Record<string, unknown>[] {
+  if (!req.user || can(req.user.role, 'pii:read')) return rowsIn;
+  return rowsIn.map((r) => {
+    const out: Record<string, unknown> = { ...r };
+    for (const k of Object.keys(out)) {
+      if (PHONE_KEYS.has(k)) out[k] = maskPhone(out[k]);
+      else if (ADDRESS_KEYS.has(k) && out[k] != null) out[k] = 'Hidden';
+    }
+    return out;
+  });
+}
+
 /** Every list/report can be exported with ?format=csv or ?format=xlsx (PRD 7.11). */
 export function sendList(req: Request, res: Response, rowsIn: Record<string, unknown>[], name = 'export') {
   // A file skips res.json, so the keys hideCosts hides are taken out here as well.
   const hidden = res.locals.hiddenKeys as ReadonlySet<string> | undefined;
-  const data = hidden ? (withoutKeys(rowsIn, hidden) as Record<string, unknown>[]) : rowsIn;
+  const data = maskPii(req, hidden ? (withoutKeys(rowsIn, hidden) as Record<string, unknown>[]) : rowsIn);
   if (req.query.format === 'xlsx') {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${name}.xlsx"`);

@@ -264,6 +264,9 @@ export const leads = pgTable('leads', {
   firstContactedAt: ts('first_contacted_at'),
   address: jsonb('address'),
   gstin: text('gstin'),
+  /** DPDP consent: when this person agreed to be contacted, and how (their own enquiry form, told our staff). */
+  consentAt: ts('consent_at'),
+  consentSource: text('consent_source'),
   notes: text('notes'),
   /** The follow-up plan this lead is on, which step comes next (0 = the first), and when the plan was started. */
   planId: uuid('plan_id').references((): AnyPgColumn => followUpPlans.id),
@@ -322,6 +325,9 @@ export const parties = pgTable('parties', {
   creditLimit: money('credit_limit'),
   paymentTermsDays: integer('payment_terms_days'),
   leadId: uuid('lead_id').references((): AnyPgColumn => leads.id),
+  /** DPDP consent: when this person agreed to be contacted, and how (their own enquiry form, told our staff). */
+  consentAt: ts('consent_at'),
+  consentSource: text('consent_source'),
   active: boolean('active').notNull().default(true),
   ...stamps,
 }, (t) => [
@@ -2033,3 +2039,27 @@ export const deliveryChecks = pgTable('delivery_checks', {
   checkedBy: uuid('checked_by').references(() => users.id),
   ...stamps,
 });
+
+/**
+ * Who opened a customer's full record (a lead or a party), and when (DPDP, brief P3). Lists show phone numbers
+ * and addresses masked to anyone without pii:read; opening the record itself is logged here, for everyone.
+ * Append-only: nothing in the app updates or deletes a row.
+ */
+export const accessLog = pgTable('access_log', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  userId: uuid('user_id').references(() => users.id),
+  recordType: text('record_type').notNull(),
+  recordId: uuid('record_id').notNull(),
+  at: ts('at').notNull().defaultNow(),
+}, (t) => [index('access_log_record_idx').on(t.recordType, t.recordId), index('access_log_at_idx').on(t.at)]);
+
+/**
+ * Amount-based purchase order approval (brief P3): a PO worth more than its sender's role may send (with GST)
+ * waits in pending_approval for someone with po:approve. A role with no row here has no limit.
+ */
+export const poApprovalLimits = pgTable('po_approval_limits', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  role: roleEnum('role').notNull().unique(),
+  maxAmount: money('max_amount').notNull(),
+  ...stamps,
+}, (t) => [check('po_approval_limits_amount_chk', sql`${t.maxAmount} >= 0`)]);

@@ -108,7 +108,8 @@ export const PAYMENT_MODES = ['cash', 'upi', 'bank_transfer', 'card', 'cheque'] 
 export type PaymentMode = (typeof PAYMENT_MODES)[number];
 export const PAYMENT_DIRECTIONS = ['in', 'out'] as const;
 
-export const PO_STATUSES = ['draft', 'sent', 'partly_received', 'received', 'closed', 'cancelled'] as const;
+// pending_approval: sent by someone whose limit it is over (po_approval_limits); it waits for po:approve (brief P3).
+export const PO_STATUSES = ['draft', 'sent', 'partly_received', 'received', 'closed', 'cancelled', 'pending_approval'] as const;
 export const GRN_STATUSES = ['received', 'inwarded', 'cancelled'] as const;
 export const BILL_DOC_TYPES = ['bill', 'debit_note'] as const;
 export const BILL_STATUSES = ['posted', 'cancelled'] as const;
@@ -293,6 +294,9 @@ export const PERMISSIONS = {
   'pricelists:approve': ['owner', 'admin'],
 
   'parties:read': ['owner', 'marketing', 'store', 'sales', 'stores', 'accounts', 'admin', 'technician', 'service_manager'],
+  // DPDP (brief P3): who sees customers' phone numbers and addresses in lists. Everyone else sees them masked.
+  // Opening a customer's full record is logged for everyone (access_log).
+  'pii:read': ['owner', 'marketing', 'store', 'sales', 'accounts', 'service_manager', 'admin'],
   // Adding a new customer or supplier in the middle of the work (a walk-in at the counter, a new supplier on a bill).
   'parties:write': ['store', 'sales', 'stores', 'accounts', 'admin'],
   // Changing one afterwards, and its price list, credit limit and payment terms.
@@ -316,6 +320,8 @@ export const PERMISSIONS = {
 
   'purchasing:read': ['owner', 'stores', 'accounts', 'admin'],
   'po:write': ['stores', 'accounts', 'admin'],
+  // Approving a purchase order above its sender's limit (brief P3).
+  'po:approve': ['owner', 'admin'],
   'grn:write': ['stores', 'admin'],
   'bills:write': ['accounts', 'admin'],
 

@@ -40,14 +40,20 @@ export default function PurchaseOrderPage() {
       status={
         <StatusBar steps={['Draft', 'Sent to supplier', 'Goods arriving', 'All received']}
           current={{ draft: 0, sent: 1, partly_received: 2, received: 3, closed: 3 }[po.status as string] ?? 0}
-          stopped={po.status === 'cancelled' ? 'Cancelled' : po.status === 'closed' ? 'Closed' : null} />
+          stopped={po.status === 'cancelled' ? 'Cancelled' : po.status === 'closed' ? 'Closed' : po.status === 'pending_approval' ? 'Waiting for approval' : null} />
       }
       actions={
       <>
         {can('po:write') && po.status === 'draft' && <ActionButton kind="primary" onClick={() => post(`/purchasing/orders/${id}/send`)} onDone={reload}>Mark as sent</ActionButton>}
         <Link className="button" href={`/purchasing/orders/${id}/print`}>Print / PDF</Link>
         {waPhone && <a className="button" target="_blank" rel="noreferrer" href={`https://wa.me/${waPhone}?text=${encodeURIComponent(waText)}`}>Share on WhatsApp</a>}
-        {can('po:write') && ['draft', 'sent'].includes(po.status) && <ActionButton kind="danger" confirm="Cancel this PO?" onClick={() => post(`/purchasing/orders/${id}/cancel`)} onDone={reload}>Cancel</ActionButton>}
+        {/* Above its sender's limit, a PO waits for the owner (brief P3). */}
+        {can('po:approve') && po.status === 'pending_approval' && <ActionButton kind="primary" confirm="Approve this PO? It is then sent." onClick={() => post(`/purchasing/orders/${id}/approve`)} onDone={reload}>Approve</ActionButton>}
+        {can('po:approve') && po.status === 'pending_approval' && <ActionButton onClick={() => {
+          const reason = window.prompt('Why is it sent back?');
+          return reason ? post(`/purchasing/orders/${id}/reject`, { reason }) : Promise.resolve();
+        }} onDone={reload}>Send back</ActionButton>}
+        {can('po:write') && ['draft', 'sent', 'pending_approval'].includes(po.status) && <ActionButton kind="danger" confirm="Cancel this PO?" onClick={() => post(`/purchasing/orders/${id}/cancel`)} onDone={reload}>Cancel</ActionButton>}
         {can('po:write') && ['partly_received', 'received'].includes(po.status) && <ActionButton confirm="Close this PO? Nothing more can be received against it." onClick={() => post(`/purchasing/orders/${id}/close`)} onDone={reload}>Close PO</ActionButton>}
       </>
     }>

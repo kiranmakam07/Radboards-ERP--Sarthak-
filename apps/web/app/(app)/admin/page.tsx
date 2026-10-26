@@ -119,6 +119,7 @@ export default function AdminPage() {
             onSubmit={(v) => put('/settings/discount-limits', { discount_limits: { ...s.discount_limits, store: Number(v.store), sales: Number(v.sales) } })}
             onDone={settings.reload} />
         </Card>
+        <PoLimits />
         <Card title="Price lists">
           <Table rows={priceLists.data?.data} columns={[
             { key: 'name', title: 'Name' }, { key: 'base_price', title: 'Uses', render: (r) => `${r.base_price} price` },
@@ -228,5 +229,25 @@ function PriceListRates({ lists, onDone }: { lists: any[]; onDone: () => void })
         </>
       )}
     </div>
+  );
+}
+
+/** Purchase order approval (brief P3): the most each role may send a PO for, with GST; above it the PO waits for the owner. */
+function PoLimits() {
+  const limits = useGet<{ data: { role: string; max_amount: string }[] }>('/purchasing/approval-limits');
+  const of = (role: string) => limits.data?.data.find((l) => l.role === role)?.max_amount ?? '';
+  if (!limits.data) return null;
+  return (
+    <Card title="Purchase order limits">
+      <p className="muted">The most each role may send a purchase order for, with GST. Above it, the order waits for the owner to approve it. Blank: no limit.</p>
+      <Form inline submit="Save limits"
+        initial={{ stores: of('stores') ? String(Number(of('stores'))) : '', accounts: of('accounts') ? String(Number(of('accounts'))) : '' }}
+        fields={[
+          { name: 'stores', label: 'Stores, ₹', type: 'number' },
+          { name: 'accounts', label: 'Accounts, ₹', type: 'number' },
+        ]}
+        onSubmit={(v) => put('/purchasing/approval-limits', { limits: [{ role: 'stores', max_amount: v.stores || null }, { role: 'accounts', max_amount: v.accounts || null }] })}
+        onDone={limits.reload} />
+    </Card>
   );
 }

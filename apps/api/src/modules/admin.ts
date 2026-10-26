@@ -282,6 +282,19 @@ export function settingsRouter(db: DB) {
        order by a.id desc limit ${q.limit}`);
     sendList(req, res, data, 'audit-log');
   });
+
+  /** DPDP (brief P3): who opened which customer's full record (a lead or a party), newest first. */
+  r.get('/access-log', requirePerm('audit:read'), async (req, res) => {
+    const q = z.object({ record_type: z.enum(['lead', 'party']).optional(), limit: z.coerce.number().int().min(1).max(1000).default(200) }).parse(req.query);
+    sendList(req, res, await rows(db, sql`
+      select a.id, a.record_type, a.record_id, a.at, u.name as user_name, u.role,
+             coalesce(l.name, p.name) as record_name, coalesce(l.lead_no, p.party_type::text) as record_ref
+        from access_log a left join users u on u.id = a.user_id
+        left join leads l on a.record_type = 'lead' and l.id = a.record_id
+        left join parties p on a.record_type = 'party' and p.id = a.record_id
+       where (${q.record_type ?? null}::text is null or a.record_type = ${q.record_type ?? null})
+       order by a.id desc limit ${q.limit}`), 'access-log');
+  });
   return r;
 }
 

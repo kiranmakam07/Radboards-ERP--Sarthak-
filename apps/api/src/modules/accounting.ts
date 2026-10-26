@@ -4,7 +4,7 @@ import { z } from 'zod';
 import {
   ACCOUNT_TYPES, D, addDays, formatDate, fyOf, fyRange, isValidGstin, isValidPan, istDate, money, normaliseGstin, normalisePan, panFromGstin,
 } from '@radcore/shared';
-import { audit } from '../core/audit';
+import { audit, auditRead } from '../core/audit';
 import { requireAuth, requirePerm } from '../core/auth';
 import { assertMoneyAccount, postJournal, reverseJournals, type JLine } from '../core/journal';
 import { nextNumber } from '../core/numbering';
@@ -207,6 +207,31 @@ export async function reopenYear(ctx: Ctx, fy: string): Promise<void> {
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
+/**
+ * Books health check: the three things that must always be true (the journal balances, the stock ledger matches
+ * Stock in Hand, every debtor entry names its party). Used by the report, the tests, and the monthly restore drill
+ * (src/integrity-cli.ts, run against a backup restored into a scratch database).
+ */
+export async function integrityReport(db: DB) {
+  const [tb] = await rows<{ d: string; c: string }>(db, sql`select coalesce(sum(debit),0)::text as d, coalesce(sum(credit),0)::text as c from journal_lines`);
+  const [stockGl] = await rows<{ b: string }>(db, sql`
+    select coalesce(sum(l.debit) - sum(l.credit), 0)::text as b from journal_lines l join accounts a on a.id = l.account_id where a.system_key = 'stock'`);
+  const [stockLedger] = await rows<{ v: string }>(db, sql`select coalesce(sum(value), 0)::text as v from stock_movements`);
+  const [unbalanced] = await rows<{ n: number }>(db, sql`
+    select count(*)::int as n from (select entry_id from journal_lines group by entry_id having sum(debit) <> sum(credit)) x`);
+  const [debtorsGl] = await rows<{ b: string }>(db, sql`
+    select coalesce(sum(l.debit) - sum(l.credit), 0)::text as b from journal_lines l join accounts a on a.id = l.account_id where a.system_key = 'debtors'`);
+  const [debtorsParties] = await rows<{ b: string }>(db, sql`
+    select coalesce(sum(l.debit) - sum(l.credit), 0)::text as b from journal_lines l join accounts a on a.id = l.account_id
+     where a.system_key = 'debtors' and l.party_id is not null`);
+  return {
+    journal_balanced: D(tb!.d).eq(tb!.c), total_debit: money(tb!.d), total_credit: money(tb!.c),
+    unbalanced_entries: unbalanced!.n,
+    stock_gl: money(stockGl!.b), stock_ledger_value: money(stockLedger!.v), stock_matches_gl: D(stockGl!.b).eq(stockLedger!.v),
+    debtors_gl: money(debtorsGl!.b), debtors_with_party: money(debtorsParties!.b),
+  };
+}
+
 export function accountingRouter(db: DB) {
   const r = Router();
 
@@ -474,7 +499,7 @@ export function accountingRouter(db: DB) {
    * Profit by customer: the same figures as profit by bill, added up for each party. Returns are
    * taken off. Counter sales with no named customer are one line, "Cash Sale".
    */
-  r.get('/reports/party-profit', requirePerm('accounts:read'), async (req, res) => {
+  r.get('/reports/party-profit', requirePerm('accounts:read'), auditRead(db, 'party_profit'), async (req, res) => {
     const q = z.object({ from: zDate.optional(), to: zDate.optional() }).parse(req.query);
     const today = istDate();
     const from = q.from ?? `${today.slice(0, 7)}-01`;
@@ -506,7 +531,7 @@ export function accountingRouter(db: DB) {
    * from the cost recorded when they were delivered. A credit note takes its sale and its cost
    * back out. Services have no cost, so all of a service line is profit.
    */
-  r.get('/reports/invoice-profit', requirePerm('accounts:read'), async (req, res) => {
+  r.get('/reports/invoice-profit', requirePerm('accounts:read'), auditRead(db, 'invoice_profit'), async (req, res) => {
     const q = z.object({ from: zDate.optional(), to: zDate.optional() }).parse(req.query);
     const today = istDate();
     const from = q.from ?? `${today.slice(0, 7)}-01`;
@@ -642,25 +667,7 @@ export function accountingRouter(db: DB) {
    * Accounts before closing a month.
    */
   r.get('/reports/integrity', requirePerm('accounts:read'), async (_req, res) => {
-    const [tb] = await rows<{ d: string; c: string }>(db, sql`select coalesce(sum(debit),0)::text as d, coalesce(sum(credit),0)::text as c from journal_lines`);
-    const [stockGl] = await rows<{ b: string }>(db, sql`
-      select coalesce(sum(l.debit) - sum(l.credit), 0)::text as b from journal_lines l join accounts a on a.id = l.account_id where a.system_key = 'stock'`);
-    const [stockLedger] = await rows<{ v: string }>(db, sql`select coalesce(sum(value), 0)::text as v from stock_movements`);
-    const [unbalanced] = await rows<{ n: number }>(db, sql`
-      select count(*)::int as n from (select entry_id from journal_lines group by entry_id having sum(debit) <> sum(credit)) x`);
-    const [debtorsGl] = await rows<{ b: string }>(db, sql`
-      select coalesce(sum(l.debit) - sum(l.credit), 0)::text as b from journal_lines l join accounts a on a.id = l.account_id where a.system_key = 'debtors'`);
-    const [debtorsParties] = await rows<{ b: string }>(db, sql`
-      select coalesce(sum(l.debit) - sum(l.credit), 0)::text as b from journal_lines l join accounts a on a.id = l.account_id
-       where a.system_key = 'debtors' and l.party_id is not null`);
-    res.json({
-      data: {
-        journal_balanced: D(tb!.d).eq(tb!.c), total_debit: money(tb!.d), total_credit: money(tb!.c),
-        unbalanced_entries: unbalanced!.n,
-        stock_gl: money(stockGl!.b), stock_ledger_value: money(stockLedger!.v), stock_matches_gl: D(stockGl!.b).eq(stockLedger!.v),
-        debtors_gl: money(debtorsGl!.b), debtors_with_party: money(debtorsParties!.b),
-      },
-    });
+    res.json({ data: await integrityReport(db) });
   });
 
   // ---- financial years ----
