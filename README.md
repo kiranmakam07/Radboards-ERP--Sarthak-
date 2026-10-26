@@ -73,8 +73,11 @@ docker compose --env-file .env.production -f compose.prod.yml up -d --build
 
 - **First sign-in:** the admin from `.env.production`. Change the password, then fill in
   Setup → Company profile and add the users.
-- **Updating:** `git pull`, then the same `up -d --build` command. Database migrations are
-  applied automatically when the API starts.
+- **Updating:** `./deploy/update.sh`. It takes a backup of the database first
+  (`backups/radcore_<date>_pre-update.dump`) and stops if that fails, then fetches the new version,
+  builds it and waits for the API. Database changes in an update are applied as the API starts, all in
+  one transaction: if one fails, none is applied and the API does not start. If the API does not come
+  up, the script prints the way back: the previous version, and the backup it just took.
 - **Least privilege:** the API works as `radcore_app`, a database login that can read and write rows
   but cannot create, alter or drop anything; only the migrations at start run as the owner
   (`MIGRATION_DATABASE_URL`). `deploy/db-app-user.sh` makes that login on a new database by itself;
@@ -82,15 +85,40 @@ docker compose --env-file .env.production -f compose.prod.yml up -d --build
   `docker compose --env-file .env.production -f compose.prod.yml exec db bash /docker-entrypoint-initdb.d/20-app-user.sh`
 - **Backups:** one compressed dump per day in `./backups` on the server, kept for
   `BACKUP_KEEP_DAYS` (30). With `BACKUP_S3_BUCKET` and an AWS key set, each dump and each copy of the
-  attached files also goes to that bucket in Mumbai (`db/` and `uploads/`), so a lost server does not
-  take the backups with it. Make the bucket private, give the key permission only to put and list files
-  in it, and set how long copies are kept with a lifecycle rule on the bucket (for example 90 days).
+  attached files also goes to that bucket in Mumbai (`db/` and `uploads/`), stored encrypted by S3, so a
+  lost server does not take the backups with it. Make the bucket private, give the key permission only to
+  put and list files in it, and set how long copies are kept with a lifecycle rule on the bucket (for
+  example 90 days). A backup now, outside the daily one:
+  `docker compose --env-file .env.production -f compose.prod.yml exec backup /bin/bash /backup.sh once manual`
+- **Encrypted backups:** set `BACKUP_ENCRYPTION_KEY` (make one with `openssl rand -hex 32`) and every
+  dump and file copy is encrypted with it (AES-256) before it is written, on the server and off-site
+  (`.dump.enc`, `.tar.gz.enc`). **Keep a copy of the key off the server** (a password manager): without it
+  the backups cannot be restored. The restore drill decrypts with it, which also proves the key still works.
+- **Alerts:** set `ALERT_WEBHOOK_URL` to an incoming webhook of Slack, Google Chat or Discord, or to an
+  ntfy.sh topic (`https://ntfy.sh/<a long random name>`, with the ntfy app on the owner's phone). A
+  request that fails unexpectedly, a background job that fails, a failed backup or off-site copy, and a
+  failed restore drill are sent there (the same problem at most once in 15 minutes). Without it they are
+  only listed on **Admin → Setup → System health**, which also has a button to send a test alert. For the
+  server being down altogether, point an uptime monitor (UptimeRobot or similar) at `https://<domain>/api/health`.
+- **Background jobs:** the API runs them itself every 15 minutes: the day's tasks from the routines,
+  letting go of reserved stock past its date, reading the statements mailbox (when one is connected),
+  and clearing old records. System health shows when they last ran. (`SCHEDULER=off` stops this when
+  another scheduler calls `/api/hooks/jobs/run` with `Authorization: Bearer <CRON_SECRET>`; the Vercel
+  review copy does that once a day.)
 - **Restore drill:** `./deploy/restore-drill.sh` restores the newest backup into a scratch database
   and checks the books in it (`--from-s3` takes the newest off-site copy instead). Run it monthly from
   cron: `30 3 1 * * cd /opt/radcore && ./deploy/restore-drill.sh >> backups/restore-drill.log 2>&1`.
 - **Attached files** (resumes, bill photos) are kept on their own volume, not in the database, and are
   copied into `./backups` as `uploads_<date>.tar.gz` alongside the database dump.
-- **Restore:** `docker compose --env-file .env.production -f compose.prod.yml exec -T db pg_restore --clean --if-exists -U radcore -d radcore < backups/<file>.dump`
+- **Restoring a backup** (the live database is replaced: stop the API first so nobody is working in it):
+  ```bash
+  docker compose --env-file .env.production -f compose.prod.yml stop api web
+  # an encrypted backup is decrypted first:
+  docker compose --env-file .env.production -f compose.prod.yml run --rm --no-deps -T --entrypoint openssl backup enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_ENCRYPTION_KEY -in /backups/<file>.dump.enc -out /backups/restore.dump
+  docker compose --env-file .env.production -f compose.prod.yml exec -T db pg_restore --clean --if-exists -U radcore -d radcore < backups/restore.dump
+  docker compose --env-file .env.production -f compose.prod.yml start api web
+  ```
+  Then run `./deploy/db-app-user.sh` again (as above) so the API's login has its rights on the restored tables.
 - **Logs:** `docker compose --env-file .env.production -f compose.prod.yml logs -f api`
 
 CI builds these images and starts the stack on every push, so a broken build is caught
@@ -234,13 +262,19 @@ It works in two ways, and the first needs nothing set up:
      and make an **app password**. Set `BANK_MAIL_HOST`, `BANK_MAIL_USER` and `BANK_MAIL_PASSWORD`
      on the server (on Vercel: Environment Variables, then redeploy), together with `APP_SECRET`.
    - In the mailbox where the bank's mail arrives, add a forwarding rule that sends mail from the
-     bank's statement address to that mailbox. An automatic forward keeps the bank as the sender.
+     bank's statement address to that mailbox. An automatic forward keeps the bank as the sender, and
+     the bank's signature on the mail.
+   - A statement is imported by itself only when the mail service that received it found it signed by
+     the sender's domain (DKIM or DMARC), since anyone can write the bank's address on a mail but only
+     the bank's servers can sign for it. An unsigned one is held, with its file, for a person to look at
+     and bring in with **Try again**. A mail forwarded by hand is signed by the person who forwarded it:
+     then the account's rule names that person's address.
      The bank's own e-statement setting decides how often it comes (monthly, weekly or daily).
    - On the Bank reconciliation screen, under **Statements by email**, say for each bank account
      how its mails are recognised (words in the sender's address and in the subject) and enter the
      statement's password.
-   - The mailbox is read when someone opens that screen (at most every half hour), when **Check
-     the mailbox now** is pressed, and whenever a scheduler calls
+   - The mailbox is read by the background jobs every 15 minutes, when someone opens that screen (at
+     most every half hour), when **Check the mailbox now** is pressed, and whenever a scheduler calls
      `GET https://<domain>/api/hooks/bank-mail/check` with the header
      `Authorization: Bearer <BANK_MAIL_CRON_SECRET>` (a cron job on the server, or the host's own
      scheduler).
@@ -258,6 +292,28 @@ one bank's layout. It has been tested on statements made up in several layouts; 
 tried on a real statement from the bank yet**, and the mailbox connection has not been tried
 against a real mail service. If a real statement is refused, the message says what was read, and
 the bank's CSV download still works.
+
+## Moving from Vyapar
+
+**Admin → Moving from Vyapar.** Vyapar's closing balances on the cut-over date become RadCore's opening
+balances, and work carries on in RadCore from there; old bills are not brought in one by one. Three files,
+each Vyapar's own export saved as CSV (or the template on the screen):
+
+1. **Parties**: customers, dealers and suppliers with the balance each closed at (Vyapar's *Receivable* and
+   *Payable* columns, or one signed balance). A payment against an old balance is taken on account.
+2. **Items**: products with their stock and what it is worth. A vehicle needs its serial numbers
+   (separated by `;`), as it is kept by serial here.
+3. **Account balances**: cash, each bank account, loans, capital, GST credit carried forward. Each account
+   must be in the chart of accounts first; customers, suppliers and stock come from steps 1 and 2.
+
+Each file is **checked** first: every row is listed with anything wrong with it (a bad GSTIN or phone, a
+missing HSN, a party already here) and nothing is saved. Only a file with no problems can be **brought in**,
+and then all of it at once. Everything is posted against Opening Balance Equity, which ends up holding what
+the business is worth on Vyapar's figures. Step 4, **Compare with Vyapar**, takes Vyapar's party balances,
+stock summary or account balances on a date and shows each line with both figures and the difference, for
+the month the two run side by side. Column names are matched loosely (*Phone No.*, *Mobile*, *GSTIN*, *Item
+Code*, *Stock Quantity*...); the exports from Radboards' own Vyapar have not been seen yet, so the first real
+files may need a column name added.
 
 ## Commands
 

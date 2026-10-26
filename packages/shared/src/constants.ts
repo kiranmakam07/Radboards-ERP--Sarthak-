@@ -355,6 +355,8 @@ export const PERMISSIONS = {
   'gst:read': ['owner', 'accounts', 'admin'],
   // Marking a month's return as filed closes it for the documents it reports; taking the mark back is the owner's.
   'gst:file': ['accounts', 'admin'],
+  // Bringing Vyapar's closing balances in as the opening balances (modules/opening.ts).
+  'opening:import': ['accounts', 'admin'],
   'gst:unfile': ['owner', 'admin'],
 
   'dashboard:sales': ['owner', 'sales', 'store', 'admin'],

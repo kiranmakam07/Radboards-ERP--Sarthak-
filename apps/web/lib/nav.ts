@@ -85,6 +85,7 @@ export const NAV: NavSection[] = [
   { group: 'Admin', icon: 'admin', blurb: 'Masters, users and settings', items: [
     { href: '/masters', label: 'Masters', perm: 'masters:manage' },
     { href: '/admin', label: 'Setup', perm: 'settings:manage' },
+    { href: '/admin/opening', label: 'Moving from Vyapar', perm: 'opening:import' },
     { href: '/admin/users', label: 'Users', perm: 'users:manage' },
     { href: '/admin/permissions', label: 'Permissions', perm: 'settings:manage' },
     { href: '/admin/audit', label: 'Audit trail', perm: 'audit:read' },

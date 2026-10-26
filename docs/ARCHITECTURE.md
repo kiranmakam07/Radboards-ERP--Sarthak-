@@ -193,15 +193,22 @@ writes. A dash means none.
 | `dashboards.ts` | `/api/dashboards` | none: read-only | gst, ops | - |
 | `admin.ts` | `/api/auth`, `/api/users`, `/api/settings`, `/api/masters` | users, lead_sources, lost_reasons, campaigns, item_categories, locations, expense_categories, price_lists, entities, branches, tax_rates | - | - |
 | `files.ts` | `/api/files` | files, file_contents | - | - |
+| `service.ts` | `/api/service`, `/api/public/estimates` | warranty_rules, fault_codes, job_cards and their lines, media and faults, supplier_claims | items, sales | job_card (parts issued), supplier_claim |
+| `imports.ts` | `/api/imports` | import_shipments, import_shipment_orders, landed_cost_lines, landed_cost_applications, landed_cost_allocations | - | landed_cost_line (duty paid), landed_cost (applied to the goods) |
+| `pipeline.ts` | `/api/pipeline` | test_rides (and delivery_checks through sales) | parties, payments, reservations, sales | - |
+| `opening.ts` | `/api/opening` | none of its own: makes parties, items and opening stock | inventory, parties | opening_balance (a party's), opening_accounts |
+| `health.ts` | `/api/settings/health`, `/api/hooks/jobs` | none: reads error_log and the job state | (core/jobs) | - |
 
-There are no import cycles between modules: the "Calls" column only ever points one way.
+There are no import cycles between modules: the "Calls" column only ever points one way. Two calls cross the
+usual direction on purpose: `payroll.ts` calls `hr.ts` (a salary from a date, `recordSalary`), and `core/jobs.ts`
+calls the modules whose work runs by itself (ops, reservations, bank-mail); nothing they call calls back.
 
 Beside the modules:
 
 | Folder | What is in it |
 |---|---|
-| `core/` | The engines: `auth`, `numbering`, `stock`, `units` (serials), `journal`, `audit`, `settings`, `taxrates` (the GST rate on a date). |
-| `lib/` | Tools with no business rules: `errors`, `http` (the zod checks, `inTx`, `sendList`), `xlsx`, `bank-csv`, `bank-pdf`, `mailbox`, `secret-box`. |
+| `core/` | The engines: `auth`, `numbering`, `stock`, `units` (serials), `journal`, `audit`, `settings`, `taxrates` (the GST rate on a date), `stages` (lead stage groups), `access` (who opened a full record), `gst-lock` (a month whose return is filed), `alerts` (error log and the alert channel), `jobs` (the background jobs and their scheduler). |
+| `lib/` | Tools with no business rules: `errors`, `http` (the zod checks, `inTx`, `sendList`), `idempotency` (a save repeated with its key is done once), `xlsx`, `bank-csv`, `bank-pdf`, `mailbox` (and the signature check on a statement mail), `secret-box`. |
 | `db/` | `schema.ts` (every table), `client.ts` (one `DB` type for PostgreSQL and PGlite), `seed.ts` (what a new installation needs), `demo.ts` (sample data). |
 | `app.ts`, `server.ts`, `serverless.ts`, `prepare.ts`, `config.ts` | The front door, the two ways of running it, and the settings from the environment. |
 

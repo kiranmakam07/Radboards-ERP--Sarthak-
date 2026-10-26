@@ -9,6 +9,7 @@ import type { DB } from './db/client';
 import { AppError, errorHandler, forbidden, setProblemReporter } from './lib/errors';
 import { recordProblem } from './core/alerts';
 import { healthRouter, jobsHookRouter } from './modules/health';
+import { openingRouter } from './modules/opening';
 import { hideCosts } from './lib/http';
 import { readMailbox } from './lib/mailbox';
 import { accountingRouter } from './modules/accounting';
@@ -216,6 +217,7 @@ export function createApp(db: DB, deps: AppDeps = defaultAppDeps) {
   app.use('/api/bank', bankRouter(db));
   app.use('/api/gst', gstRouter(db));
   app.use('/api/tds', tdsRouter(db));
+  app.use('/api/opening', openingRouter(db));
   // HR
   app.use('/api/payroll/my-payslips', myPayslipRouter(db));
   app.use('/api/payroll', payrollRouter(db));
