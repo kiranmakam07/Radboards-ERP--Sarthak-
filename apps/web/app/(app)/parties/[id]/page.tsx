@@ -70,6 +70,22 @@ export default function PartyPage() {
       )}
       {!can('parties:manage') && can('parties:write') ? <p className="muted small no-print">This record is part of the masters. Ask an admin to change it.</p> : null}
 
+      {p.jobs?.length > 0 && (
+        <Card title="Job cards" id="jobs">
+          <Table rows={p.jobs} rowHref={(j) => `/service/${j.id}`} columns={[
+            { key: 'job_no', title: 'Job' }, { key: 'item_name', title: 'Unit', render: (j) => `${j.item_name} ${j.serial_no}` },
+            { key: 'created_at', title: 'Taken in', render: (j) => date(j.created_at) }, { key: 'status', title: 'Status', render: (j) => <Badge value={j.status} /> },
+          ]} />
+        </Card>
+      )}
+      {p.shipments?.length > 0 && (
+        <Card title="Import shipments" id="shipments">
+          <Table rows={p.shipments} rowHref={(s) => `/imports/${s.id}`} columns={[
+            { key: 'shipment_no', title: 'Shipment' }, { key: 'stage', title: 'Stage', render: (s) => label(s.stage) },
+            { key: 'created_at', title: 'Opened', render: (s) => date(s.created_at) },
+          ]} />
+        </Card>
+      )}
       {p.open_invoices.length > 0 && (
         <Card title="Unpaid invoices" id="unpaid-invoices">
           <Table rows={p.open_invoices} rowHref={(r) => `/invoices/${r.invoice_id}`} columns={[

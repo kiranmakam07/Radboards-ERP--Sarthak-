@@ -35,6 +35,7 @@ export default function PurchaseOrderPage() {
           <SmartButton icon="stores" value={`${num(received)} of ${num(ordered)}`} label={`Received · ${po.receipts.length} receipt${po.receipts.length === 1 ? '' : 's'}`}
             href={po.receipts.length ? '#receipts' : null} tone={received > 0 && received < ordered ? 'amber' : undefined} />
           <SmartButton icon="accounts" value={po.bills.length} label={po.bills.length ? `Bills · ₹${inr(billed).replace(/\.00$/, '')}` : 'Bills'} href={po.bills.length ? '#bills' : null} />
+          {po.shipment ? <SmartButton icon="stores" value={po.shipment.shipment_no} label="Import shipment" href={`/imports/${po.shipment.id}`} /> : null}
         </>
       }
       status={

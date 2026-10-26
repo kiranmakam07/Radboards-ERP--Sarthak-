@@ -131,7 +131,11 @@ export function partiesRouter(db: DB) {
     const open_bills = await rows(db, sql`
       select bill_id, bill_no, supplier_invoice_no, bill_date, due_date, grand_total, outstanding, payment_status
         from v_bill_outstanding where supplier_id = ${id} and outstanding > 0 order by bill_date`);
-    res.json({ data: { ...party, balance: await partyBalance(db, id), open_invoices, open_bills } });
+    const jobs = await rows(db, sql`
+      select j.id, j.job_no, j.status, j.created_at, u.serial_no, i.name as item_name from job_cards j join units u on u.id = j.unit_id
+        join items i on i.id = u.item_id where j.party_id = ${id} order by j.created_at desc limit 50`);
+    const shipments = await rows(db, sql`select id, shipment_no, stage, created_at from import_shipments where supplier_id = ${id} order by created_at desc limit 50`);
+    res.json({ data: { ...party, balance: await partyBalance(db, id), open_invoices, open_bills, jobs, shipments } });
   });
 
   /**

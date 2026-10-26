@@ -1014,6 +1014,8 @@ export async function invoiceDocument(tx: DB, id: string) {
     credit_notes: creditNotes,
     against_invoice: against ?? null,
     order: order ?? null,
+    // A bill made when a vehicle was handed back from the workshop: its job card.
+    job_card: (await rows(tx, sql`select id, job_no from job_cards where invoice_id = ${id}`))[0] ?? null,
     company,
   };
 }
@@ -1107,6 +1109,7 @@ export function salesRouter(db: DB) {
         // A vehicle on the order: its delivery checklist, done before it is handed over.
         has_vehicle: (await rows(db, sql`select 1 from sales_order_lines l join items i on i.id = l.item_id where l.order_id = ${id} and i.item_type = 'vehicle' limit 1`)).length > 0,
         delivery_checks: (await db.select().from(deliveryChecks).where(eq(deliveryChecks.salesOrderId, id)))[0] ?? null,
+        job_card: (await rows(db, sql`select id, job_no from job_cards where sales_order_id = ${id}`))[0] ?? null,
         company: await getCompany(db, order!.entityId),
       },
     });

@@ -52,6 +52,7 @@ export default function ProductPage() {
           <SmartButton icon="trend" value={`${num(a.sold_qty ?? 0)} ${p.unit}`} label={`Sold, 90 days · ₹${inr(a.sold_value ?? 0).replace(/\.00$/, '')}`} />
           {p.is_stock_item ? <SmartButton icon="sales" value={num(a.to_deliver ?? 0)} label="To deliver" tone={Number(a.to_deliver) > sellable ? 'amber' : undefined} href="/sales/orders" /> : null}
           {p.is_stock_item ? <SmartButton icon="store" value={num(a.to_receive ?? 0)} label="Coming in" href="/purchasing/orders" /> : null}
+          {p.warranty ? <SmartButton icon="service" value={`${p.warranty.months} months`} label={`Warranty${p.warranty.km_limit ? ` · ${num(p.warranty.km_limit)} km` : ''}`} href="/service/setup" /> : null}
         </>
       }
       status={<StatusBar steps={['In use']} current={0} stopped={p.active ? null : 'Switched off'} />}

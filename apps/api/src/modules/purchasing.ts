@@ -576,6 +576,8 @@ export function purchasingRouter(db: DB) {
       data: {
         ...po, lines,
         receipts: await rows(db, sql`select id, grn_no, received_at, status from goods_receipts where purchase_order_id = ${id} order by received_at`),
+        shipment: (await rows(db, sql`
+          select s.id, s.shipment_no, s.stage from import_shipment_orders o join import_shipments s on s.id = o.shipment_id where o.purchase_order_id = ${id}`))[0] ?? null,
         bills: await rows(db, sql`
           select id, doc_type, bill_no, supplier_invoice_no, bill_date, grand_total, status, mismatches
             from purchase_bills where purchase_order_id = ${id} order by created_at`),
@@ -816,10 +818,11 @@ export function purchasingRouter(db: DB) {
     const id = zId.parse(req.params.id);
     const [bill] = await rows(db, sql`
       select b.*, s.name as supplier_name, s.gstin as supplier_gstin, s.billing_address as supplier_address, po.po_no, jw.challan_no as job_work_challan_no,
-             o.allocated, o.debited, o.outstanding, o.payment_status
+             sh.shipment_no as import_shipment_no, o.allocated, o.debited, o.outstanding, o.payment_status
         from purchase_bills b join parties s on s.id = b.supplier_id
         left join purchase_orders po on po.id = b.purchase_order_id
         left join job_works jw on jw.id = b.job_work_id
+        left join import_shipments sh on sh.id = b.import_shipment_id
         left join v_bill_outstanding o on o.bill_id = b.id where b.id = ${id}`);
     must(bill, 'Purchase bill');
     const lines = await rows(db, sql`

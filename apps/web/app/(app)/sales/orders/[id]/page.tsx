@@ -41,6 +41,7 @@ export default function OrderPage() {
           <SmartButton icon="stores" value={o.deliveries.length} label="Deliveries" href={o.deliveries.length ? '#deliveries' : null} />
           <SmartButton icon="accounts" value={invoices.length} label={invoices.length ? `Invoices · ₹${inr(billed).replace(/\.00$/, '')}` : 'Invoices'} href={invoices.length ? '#invoices' : null} />
           {o.lead_id ? <SmartButton icon="crm" value="Lead" label="Where it came from" href={`/leads/${o.lead_id}`} /> : null}
+          {o.job_card ? <SmartButton icon="service" value={o.job_card.job_no} label="Job card" href={`/service/${o.job_card.id}`} /> : null}
         </>
       }
       status={

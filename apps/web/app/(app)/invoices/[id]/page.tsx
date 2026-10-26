@@ -70,6 +70,7 @@ export default function InvoicePage() {
         <>
           {inv.party_id ? <SmartButton icon="me" value={inv.party_name} label="Customer" href={`/parties/${inv.party_id}`} /> : <SmartButton icon="me" value={inv.party_name ?? 'Cash sale'} label="Customer" />}
           {inv.order ? <SmartButton icon="sales" value={inv.order.order_no} label="Order" href={`/sales/orders/${inv.order.id}`} /> : null}
+          {inv.job_card ? <SmartButton icon="service" value={inv.job_card.job_no} label="Job card" href={`/service/${inv.job_card.id}`} /> : null}
           {inv.against_invoice ? <SmartButton icon="accounts" value={inv.against_invoice.invoice_no} label="Against invoice" href={`/invoices/${inv.against_invoice.id}`} /> : null}
           {!isCn && inv.status === 'issued' ? (
             <SmartButton icon="rupee" value={outstanding > 0 ? rupees(outstanding) : 'Nil'} label={outstanding > 0 ? 'Still to pay' : 'Fully paid'} tone={outstanding > 0 ? 'amber' : 'green'} />

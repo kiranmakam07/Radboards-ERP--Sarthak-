@@ -145,12 +145,12 @@ export async function removeCost(ctx: Ctx, shipmentId: string, lineId: string) {
 // ---------------------------------------------------------------------------
 // Spreading the costs over the goods
 // ---------------------------------------------------------------------------
-type Good = { grn_line_id: string; grn_no: string; item_id: string; item_name: string; sku: string; accepted: string; rate: string; weight_kg: string | null };
+type Good = { grn_line_id: string; grn_id: string; grn_no: string; item_id: string; item_name: string; sku: string; accepted: string; rate: string; weight_kg: string | null };
 
 /** The shipment's goods: accepted quantities on the goods receipts of its purchase orders, after QC. */
 async function goodsOf(tx: DB, shipmentId: string): Promise<Good[]> {
   return rows<Good>(tx, sql`
-    select gl.id as grn_line_id, g.grn_no, gl.item_id, i.name as item_name, i.sku, gl.accepted_qty::text as accepted, gl.rate::text, i.weight_kg::text
+    select gl.id as grn_line_id, g.id as grn_id, g.grn_no, gl.item_id, i.name as item_name, i.sku, gl.accepted_qty::text as accepted, gl.rate::text, i.weight_kg::text
       from import_shipment_orders o join goods_receipts g on g.purchase_order_id = o.purchase_order_id
       join goods_receipt_lines gl on gl.grn_id = g.id join items i on i.id = gl.item_id
      where o.shipment_id = ${shipmentId} and g.status = 'inwarded' and gl.accepted_qty > 0

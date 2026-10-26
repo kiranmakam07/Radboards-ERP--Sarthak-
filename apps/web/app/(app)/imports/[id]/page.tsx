@@ -106,7 +106,8 @@ export default function ShipmentPage() {
 
       <Card title="Goods received">
         <Table rows={s.goods} empty="Nothing received and passed by QC yet." columns={[
-          { key: 'grn_no', title: 'Receipt' }, { key: 'item_name', title: 'Item', render: (g) => <>{g.item_name} <span className="muted small">{g.sku}</span></> },
+          { key: 'grn_no', title: 'Receipt', render: (g) => <Link href={`/purchasing/receipts/${g.grn_id}`}>{g.grn_no}</Link> },
+          { key: 'item_name', title: 'Item', render: (g) => <Link href={`/items/${g.item_id}`}>{g.item_name} <span className="muted small">{g.sku}</span></Link> },
           { key: 'accepted', title: 'Accepted', align: 'right', render: (g) => num(g.accepted) },
           { key: 'rate', title: 'Cost each ₹', align: 'right', render: (g) => inr(g.rate) },
           { key: 'landed', title: 'Landed cost ₹', align: 'right', render: (g) => inr(g.landed) },

@@ -22,7 +22,9 @@ export default function UnitPage() {
   const can = useCan();
   const write = can('units:write');
   const { data, loading, error, reload } = useGet<{ data: any }>(`/units/${id}`);
-  const items = useGet<{ data: any[] }>(write ? '/items?limit=2000' : null);
+  // Recording a part inside needs the list of parts to pick from; a role that cannot see items (operations) does without.
+  const canPickParts = write && can('items:read');
+  const items = useGet<{ data: any[] }>(canPickParts ? '/items?limit=2000' : null);
   const [open, setOpen] = useState<'edit' | 'part' | null>(null);
   const u = data?.data;
   if (!u) return <Page title="Unit"><Loading loading={loading} error={error} /></Page>;
@@ -35,6 +37,7 @@ export default function UnitPage() {
         <>
           <SmartButton icon="stores" value={u.location ?? (top ? `in ${top.serial_no}` : '—')} label={label(u.status)} />
           <SmartButton icon="trend" value={u.descendants.length} label="Parts inside" href="#parts" />
+          {u.jobs?.length ? <SmartButton icon="service" value={u.jobs.length} label="Job cards" href="#jobs" /> : null}
           {u.sold_invoice_id ? <SmartButton icon="accounts" value={u.sold_invoice_no} label={`Sold to ${u.sold_to}`} href={`/invoices/${u.sold_invoice_id}`} /> : null}
           {u.charge_every_days ? <SmartButton icon="calendar" value={u.last_charged_on ? date(u.last_charged_on) : 'Never'} label="Last storage charge" /> : null}
         </>
@@ -43,7 +46,7 @@ export default function UnitPage() {
       actions={write ? (
         <>
           <button type="button" onClick={() => setOpen('edit')}>Edit details</button>
-          <button type="button" onClick={() => setOpen('part')}>+ Part inside</button>
+          {canPickParts ? <button type="button" onClick={() => setOpen('part')}>+ Part inside</button> : null}
           {u.charge_every_days && !gone ? (
             <ActionButton kind="primary" onClick={() => post(`/units/${id}/charged`, {})} onDone={reload}>Charged today</ActionButton>
           ) : null}
@@ -77,6 +80,15 @@ export default function UnitPage() {
           {u.descendants.length === 0 && u.ancestors.length === 0 ? <p className="muted small">No parts recorded inside it. {write ? 'Add the battery pack, controller or motor with + Part inside.' : ''}</p> : null}
         </Card>
       </div>
+      {u.jobs?.length ? (
+        <Card title="In the workshop" id="jobs">
+          <Table rows={u.jobs} rowHref={(j) => `/service/${j.id}`} columns={[
+            { key: 'job_no', title: 'Job' }, { key: 'created_at', title: 'Taken in', render: (j) => dateTime(j.created_at) },
+            { key: 'complaint', title: 'Complaint', render: (j) => <span style={{ whiteSpace: 'normal' }}>{j.complaint}</span> },
+            { key: 'status', title: 'Status', render: (j) => <Badge value={j.status} /> },
+          ]} />
+        </Card>
+      ) : null}
       <Card title="History">
         <Table rows={u.events} empty="Nothing yet." columns={[
           { key: 'at', title: 'When', render: (r) => dateTime(r.at) },

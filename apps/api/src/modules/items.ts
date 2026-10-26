@@ -168,6 +168,7 @@ export function itemsRouter(db: DB) {
         price_list_rates: rates,
         movements,
         valuation: val ?? { qty: '0', value: '0', avg_cost: null },
+        warranty: (await rows(db, sql`select months, km_limit, cycle_limit from warranty_rules where item_id = ${id} and active`))[0] ?? null,
         images: await db.select().from(itemImages).where(eq(itemImages.itemId, id)).orderBy(asc(itemImages.sort)),
         channel_map: await db.select().from(channelItemMap).where(eq(channelItemMap.itemId, id)),
       },

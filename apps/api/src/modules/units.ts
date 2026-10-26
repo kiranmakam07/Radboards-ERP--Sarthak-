@@ -118,7 +118,8 @@ export function unitsRouter(db: DB) {
         from unit_events e left join locations fl on fl.id = e.from_location_id left join locations tl on tl.id = e.to_location_id
         left join users us on us.id = e.created_by
        where e.unit_id = ${id} order by e.id desc`);
-    res.json({ data: { ...unit, events, ...(await genealogy(db, id)) } });
+    const jobs = await rows(db, sql`select id, job_no, status, created_at, complaint from job_cards where unit_id = ${id} order by created_at desc`);
+    res.json({ data: { ...unit, events, jobs, ...(await genealogy(db, id)) } });
   });
 
   /**
