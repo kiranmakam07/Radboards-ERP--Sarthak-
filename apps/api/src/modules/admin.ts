@@ -18,7 +18,7 @@ import {
 } from '../db/schema';
 import { badRequest, forbidden, must } from '../lib/errors';
 import {
-  emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zGstRate, zHttpUrl, zId, zMoney, zPhone, zStateCode, zText,
+  emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zGstRate, zHttpUrl, zId, zMoney, zPhone, zStateCode, zText, zPatch,
 } from '../lib/http';
 import { toWorkbook, type Sheet } from '../lib/xlsx';
 
@@ -138,7 +138,7 @@ export function usersRouter(db: DB) {
 
   r.patch('/:id', requirePerm('users:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const body = zUser.omit({ password: true }).extend({ active: z.boolean(), password: zPassword }).partial().parse(req.body);
+    const body = zPatch(zUser.omit({ password: true }).extend({ active: z.boolean(), password: zPassword })).parse(req.body);
     const updated = await inTx(db, req, async (ctx) => {
       const [before] = await ctx.tx.select(publicUser).from(users).where(eq(users.id, id));
       must(before, 'User');
@@ -276,7 +276,7 @@ export function settingsRouter(db: DB) {
 
   /** The biggest discount off the price list each role may give without approval, in %. */
   r.put('/discount-limits', requirePerm('settings:manage'), async (req, res) => {
-    const body = z.object({ discount_limits: z.record(z.enum(ROLES), z.number().min(0).max(100)) }).parse(req.body);
+    const body = z.object({ discount_limits: z.partialRecord(z.enum(ROLES), z.number().min(0).max(100)) }).parse(req.body);
     await inTx(db, req, async (ctx) => {
       const before = await getSetting(ctx.tx, 'discount_limits');
       await setSetting(ctx.tx, 'discount_limits', body.discount_limits, ctx.user!.id);
@@ -291,7 +291,7 @@ export function settingsRouter(db: DB) {
 
   r.get('/audit-log', requirePerm('audit:read'), async (req, res) => {
     const q = z.object({ entity: z.string().optional(), entity_id: z.string().optional(),
-      limit: z.coerce.number().int().min(1).max(1000).default(200) }).parse(req.query);
+      limit: z.coerce.number().int().min(1).max(1000).prefault(200) }).parse(req.query);
     const data = await rows(db, sql`
       select a.id, a.entity, a.entity_id, a.action, a.before, a.after, a.at, u.name as user_name
         from audit_log a left join users u on u.id = a.user_id
@@ -303,7 +303,7 @@ export function settingsRouter(db: DB) {
 
   /** DPDP (brief P3): who opened which customer's full record (a lead or a party), newest first. */
   r.get('/access-log', requirePerm('audit:read'), async (req, res) => {
-    const q = z.object({ record_type: z.enum(['lead', 'party']).optional(), limit: z.coerce.number().int().min(1).max(1000).default(200) }).parse(req.query);
+    const q = z.object({ record_type: z.enum(['lead', 'party']).optional(), limit: z.coerce.number().int().min(1).max(1000).prefault(200) }).parse(req.query);
     sendList(req, res, await rows(db, sql`
       select a.id, a.record_type, a.record_id, a.at, u.name as user_name, u.role,
              coalesce(l.name, p.name) as record_name, coalesce(l.lead_no, p.party_type::text) as record_ref
@@ -336,7 +336,7 @@ export function mastersRouter(db: DB) {
     res.status(201).json({ data: row });
   });
   r.patch('/lead-sources/:id', requirePerm('masters:manage'), async (req, res) => {
-    const body = zNameActive.extend({ default_owner_id: emptyToNull(zId) }).partial().parse(req.body);
+    const body = zPatch(zNameActive.extend({ default_owner_id: emptyToNull(zId) })).parse(req.body);
     const [row] = await db.update(leadSources)
       .set({ name: body.name, active: body.active, defaultOwnerId: body.default_owner_id, updatedAt: new Date() })
       .where(eq(leadSources.id, zId.parse(req.params.id))).returning();
@@ -353,7 +353,7 @@ export function mastersRouter(db: DB) {
     res.status(201).json({ data: row });
   });
   r.patch('/lost-reasons/:id', requirePerm('masters:manage'), async (req, res) => {
-    const body = zNameActive.partial().parse(req.body);
+    const body = zPatch(zNameActive).parse(req.body);
     const [row] = await db.update(lostReasons).set({ ...body, updatedAt: new Date() })
       .where(eq(lostReasons.id, zId.parse(req.params.id))).returning();
     res.json({ data: must(row, 'Lost reason') });
@@ -372,7 +372,7 @@ export function mastersRouter(db: DB) {
     res.status(201).json({ data: row });
   });
   r.patch('/campaigns/:id', requirePerm('masters:manage', 'leads:write'), async (req, res) => {
-    const body = z.object({ name: zText(150), active: z.boolean() }).partial().parse(req.body);
+    const body = zPatch(z.object({ name: zText(150), active: z.boolean() })).parse(req.body);
     const [row] = await db.update(campaigns).set({ ...body, updatedAt: new Date() })
       .where(eq(campaigns.id, zId.parse(req.params.id))).returning();
     res.json({ data: must(row, 'Campaign') });
@@ -389,7 +389,7 @@ export function mastersRouter(db: DB) {
     res.status(201).json({ data: row });
   });
   r.patch('/item-categories/:id', requirePerm('masters:manage', 'items:write'), async (req, res) => {
-    const body = zNameActive.partial().parse(req.body);
+    const body = zPatch(zNameActive).parse(req.body);
     const [row] = await db.update(itemCategories).set({ ...body, updatedAt: new Date() })
       .where(eq(itemCategories.id, zId.parse(req.params.id))).returning();
     res.json({ data: must(row, 'Category') });
@@ -404,7 +404,7 @@ export function mastersRouter(db: DB) {
     const pctOrNull = emptyToNull(z.coerce.number().min(0).max(300)).optional();
     const b = z.object({
       hsn: z.string().trim().regex(/^\d{2,8}$/, 'an HSN or SAC code: 2 to 8 digits'), gst_rate: zGstRate,
-      cess_rate: z.coerce.number().min(0).max(300).default(0), bcd_rate: pctOrNull, sws_rate: pctOrNull,
+      cess_rate: z.coerce.number().min(0).max(300).prefault(0), bcd_rate: pctOrNull, sws_rate: pctOrNull,
       effective_from: zDate, note: emptyToNull(z.string().trim().max(300)).optional(),
     }).parse(req.body);
     const row = await inTx(db, req, async (ctx) => {
@@ -427,7 +427,7 @@ export function mastersRouter(db: DB) {
   });
   const zEntity = z.object({
     legal_name: zText(200), gstin: emptyToNull(zGstin).optional(),
-    state_code: zStateCode.refine((c) => Boolean(STATE_CODES[c]), 'unknown state code'), address: zAddress.default({}),
+    state_code: zStateCode.refine((c) => Boolean(STATE_CODES[c]), 'unknown state code'), address: zAddress.prefault({}),
     code: z.string().trim().toUpperCase().regex(/^[A-Z]$/, 'one letter, put in front of its document numbers'),
   });
   r.post('/entities', requirePerm('settings:manage'), async (req, res) => {
@@ -447,7 +447,7 @@ export function mastersRouter(db: DB) {
     const entityId = zId.parse(req.params.id);
     const b = z.object({
       name: zText(120), gstin: emptyToNull(zGstin).optional(),
-      state_code: zStateCode.refine((c) => Boolean(STATE_CODES[c]), 'unknown state code'), address: zAddress.default({}),
+      state_code: zStateCode.refine((c) => Boolean(STATE_CODES[c]), 'unknown state code'), address: zAddress.prefault({}),
     }).parse(req.body);
     const row = await inTx(db, req, async (ctx) => {
       const [e] = await ctx.tx.select().from(entities).where(eq(entities.id, entityId));
@@ -472,7 +472,7 @@ export function mastersRouter(db: DB) {
     res.status(201).json({ data: row });
   });
   r.patch('/locations/:id', requirePerm('masters:manage'), async (req, res) => {
-    const body = zNameActive.partial().parse(req.body);
+    const body = zPatch(zNameActive).parse(req.body);
     const [place] = await db.select().from(locations).where(eq(locations.id, zId.parse(req.params.id)));
     // Job work runs through its own place: it cannot be switched off from the list.
     if (place?.type === 'job_work' && body.active === false) throw badRequest('The place for stock with job workers is used by every job work challan and stays on');
@@ -505,7 +505,7 @@ export function mastersRouter(db: DB) {
     res.status(201).json({ data: row });
   });
   r.patch('/price-lists/:id', requirePerm('pricelists:write'), async (req, res) => {
-    const body = z.object({ name: zText(100), tax_inclusive: z.boolean(), active: z.boolean() }).partial().parse(req.body);
+    const body = zPatch(z.object({ name: zText(100), tax_inclusive: z.boolean(), active: z.boolean() })).parse(req.body);
     const [row] = await db.update(priceLists)
       .set({ name: body.name, taxInclusive: body.tax_inclusive, active: body.active, updatedAt: new Date() })
       .where(eq(priceLists.id, zId.parse(req.params.id))).returning();

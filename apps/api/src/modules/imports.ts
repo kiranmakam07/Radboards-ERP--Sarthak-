@@ -335,7 +335,7 @@ export function importsRouter(db: DB) {
 
   r.post('/', requirePerm('imports:write'), async (req, res) => {
     const b = z.object({
-      supplier_id: zId, purchase_order_ids: z.array(zId).max(50).default([]), currency: zCurrency, fx_rate: emptyToNull(zFxRate).optional(),
+      supplier_id: zId, purchase_order_ids: z.array(zId).max(50).prefault([]), currency: zCurrency, fx_rate: emptyToNull(zFxRate).optional(),
       bl_awb_no: emptyToNull(z.string().trim().max(60)).optional(), notes: emptyToNull(z.string().trim().max(2000)).optional(),
     }).parse(req.body);
     const s = await inTx(db, req, (ctx) => createShipment(ctx, {
@@ -379,7 +379,7 @@ export function importsRouter(db: DB) {
 
   r.post('/:id/costs', requirePerm('imports:post'), async (req, res) => {
     const b = z.object({
-      kind: z.enum(LANDED_COST_KINDS), amount: zMoneyPos, basis: z.enum(LANDED_COST_BASES).default('value'), description: emptyToNull(z.string().trim().max(300)).optional(),
+      kind: z.enum(LANDED_COST_KINDS), amount: zMoneyPos, basis: z.enum(LANDED_COST_BASES).prefault('value'), description: emptyToNull(z.string().trim().max(300)).optional(),
       paid_from_account_id: zId, paid_on: emptyToNull(zDate).optional(),
     }).parse(req.body);
     res.status(201).json({ data: await inTx(db, req, (ctx) => addPaidCost(ctx, zId.parse(req.params.id), {

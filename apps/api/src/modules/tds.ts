@@ -8,7 +8,7 @@ import { assertMoneyAccount, postJournal, reverseJournals, systemAccountIds, typ
 import { rows, type DB } from '../db/client';
 import { accounts, tdsDeposits, tdsRates } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zMonth, zText, wantsFile, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zMonth, zText, wantsFile, type Ctx, zPatch } from '../lib/http';
 
 /**
  * TDS (tax deducted at source), both ways round.
@@ -130,7 +130,7 @@ export function tdsRouter(db: DB) {
   /** Changing a rate affects what is offered from now on; deductions already recorded keep their own figure. */
   r.patch('/rates/:id', requirePerm('accounts:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = zRate.partial().parse(req.body);
+    const b = zPatch(zRate).parse(req.body);
     const row = await inTx(db, req, async (ctx) => {
       const [before] = await ctx.tx.select().from(tdsRates).where(eq(tdsRates.id, id)).for('update');
       must(before, 'TDS rate');
@@ -211,7 +211,7 @@ export function tdsRouter(db: DB) {
 
   r.post('/deposits', requirePerm('accounts:write'), async (req, res) => {
     const b = z.object({
-      kind: z.enum(['vendor', 'salary']).default('vendor'), paid_on: zDate.default(() => istDate()), amount: zMoneyPos, account_id: zId, month: zMonth,
+      kind: z.enum(['vendor', 'salary']).prefault('vendor'), paid_on: zDate.prefault(() => istDate()), amount: zMoneyPos, account_id: zId, month: zMonth,
       challan_no: emptyToNull(z.string().trim().max(40)).optional(), bsr_code: emptyToNull(z.string().trim().max(20)).optional(),
       notes: emptyToNull(z.string().trim().max(500)).optional(),
     }).parse(req.body);

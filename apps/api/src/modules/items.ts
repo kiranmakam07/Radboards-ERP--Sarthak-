@@ -7,7 +7,7 @@ import { requirePerm } from '../core/auth';
 import { rows, type DB } from '../db/client';
 import { channelItemMap, itemImages, items, priceListItems, priceLists } from '../db/schema';
 import { badRequest, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zCessRate, zGstRate, zLink, zId, zListQuery, zMoney, zQtyNonNeg, zText, zWeight } from '../lib/http';
+import { emptyToNull, inTx, sendList, zCessRate, zGstRate, zLink, zId, zListQuery, zMoney, zQtyNonNeg, zText, zWeight, zPatch } from '../lib/http';
 
 /**
  * The item master: what we buy, make and sell, with HSN, GST rate, unit, prices, pictures and the
@@ -59,12 +59,12 @@ const zItem = z.object({
   category_id: emptyToNull(zId).optional(),
   hsn_sac: emptyToNull(z.string().regex(/^\d{4,8}$/, 'HSN/SAC must be 4 to 8 digits')).optional(),
   gst_rate: zGstRate,
-  cess_rate: zCessRate.default('0'),
-  unit: zText(20).default('Nos'),
-  purchase_cost: zMoney.default('0'),
-  mrp: zMoney.default('0'),
-  retail_price: zMoney.default('0'),
-  dealer_price: zMoney.default('0'),
+  cess_rate: zCessRate.prefault('0'),
+  unit: zText(20).prefault('Nos'),
+  purchase_cost: zMoney.prefault('0'),
+  mrp: zMoney.prefault('0'),
+  retail_price: zMoney.prefault('0'),
+  dealer_price: zMoney.prefault('0'),
   reorder_level: emptyToNull(zQtyNonNeg).optional(),
   barcode: emptyToNull(z.string().trim().max(60)).optional(),
   is_serialised: z.boolean().optional(),
@@ -91,7 +91,7 @@ export function itemsRouter(db: DB) {
   r.get('/', requirePerm('items:read'), async (req, res) => {
     const q = zListQuery.extend({
       type: z.enum(ITEM_TYPES).optional(),
-      active: z.enum(['true', 'false', 'all']).default('true'),
+      active: z.enum(['true', 'false', 'all']).prefault('true'),
       category_id: zId.optional(),
     }).parse(req.query);
     const like = q.q ? `%${q.q}%` : null;
@@ -188,7 +188,7 @@ export function itemsRouter(db: DB) {
 
   r.patch('/:id', requirePerm('items:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const body = zItem.partial().parse(req.body);
+    const body = zPatch(zItem).parse(req.body);
     const updated = await inTx(db, req, async (ctx) => {
       const [before] = await ctx.tx.select().from(items).where(eq(items.id, id)).for('update');
       must(before, 'Item');
@@ -211,7 +211,7 @@ export function itemsRouter(db: DB) {
 
   r.post('/:id/images', requirePerm('items:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const body = z.object({ url: zLink, sort: z.number().int().default(0) }).parse(req.body);
+    const body = z.object({ url: zLink, sort: z.number().int().prefault(0) }).parse(req.body);
     const [item] = await db.select({ id: items.id }).from(items).where(eq(items.id, id));
     must(item, 'Item');
     const [row] = await db.insert(itemImages).values({ itemId: id, url: body.url, sort: body.sort, createdBy: req.user!.id }).returning();
@@ -236,7 +236,7 @@ export function itemsRouter(db: DB) {
   r.put('/:id/channel-map', requirePerm('items:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const body = z.object({
-      channel: z.enum(CHANNELS), external_product_id: zText(100), external_variant_id: z.string().max(100).default(''),
+      channel: z.enum(CHANNELS), external_product_id: zText(100), external_variant_id: z.string().max(100).prefault(''),
     }).parse(req.body);
     const [row] = await db.insert(channelItemMap)
       .values({ itemId: id, channel: body.channel, externalProductId: body.external_product_id,

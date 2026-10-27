@@ -223,7 +223,7 @@ export function inventoryRouter(db: DB) {
   /** Stock on hand per item and location - always sum(stock_movements), never a stored number. */
   r.get('/on-hand', requirePerm('stock:read'), async (req, res) => {
     const q = zListQuery.extend({
-      location_id: zId.optional(), item_type: z.string().optional(), include_zero: z.enum(['true', 'false']).default('false'),
+      location_id: zId.optional(), item_type: z.string().optional(), include_zero: z.enum(['true', 'false']).prefault('false'),
     }).parse(req.query);
     const like = q.q ? `%${q.q}%` : null;
     const data = await rows(db, sql`
@@ -335,7 +335,7 @@ export function inventoryRouter(db: DB) {
   /** Manual adjustment (damage, sample, found stock...) or opening stock. Needs a reason and approval. */
   r.post('/adjustments', requirePerm('stock:write'), async (req, res) => {
     const b = z.object({
-      kind: z.enum(['adjustment', 'opening']).default('adjustment'),
+      kind: z.enum(['adjustment', 'opening']).prefault('adjustment'),
       location_id: zId,
       reason: zText(300),
       lines: z.array(z.object({

@@ -12,7 +12,7 @@ import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { assets, maintenanceLogs, maintenanceSchedules, projects, settings, taskTemplates, tasks, users } from '../db/schema';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zClock, zDate, zId, zListQuery, zMoney, zText, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zClock, zDate, zId, zListQuery, zMoney, zText, type Ctx, zPatch } from '../lib/http';
 
 /**
  * Operations: routines, tasks, assets and their maintenance.
@@ -94,7 +94,7 @@ const zTemplate = z.object({
   weekdays: z.array(z.coerce.number().int().min(0).max(6)).max(7).optional(),
   month_day: emptyToNull(z.coerce.number().int().min(1).max(31)).optional(),
   assignee_id: zId,
-  checklist: z.array(zText(200)).max(30).default([]),
+  checklist: z.array(zText(200)).max(30).prefault([]),
   /** Finish by this time on the day; blank means any time that day. */
   due_time: emptyToNull(zClock).optional(),
   start_date: emptyToNull(zDate).optional(),
@@ -320,7 +320,7 @@ export function opsRouter(db: DB) {
 
   r.patch('/templates/:id', requirePerm('ops:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = zTemplate.partial().parse(req.body);
+    const b = zPatch(zTemplate).parse(req.body);
     const today = istDate();
     const row = await inTx(db, req, async (ctx) => {
       const [t] = await ctx.tx.select().from(taskTemplates).where(eq(taskTemplates.id, id)).for('update');
@@ -420,7 +420,7 @@ export function opsRouter(db: DB) {
     const b = z.object({
       title: zText(150), description: emptyToNull(z.string().trim().max(2000)).optional(), assignee_id: zId,
       due_date: emptyToNull(zDate).optional(), due_time: emptyToNull(zClock).optional(),
-      checklist: z.array(zText(200)).max(30).default([]),
+      checklist: z.array(zText(200)).max(30).prefault([]),
     }).parse(req.body);
     const today = istDate();
     const row = await inTx(db, req, async (ctx) => {
@@ -582,7 +582,7 @@ export function opsRouter(db: DB) {
 
   r.patch('/assets/:id', requirePerm('ops:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = zAsset.partial().parse(req.body);
+    const b = zPatch(zAsset).parse(req.body);
     const row = await inTx(db, req, async (ctx) => {
       const [a] = await ctx.tx.select().from(assets).where(eq(assets.id, id)).for('update');
       must(a, 'Asset');
@@ -633,13 +633,13 @@ export function opsRouter(db: DB) {
   const zSchedule = z.object({
     title: zText(150), interval_count: z.coerce.number().int().min(1).max(3650), interval_unit: z.enum(INTERVAL_UNITS),
     last_done_on: emptyToNull(zDate).optional(), next_due_on: emptyToNull(zDate).optional(), assignee_id: emptyToNull(zId).optional(),
-    remind_days_before: z.coerce.number().int().min(0).max(365).default(7), instructions: emptyToNull(z.string().trim().max(2000)).optional(),
+    remind_days_before: z.coerce.number().int().min(0).max(365).prefault(7), instructions: emptyToNull(z.string().trim().max(2000)).optional(),
     active: z.boolean().optional(),
   });
 
   /** Everything on a schedule, most urgent first. view=due keeps only what is overdue or inside its reminder window. */
   r.get('/maintenance', requirePerm('ops:read'), async (req, res) => {
-    const q = z.object({ view: z.enum(['due', 'all']).default('all') }).parse(req.query);
+    const q = z.object({ view: z.enum(['due', 'all']).prefault('all') }).parse(req.query);
     const today = istDate();
     const data = await scheduleRows(db, today,
       q.view === 'due' ? sql`s.active and s.next_due_on <= ${today}::date + s.remind_days_before` : sql`true`);
@@ -671,7 +671,7 @@ export function opsRouter(db: DB) {
 
   r.patch('/schedules/:id', requirePerm('ops:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = zSchedule.partial().parse(req.body);
+    const b = zPatch(zSchedule).parse(req.body);
     const row = await inTx(db, req, async (ctx) => {
       const [s] = await ctx.tx.select().from(maintenanceSchedules).where(eq(maintenanceSchedules.id, id)).for('update');
       must(s, 'Maintenance schedule');

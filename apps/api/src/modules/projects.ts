@@ -116,7 +116,7 @@ const zAllocation = z.object({
   asset_id: emptyToNull(zId).optional(),
   from_date: zDate,
   to_date: zDate,
-  percent: z.coerce.number().int().min(1).max(100).default(100),
+  percent: z.coerce.number().int().min(1).max(100).prefault(100),
   role: emptyToNull(z.string().trim().max(150)).optional(),
   notes: emptyToNull(z.string().trim().max(1000)).optional(),
   allow_over: z.boolean().optional(),
@@ -166,7 +166,7 @@ export function projectsRouter(db: DB) {
     const b = z.object({
       name: zText(150), description: emptyToNull(z.string().trim().max(4000)).optional(), owner_id: zId,
       start_date: emptyToNull(zDate).optional(), deadline: emptyToNull(zDate).optional(),
-      status: z.enum(['planned', 'active']).default('planned'),
+      status: z.enum(['planned', 'active']).prefault('planned'),
     }).parse(req.body);
     const today = istDate();
     const row = await inTx(db, req, async (ctx) => {
@@ -239,7 +239,7 @@ export function projectsRouter(db: DB) {
     const b = z.object({
       title: zText(150), description: emptyToNull(z.string().trim().max(2000)).optional(), assignee_id: zId,
       start_date: emptyToNull(zDate).optional(), due_date: zDate, due_time: emptyToNull(zClock).optional(),
-      checklist: z.array(zText(200)).max(30).default([]),
+      checklist: z.array(zText(200)).max(30).prefault([]),
     }).parse(req.body);
     const today = istDate();
     const row = await inTx(db, req, async (ctx) => {
@@ -344,7 +344,7 @@ export function projectsRouter(db: DB) {
    * a single day still shows.
    */
   r.get('/resources', requirePerm('ops:read'), async (req, res) => {
-    const q = z.object({ from: zDate.optional(), weeks: z.coerce.number().int().min(1).max(26).default(8) }).parse(req.query);
+    const q = z.object({ from: zDate.optional(), weeks: z.coerce.number().int().min(1).max(26).prefault(8) }).parse(req.query);
     const today = istDate();
     const from = weekStart(q.from ?? today);
     const weeks = Array.from({ length: q.weeks }, (_, i) => ({ start: addDays(from, i * 7), end: addDays(from, i * 7 + 6) }));

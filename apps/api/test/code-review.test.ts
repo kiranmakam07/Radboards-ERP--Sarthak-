@@ -129,3 +129,14 @@ describe('CR-10 the staff list with phones and emails', () => {
     expect(lite[0]).not.toHaveProperty('phone');
   });
 });
+
+describe('CR-16 zod 4: what an edit leaves out stays as it is', () => {
+  it('editing an item’s reorder level keeps its prices and tax; a missing field still reads "Required"', async () => {
+    const admin = await w.as('admin');
+    await admin.patch(`/api/items/${id.sample}`).send({ reorder_level: 4 }).expect(200);
+    const item = (await admin.get(`/api/items/${id.sample}`).expect(200)).body.data;
+    expect([item.dealer_price, item.purchase_cost, Number(item.gst_rate), item.hsn_sac]).toEqual(['1000.00', '2500.00', 18, '950699']);
+    const res = await admin.post('/api/items').send({ name: 'No SKU' }).expect(400);
+    expect(res.body.error.message).toMatch(/: Required$/);
+  });
+});

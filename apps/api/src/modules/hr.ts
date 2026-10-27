@@ -14,7 +14,7 @@ import { rows, type DB } from '../db/client';
 import { applicantActivities, applicants, attendance, employees, interviews, jobOpenings, salaryRevisions, users } from '../db/schema';
 import { parseBankDate, parseCsv } from '../lib/bank-csv';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zClock, zDate, zLink, zId, zListQuery, zMoney, zPhone, zText, wantsFile, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zClock, zDate, zLink, zId, zListQuery, zMoney, zPhone, zText, wantsFile, type Ctx, zPatch } from '../lib/http';
 
 /**
  * HR: hiring, employees and the attendance register.
@@ -468,7 +468,7 @@ const zEmployee = z.object({
   email: emptyToNull(z.string().email().max(200)).optional(),
   department: zText(100),
   designation: zText(100),
-  employment_type: z.enum(EMPLOYMENT_TYPES).default('full_time'),
+  employment_type: z.enum(EMPLOYMENT_TYPES).prefault('full_time'),
   join_date: zDate,
   monthly_salary: emptyToNull(zMoney).optional(),
   /** The day a changed salary starts from; today if not given. */
@@ -506,7 +506,7 @@ export function hrRouter(db: DB) {
 
   r.post('/openings', requirePerm('hr:write'), async (req, res) => {
     const b = z.object({
-      title: zText(150), department: zText(100), positions: z.coerce.number().int().min(1).max(500).default(1),
+      title: zText(150), department: zText(100), positions: z.coerce.number().int().min(1).max(500).prefault(1),
       description: emptyToNull(z.string().trim().max(4000)).optional(), opened_on: emptyToNull(zDate).optional(),
     }).parse(req.body);
     const row = await inTx(db, req, async (ctx) => {
@@ -638,7 +638,7 @@ export function hrRouter(db: DB) {
 
   r.patch('/applicants/:id', requirePerm('hr:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = zApplicant.partial().parse(req.body);
+    const b = zPatch(zApplicant).parse(req.body);
     const row = await inTx(db, req, async (ctx) => {
       const a = await lockApplicant(ctx.tx, id);
       const open = OPEN_APPLICANT_STAGES.includes(a.stage);
@@ -692,7 +692,7 @@ export function hrRouter(db: DB) {
   r.post('/applicants/:id/interviews', requirePerm('hr:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = z.object({
-      title: zText(100), scheduled_at: zWhen, mode: z.enum(INTERVIEW_MODES).default('in_person'), interviewer_id: emptyToNull(zId).optional(),
+      title: zText(100), scheduled_at: zWhen, mode: z.enum(INTERVIEW_MODES).prefault('in_person'), interviewer_id: emptyToNull(zId).optional(),
     }).parse(req.body);
     const row = await inTx(db, req, (ctx) =>
       scheduleInterview(ctx, id, { title: b.title, scheduledAt: b.scheduled_at, mode: b.mode, interviewerId: b.interviewer_id }));
@@ -702,7 +702,7 @@ export function hrRouter(db: DB) {
   r.post('/applicants/:id/hire', requirePerm('hr:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = z.object({
-      join_date: zDate, department: zText(100), designation: zText(100), employment_type: z.enum(EMPLOYMENT_TYPES).default('full_time'),
+      join_date: zDate, department: zText(100), designation: zText(100), employment_type: z.enum(EMPLOYMENT_TYPES).prefault('full_time'),
       monthly_salary: emptyToNull(zMoney).optional(), user_id: emptyToNull(zId).optional(),
     }).parse(req.body);
     const result = await inTx(db, req, (ctx) =>
@@ -774,7 +774,7 @@ export function hrRouter(db: DB) {
   /** The round did not happen: called off, or the applicant did not turn up. */
   r.post('/interviews/:id/cancel', requirePerm('hr:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ status: z.enum(['cancelled', 'no_show']).default('cancelled'), note: emptyToNull(z.string().trim().max(1000)).optional() }).parse(req.body);
+    const b = z.object({ status: z.enum(['cancelled', 'no_show']).prefault('cancelled'), note: emptyToNull(z.string().trim().max(1000)).optional() }).parse(req.body);
     await inTx(db, req, async (ctx) => {
       const i = await lockInterview(ctx.tx, id);
       if (i.status !== 'scheduled') throw conflict(`This interview is already ${words(i.status)}`);
@@ -834,7 +834,7 @@ export function hrRouter(db: DB) {
 
   r.patch('/employees/:id', requirePerm('employees:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = zEmployee.partial().parse(req.body);
+    const b = zPatch(zEmployee).parse(req.body);
     const row = await inTx(db, req, async (ctx) => {
       const [e] = await ctx.tx.select().from(employees).where(eq(employees.id, id)).for('update');
       must(e, 'Employee');

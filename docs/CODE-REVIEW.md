@@ -7,7 +7,8 @@ to the test step in the testing document (`exports/RadCore - Review for testing`
 
 Every fix has an automated test that fails without it (`apps/api/test/code-review.test.ts` unless named).
 After the fixes: 532 tests pass (31 shared, 501 API), on the in-memory database and on PostgreSQL 16; the web app
-builds.
+builds. After the library updates (CR-16, Sarthak's OK the same day): 533 (31 shared, 502 API), and `npm audit`
+finds no advisory in the libraries the app runs.
 
 ## What was read
 
@@ -45,7 +46,7 @@ Level: **Serious** wrong money, stock or tax in normal use · **Moderate** wrong
 | CR-13 | `modules/service.ts` | Two people taking the same unit in at once could open two job cards on it | Minor | Stock and cash leaks | A1 | Fixed (row lock) |
 | CR-14 | `lib/secret-box.ts` | The key that locks statement passwords was re-made (a deliberately slow step) on every use, blocking the server each time | Minor | — | — | Fixed (made once) |
 | CR-15 | several | Clean-up: duplicated and stray comments (settings, access, http), a comment naming a route that does not exist, comments stacked above the wrong route (sales, purchasing), duplicate-line checks left over beside `assertOnce` (credit notes, goods receipts) | Minor | — | — | Done |
-| CR-16 | dependencies | Published advisories in the libraries the app runs: body-parser 2.0-2.3 (high: a crafted compressed request can tie the server up), nodemailer through mailparser (moderate: address parsing), zod 3 (high: memory on oversized lists; the fix is zod 4, a larger change). Request bodies are capped at 1 MB and lists at fixed sizes, which limits the last | Serious | Updates and outside software | — | **Open:** updating downloads new versions, waiting for Sarthak's OK |
+| CR-16 | dependencies | Published advisories in the libraries the app runs: body-parser 2.0-2.3 (high: a crafted compressed request can tie the server up), nodemailer through mailparser (moderate: address parsing), zod 3 (high: memory on oversized lists; the fix is zod 4, a larger change). Now body-parser 2.4.0, mailparser 3.9.43 (nodemailer 10.1.4), zod 4.6.7. Moving to zod 4: a field's default is filled in before its checks, as before (`.prefault`); every edit route reads its body through `zPatch` (`lib/http.ts`), because zod 4 fills defaults in even for a field an edit leaves out, which put an item's prices back to their defaults when only its reorder level was changed; the discount limits name only some roles (`partialRecord`); ids keep the 8-4-4-4-12 check (`z.guid`); a missing field still reads "Required" | Serious | Updates and outside software | — | Fixed (`npm audit`: 0) |
 | CR-17 | `modules/service.ts` | Handing a vehicle back runs the normal credit check: a customer with an overdue bill cannot get it back, and the hand-back screen has no override | Moderate | — | A4 | **Open:** a decision (with "payment at hand-back", testing doc section 6) |
 | CR-18 | `modules/service.ts` | A supplier's credit for a warranty claim is booked without its GST: input tax is not reversed when the supplier's note carries GST | Minor | GST returns | A5 | **Open** |
 | CR-19 | `modules/sales.ts` | A credit note is not stopped after the GST time limit for one (30 November after the financial year) | Minor | GST returns | — | **Open** |

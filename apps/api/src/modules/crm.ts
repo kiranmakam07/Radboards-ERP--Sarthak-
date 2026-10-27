@@ -10,7 +10,7 @@ import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { adSpends, campaigns, channelEvents, items, leadActivities, leadSources, leads, messageTemplates } from '../db/schema';
 import { AppError, badRequest, conflict, forbidden, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zText, wantsFile, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zDate, zId, zMoneyPos, zText, wantsFile, type Ctx, zPatch } from '../lib/http';
 import { captureLead, moveLead, sourceIdByName } from './leads';
 import { advancePlan, stopPlan } from './plans';
 import { cancelOnlineOrder, fromShopify, isOnlineChannel, takeOrder, type OnlineOrder } from './online';
@@ -437,7 +437,7 @@ export function hooksRouter(db: DB, deps: CrmDeps = defaultDeps) {
   r.post('/google-ads', async (req, res) => {
     const b = z.object({
       lead_id: z.string().min(1).max(200), google_key: z.string().min(1).max(200),
-      user_column_data: z.array(z.object({ column_id: z.string().optional(), string_value: z.string().optional() }).passthrough()).default([]),
+      user_column_data: z.array(z.object({ column_id: z.string().optional(), string_value: z.string().optional() }).passthrough()).prefault([]),
       is_test: z.boolean().optional(),
     }).passthrough().parse(req.body);
     const [c] = await db.select().from(campaigns).where(eq(campaigns.token, b.google_key));
@@ -638,7 +638,7 @@ export function crmRouter(db: DB, deps: CrmDeps = defaultDeps) {
    * made, or any that were missed while something was down. A lead that is already here is not added again.
    */
   r.post('/integrations/meta/fetch', requirePerm('crm:manage'), async (req, res) => {
-    const b = z.object({ days: z.coerce.number().int().min(1).max(90).default(30) }).parse(req.body ?? {});
+    const b = z.object({ days: z.coerce.number().int().min(1).max(90).prefault(30) }).parse(req.body ?? {});
     const result = await pullMetaLeads(db, deps, b.days);
     await inTx(db, req, (ctx) => audit(ctx, 'crm', 'meta', 'fetch_leads', null, { days: b.days, ...result }));
     res.json({ data: result });
@@ -724,7 +724,7 @@ export function crmRouter(db: DB, deps: CrmDeps = defaultDeps) {
 
   r.patch('/templates/:id', requirePerm('crm:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = zTemplate.partial().parse(req.body);
+    const b = zPatch(zTemplate).parse(req.body);
     const patch: Partial<typeof messageTemplates.$inferInsert> = { updatedAt: new Date() };
     if (b.name !== undefined) patch.name = b.name;
     if (b.body !== undefined) patch.body = b.body;
@@ -741,7 +741,7 @@ export function crmRouter(db: DB, deps: CrmDeps = defaultDeps) {
    */
   r.post('/leads/:id/contact', requirePerm('leads:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ channel: z.enum(['whatsapp', 'call']).default('whatsapp'), template_id: emptyToNull(zId).optional() }).parse(req.body);
+    const b = z.object({ channel: z.enum(['whatsapp', 'call']).prefault('whatsapp'), template_id: emptyToNull(zId).optional() }).parse(req.body);
     const result = await inTx(db, req, async (ctx) => {
       const [lead] = await ctx.tx.select().from(leads).where(eq(leads.id, id)).for('update');
       must(lead, 'Lead');

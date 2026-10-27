@@ -140,7 +140,7 @@ export function pipelineRouter(db: DB) {
 
   /** Test rides between two days (today and the week ahead by default), with the lead and the demo unit. */
   r.get('/test-rides', requirePerm('leads:read'), async (req, res) => {
-    const q = z.object({ from: zDate.default(() => istDate()), to: zDate.optional(), lead_id: zId.optional() }).parse(req.query);
+    const q = z.object({ from: zDate.prefault(() => istDate()), to: zDate.optional(), lead_id: zId.optional() }).parse(req.query);
     sendList(req, res, await rows(db, sql`
       select t.id, t.slot_at, t.minutes, t.outcome, t.notes, t.lead_id, l.name as lead_name, l.phone as lead_phone, l.stage as lead_stage,
              u.serial_no, i.name as item_name, s.name as staff_name
@@ -161,7 +161,7 @@ export function pipelineRouter(db: DB) {
 
   r.post('/leads/:id/test-rides', requirePerm('leads:write'), async (req, res) => {
     const b = z.object({
-      unit_id: zId, slot_at: zInstant, minutes: z.coerce.number().int().min(5).max(480).default(30), staff_id: emptyToNull(zId).optional(),
+      unit_id: zId, slot_at: zInstant, minutes: z.coerce.number().int().min(5).max(480).prefault(30), staff_id: emptyToNull(zId).optional(),
       notes: emptyToNull(z.string().trim().max(500)).optional(),
     }).parse(req.body);
     res.status(201).json({ data: await inTx(db, req, (ctx) => bookTestRide(ctx, zId.parse(req.params.id), {

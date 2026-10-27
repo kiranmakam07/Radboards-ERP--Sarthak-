@@ -8,7 +8,7 @@ import type { DB } from '../db/client';
 import { followUpPlans, leadSources, leads, messageTemplates, users } from '../db/schema';
 import { parseCsv } from '../lib/bank-csv';
 import { badRequest, must } from '../lib/errors';
-import { emptyToNull, inTx, zId, zText } from '../lib/http';
+import { emptyToNull, inTx, zId, zText, zPatch } from '../lib/http';
 import { captureLead } from './leads';
 import { plansWithCounts, startPlan, stopPlan, type PlanStep } from './plans';
 import { OPEN_STAGES } from '../core/stages';
@@ -34,8 +34,8 @@ const zStep = z.object({
 const zPlan = z.object({
   name: zText(80),
   steps: z.array(zStep).min(1, 'a plan needs at least one step').max(20),
-  is_default: z.boolean().default(false),
-  active: z.boolean().default(true),
+  is_default: z.boolean().prefault(false),
+  active: z.boolean().prefault(true),
 });
 
 async function checkedSteps(db: DB, steps: PlanStep[]): Promise<PlanStep[]> {
@@ -132,7 +132,7 @@ export function leadToolsRouter(db: DB) {
 
   r.patch('/plans/:id', requirePerm('crm:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = zPlan.partial().parse(req.body);
+    const b = zPatch(zPlan).parse(req.body);
     const steps = b.steps ? await checkedSteps(db, b.steps) : undefined;
     const row = await inTx(db, req, async (ctx) => {
       const [before] = await ctx.tx.select().from(followUpPlans).where(eq(followUpPlans.id, id)).for('update');

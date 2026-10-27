@@ -1166,11 +1166,11 @@ export function salesRouter(db: DB) {
   });
 
   const zOrder = z.object({
-    channel: z.enum(CHANNELS).default('dealer'),
+    channel: z.enum(CHANNELS).prefault('dealer'),
     entity_id: emptyToNull(zId).optional(),
     party_id: zId,
     lead_id: emptyToNull(zId).optional(),
-    order_date: zDate.default(() => istDate()),
+    order_date: zDate.prefault(() => istDate()),
     place_of_supply: emptyToNull(zStateCode).optional(),
     tax_inclusive: z.boolean().nullish(),
     notes: emptyToNull(z.string().trim().max(2000)).optional(),
@@ -1208,7 +1208,7 @@ export function salesRouter(db: DB) {
   // The owner can confirm an order too: that is how a price below cost or over a seller's discount limit is approved.
   r.post('/orders/:id/confirm', requirePerm('sales:write', 'sales:approve_discount'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ override_credit: z.boolean().default(false) }).parse(req.body ?? {});
+    const b = z.object({ override_credit: z.boolean().prefault(false) }).parse(req.body ?? {});
     if (b.override_credit && !can(req.user!.role, 'sales:override_credit')) throw forbidden('Only Accounts or the owner can override a credit limit');
     res.json({ data: await inTx(db, req, (ctx) => confirmOrder(ctx, id, { overrideCredit: b.override_credit })) });
   });
@@ -1271,10 +1271,10 @@ export function salesRouter(db: DB) {
       payments: z.array(z.object({
         mode: z.enum(PAYMENT_MODES), amount: zMoneyPos, account_id: emptyToNull(zId).optional(),
         reference: emptyToNull(z.string().trim().max(100)).optional(),
-      })).max(5).default([]),
+      })).max(5).prefault([]),
       location_id: emptyToNull(zId).optional(),
       notes: emptyToNull(z.string().trim().max(1000)).optional(),
-      override_credit: z.boolean().default(false),
+      override_credit: z.boolean().prefault(false),
       delivery_checks: zDeliveryChecks.nullish(),
     }).parse(req.body);
     if (b.override_credit && !can(req.user!.role, 'sales:override_credit')) throw forbidden('Only Accounts or the owner can override a credit limit');
@@ -1360,7 +1360,7 @@ export function salesRouter(db: DB) {
     const id = zId.parse(req.params.id);
     const b = z.object({
       lines: z.array(z.object({ invoice_line_id: zId, qty: zQty, serials: zSerials.optional() })).min(1),
-      restock: z.boolean().default(true),
+      restock: z.boolean().prefault(true),
       location_id: emptyToNull(zId).optional(),
       reason: zText(500),
       date: zDate.optional(),
@@ -1425,7 +1425,7 @@ export function salesRouter(db: DB) {
 
   r.post('/invoices/:id/cancel', requirePerm('invoices:adjust'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ reason: zText(500), restock: z.boolean().default(false), cancel_payments: z.boolean().default(false) }).parse(req.body);
+    const b = z.object({ reason: zText(500), restock: z.boolean().prefault(false), cancel_payments: z.boolean().prefault(false) }).parse(req.body);
     res.json({ data: await inTx(db, req, (ctx) => cancelInvoice(ctx, id, { reason: b.reason, restock: b.restock, cancelPayments: b.cancel_payments })) });
   });
   return r;

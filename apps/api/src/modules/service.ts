@@ -647,7 +647,7 @@ export function serviceRouter(db: DB) {
   });
 
   // ---- reports (the brief's three) ----
-  const zRange = z.object({ from: zDate.default(() => `${istDate().slice(0, 7)}-01`), to: zDate.default(() => istDate()) });
+  const zRange = z.object({ from: zDate.prefault(() => `${istDate().slice(0, 7)}-01`), to: zDate.prefault(() => istDate()) });
 
   /** Service history by serial: every job on the unit, on what it is fitted in, and on the components inside it. */
   r.get('/reports/history', requirePerm('service:read'), async (req, res) => {

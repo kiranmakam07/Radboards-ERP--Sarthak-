@@ -318,7 +318,7 @@ export function payrollRouter(db: DB) {
 
   r.post('/advances', requirePerm('payroll:manage'), async (req, res) => {
     const b = z.object({
-      employee_id: zId, amount: zMoneyPos, monthly_recovery: zMoneyPos, given_on: zDate.default(() => istDate()), paid_from_account_id: zId,
+      employee_id: zId, amount: zMoneyPos, monthly_recovery: zMoneyPos, given_on: zDate.prefault(() => istDate()), paid_from_account_id: zId,
       note: emptyToNull(z.string().trim().max(300)).optional(),
     }).parse(req.body);
     if (D(b.monthly_recovery).gt(b.amount)) throw badRequest('The amount taken back each month cannot be more than the advance itself');
@@ -433,7 +433,7 @@ export function payrollRouter(db: DB) {
 
   r.post('/runs/:id/approve', requirePerm('payroll:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ even_if_unmarked: z.boolean().default(false) }).parse(req.body ?? {});
+    const b = z.object({ even_if_unmarked: z.boolean().prefault(false) }).parse(req.body ?? {});
     res.json({ data: await inTx(db, req, (ctx) => approveRun(ctx, id, { evenIfUnmarked: b.even_if_unmarked })) });
   });
 
@@ -444,7 +444,7 @@ export function payrollRouter(db: DB) {
 
   r.post('/runs/:id/pay', requirePerm('payroll:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ paid_from_account_id: zId, paid_on: zDate.default(() => istDate()), reference: emptyToNull(z.string().trim().max(100)).optional() }).parse(req.body);
+    const b = z.object({ paid_from_account_id: zId, paid_on: zDate.prefault(() => istDate()), reference: emptyToNull(z.string().trim().max(100)).optional() }).parse(req.body);
     res.json({ data: await inTx(db, req, (ctx) => payRun(ctx, id, { accountId: b.paid_from_account_id, paidOn: b.paid_on, reference: b.reference })) });
   });
 

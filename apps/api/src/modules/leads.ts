@@ -14,7 +14,7 @@ import { rows, type DB } from '../db/client';
 import { campaigns, items, leadActivities, leadSources, leads, lostReasons, parties, users } from '../db/schema';
 import { badRequest, conflict, must } from '../lib/errors';
 import {
-  emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zMoney, zPhone, zStateCode, zText, type Ctx,
+  emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zMoney, zPhone, zStateCode, zText, type Ctx, zPatch,
 } from '../lib/http';
 import { createParty, type Party } from './parties';
 import { OPEN_STAGES } from '../core/stages';
@@ -491,7 +491,7 @@ export function leadsRouter(db: DB) {
     source_id: zId,
     source_detail: emptyToNull(z.string().trim().max(200)).optional(),
     campaign_id: emptyToNull(zId).optional(),
-    interested_item_ids: z.array(zId).max(20).default([]),
+    interested_item_ids: z.array(zId).max(20).prefault([]),
     notes: emptyToNull(z.string().trim().max(2000)).optional(),
     owner_id: emptyToNull(zId).optional(),
     next_follow_up_at: emptyToNull(zWhen).optional(),
@@ -522,7 +522,7 @@ export function leadsRouter(db: DB) {
     const b = z.object({
       phone: zPhone,
       name: zText(150),
-      interested_item_ids: z.array(zId).max(20).default([]),
+      interested_item_ids: z.array(zId).max(20).prefault([]),
       notes: emptyToNull(z.string().trim().max(2000)).optional(),
       outcome: z.enum(['enquiry', 'buying_now']),
       /** The person agreed, at the counter, to be contacted (DPDP). */
@@ -545,7 +545,7 @@ export function leadsRouter(db: DB) {
 
   r.patch('/:id', requirePerm('leads:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({
+    const b = zPatch(z.object({
       name: zText(150),
       email: emptyToNull(z.string().email().max(200)),
       source_detail: emptyToNull(z.string().trim().max(200)),
@@ -556,7 +556,7 @@ export function leadsRouter(db: DB) {
       address: zAddress.nullable(),
       gstin: emptyToNull(zGstin),
       deal_value: emptyToNull(zMoney),
-    }).partial().parse(req.body);
+    })).parse(req.body);
     const updated = await inTx(db, req, async (ctx) => {
       const [before] = await ctx.tx.select().from(leads).where(eq(leads.id, id)).for('update');
       must(before, 'Lead');
@@ -619,7 +619,7 @@ export function leadsRouter(db: DB) {
   r.post('/:id/convert', requirePerm('leads:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = z.object({
-      party_type: z.enum(SELLING_PARTY_TYPES).default('customer'),
+      party_type: z.enum(SELLING_PARTY_TYPES).prefault('customer'),
       name: zText(200).optional(),
       email: emptyToNull(z.string().email()).optional(),
       gstin: emptyToNull(zGstin).optional(),
@@ -680,7 +680,7 @@ export function publicLeadsRouter(db: DB) {
       name: zText(150),
       phone: zPhone,
       email: emptyToNull(z.string().email().max(200)).optional(),
-      interested_item_ids: z.array(zId).max(10).default([]),
+      interested_item_ids: z.array(zId).max(10).prefault([]),
       message: emptyToNull(z.string().trim().max(1000)).optional(),
       // Honeypot: real people never fill this hidden field, bots do.
       website: z.string().max(0).optional(),

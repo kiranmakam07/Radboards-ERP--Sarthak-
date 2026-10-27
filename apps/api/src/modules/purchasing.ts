@@ -604,7 +604,7 @@ export function purchasingRouter(db: DB) {
 
   r.post('/orders', requirePerm('po:write'), async (req, res) => {
     const b = z.object({
-      supplier_id: zId, order_date: zDate.default(() => istDate()), expected_date: emptyToNull(zDate).optional(),
+      supplier_id: zId, order_date: zDate.prefault(() => istDate()), expected_date: emptyToNull(zDate).optional(),
       notes: emptyToNull(z.string().trim().max(2000)).optional(), lines: z.array(zPoLine).min(1).max(200),
       currency: zCurrency, fx_rate: emptyToNull(zFxRate).optional(),
     }).parse(req.body);
@@ -755,7 +755,7 @@ export function purchasingRouter(db: DB) {
     const id = zId.parse(req.params.id);
     const b = z.object({
       lines: z.array(z.object({
-        grn_line_id: zId, accepted_qty: zQtyNonNeg, rejected_qty: zQtyNonNeg.default('0'),
+        grn_line_id: zId, accepted_qty: zQtyNonNeg, rejected_qty: zQtyNonNeg.prefault('0'),
         reject_reason: emptyToNull(z.string().trim().max(500)).optional(),
         serials: zSerials.optional(),
         batch_no: emptyToNull(z.string().trim().max(60)).optional(),

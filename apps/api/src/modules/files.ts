@@ -62,7 +62,7 @@ export function filesRouter(db: DB) {
   const r = Router();
 
   r.post('/', requireAuth, express.raw({ type: () => true, limit: MAX_BYTES }), async (req, res) => {
-    const q = z.object({ purpose: z.enum(PURPOSES).default('other') }).parse(req.query);
+    const q = z.object({ purpose: z.enum(PURPOSES).prefault('other') }).parse(req.query);
     const allowed = UPLOAD[q.purpose];
     if (allowed && !allowed.some((p) => can(req.user!.role, p))) throw forbidden();
     const body: unknown = req.body;

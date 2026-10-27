@@ -13,7 +13,7 @@ import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { accounts, expenseCategories, expenses, fiscalCloses, journalEntries, tdsRates } from '../db/schema';
 import { badRequest, conflict, forbidden, must } from '../lib/errors';
-import { emptyToNull, inTx, sendList, zDate, zLink, zId, zListQuery, zMoney, zMoneyPos, zText, wantsFile, type Ctx } from '../lib/http';
+import { emptyToNull, inTx, sendList, zDate, zLink, zId, zListQuery, zMoney, zMoneyPos, zText, wantsFile, type Ctx, zPatch } from '../lib/http';
 
 /**
  * Accounts: the chart of accounts, expenses, journal entries made by hand, money moved between our
@@ -287,7 +287,7 @@ export function accountingRouter(db: DB) {
 
   const zAccount = z.object({
     code: zText(20), name: zText(150), type: z.enum(ACCOUNT_TYPES), parent_id: emptyToNull(zId).optional(),
-    is_group: z.boolean().default(false), subtype: emptyToNull(z.enum(['cash', 'bank'])).optional(),
+    is_group: z.boolean().prefault(false), subtype: emptyToNull(z.enum(['cash', 'bank'])).optional(),
   });
 
   r.post('/accounts', requirePerm('accounts:write'), async (req, res) => {
@@ -305,7 +305,7 @@ export function accountingRouter(db: DB) {
 
   r.patch('/accounts/:id', requirePerm('accounts:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ name: zText(150), active: z.boolean() }).partial().parse(req.body);
+    const b = zPatch(z.object({ name: zText(150), active: z.boolean() })).parse(req.body);
     const account = await inTx(db, req, async (ctx) => {
       const [before] = await ctx.tx.select().from(accounts).where(eq(accounts.id, id)).for('update');
       must(before, 'Account');
@@ -335,10 +335,10 @@ export function accountingRouter(db: DB) {
 
   r.post('/expenses', requirePerm('expenses:write'), async (req, res) => {
     const b = z.object({
-      expense_date: zDate.default(() => istDate()),
+      expense_date: zDate.prefault(() => istDate()),
       category_id: zId,
       amount: zMoneyPos,
-      gst_type: z.enum(['none', 'intra', 'inter']).default('none'),
+      gst_type: z.enum(['none', 'intra', 'inter']).prefault('none'),
       gst_amount: emptyToNull(zMoney).optional(),
       paid_from_account_id: zId,
       vendor_name: emptyToNull(z.string().trim().max(200)).optional(),
@@ -405,7 +405,7 @@ export function accountingRouter(db: DB) {
       entry_date: zDate,
       narration: zText(500),
       lines: z.array(z.object({
-        account_id: zId, party_id: emptyToNull(zId).optional(), debit: zMoney.default('0'), credit: zMoney.default('0'),
+        account_id: zId, party_id: emptyToNull(zId).optional(), debit: zMoney.prefault('0'), credit: zMoney.prefault('0'),
         memo: emptyToNull(z.string().trim().max(200)).optional(),
       })).min(2).max(200),
     }).parse(req.body);
@@ -439,7 +439,7 @@ export function accountingRouter(db: DB) {
 
   r.post('/journals/:id/reverse', requirePerm('accounts:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ reason: zText(500), date: zDate.default(() => istDate()) }).parse(req.body);
+    const b = z.object({ reason: zText(500), date: zDate.prefault(() => istDate()) }).parse(req.body);
     await inTx(db, req, async (ctx) => {
       // Locked, so two people reversing the same entry at once cannot both do it (a unique index backs this up).
       const [entry] = await ctx.tx.select().from(journalEntries).where(eq(journalEntries.id, id)).for('update');
@@ -478,7 +478,7 @@ export function accountingRouter(db: DB) {
 
   r.post('/transfers', requirePerm('accounts:write'), async (req, res) => {
     const b = z.object({
-      from_account_id: zId, to_account_id: zId, amount: zMoneyPos, date: zDate.default(() => istDate()),
+      from_account_id: zId, to_account_id: zId, amount: zMoneyPos, date: zDate.prefault(() => istDate()),
       reference: emptyToNull(z.string().trim().max(100)).optional(), notes: emptyToNull(z.string().trim().max(300)).optional(),
     }).parse(req.body);
     if (b.from_account_id === b.to_account_id) throw badRequest('Pick two different accounts');
@@ -618,7 +618,7 @@ export function accountingRouter(db: DB) {
   });
 
   r.get('/reports/trial-balance', requirePerm('accounts:read'), async (req, res) => {
-    const q = z.object({ as_of: zDate.default(() => istDate()) }).parse(req.query);
+    const q = z.object({ as_of: zDate.prefault(() => istDate()) }).parse(req.query);
     const totals = await accountTotals(db, null, q.as_of);
     const data = totals
       .map((a) => {
@@ -634,7 +634,7 @@ export function accountingRouter(db: DB) {
 
   r.get('/reports/profit-and-loss', requirePerm('accounts:read'), async (req, res) => {
     const today = istDate();
-    const q = z.object({ from: zDate.default(() => fyRange(fyOf(today)).from), to: zDate.default(() => today) }).parse(req.query);
+    const q = z.object({ from: zDate.prefault(() => fyRange(fyOf(today)).from), to: zDate.prefault(() => today) }).parse(req.query);
     const totals = await accountTotals(db, q.from, q.to, false);
     const income = totals.filter((a) => a.type === 'income').map((a) => ({ code: a.code, name: a.name, amount: money(D(a.credit).minus(a.debit)) })).filter((a) => a.amount !== '0.00');
     const expense = totals.filter((a) => a.type === 'expense').map((a) => ({ code: a.code, name: a.name, amount: money(D(a.debit).minus(a.credit)) })).filter((a) => a.amount !== '0.00');
@@ -651,7 +651,7 @@ export function accountingRouter(db: DB) {
    * Liabilities + Equity without needing a closing entry first.
    */
   r.get('/reports/balance-sheet', requirePerm('accounts:read'), async (req, res) => {
-    const q = z.object({ as_of: zDate.default(() => istDate()) }).parse(req.query);
+    const q = z.object({ as_of: zDate.prefault(() => istDate()) }).parse(req.query);
     const totals = await accountTotals(db, null, q.as_of);
     const side = (type: string, sign: 1 | -1) =>
       totals.filter((a) => a.type === type)

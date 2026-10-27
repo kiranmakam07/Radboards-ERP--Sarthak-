@@ -228,7 +228,7 @@ export function bankMailRouter(db: DB, deps: MailDeps) {
       /** Blank leaves the saved password as it is. */
       password: emptyToNull(z.string().max(200)).optional(),
       forget_password: z.boolean().optional(),
-      active: z.boolean().default(true),
+      active: z.boolean().prefault(true),
     }).parse(req.body);
     if (!b.match_from && !b.match_subject) throw badRequest('Say how these mails are recognised: words from the sender’s address, from the subject, or both');
     await inTx(db, req, async (ctx) => {

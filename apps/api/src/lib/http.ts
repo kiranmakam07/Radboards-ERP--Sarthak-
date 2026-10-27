@@ -34,6 +34,10 @@ export function inTx<T>(db: DB, req: Request, fn: (ctx: Ctx) => Promise<T>): Pro
 export const userId = (ctx: Ctx): string | null => ctx.user?.id ?? null;
 
 // ---- zod building blocks ---------------------------------------------------
+// A field left out reads "Required" on the screen, as it did before zod 4 ("Invalid input: expected string, received
+// undefined" otherwise). Every other message is zod's own, or the one given with the rule.
+z.config({ customError: (iss) => (iss.code === 'invalid_type' && iss.input === undefined ? 'Required' : undefined) });
+
 const decimalString = (maxDp: number) =>
   z.union([z.string(), z.number()]).transform((v, c) => {
     const s = String(v).trim();
@@ -60,7 +64,8 @@ export const sized = (rule: (d: Decimal) => boolean) => (v: unknown) => typeof v
 const moneyFits = sized((d) => d.abs().lt('10000000000'));
 const qtyFits = sized((d) => d.abs().lt('1000000000'));
 
-export const zId = z.string().uuid();
+// Any id in the 8-4-4-4-12 form, as zod 3 accepted; zod 4's uuid() also checks the version digits.
+export const zId = z.guid();
 export const zMoney = decimalString(2).refine(sized((d) => d.gte(0)), 'cannot be negative').refine(moneyFits, 'too large');
 export const zMoneyPos = zMoney.refine(sized((d) => d.gt(0)), 'must be more than 0');
 export const zSignedMoney = decimalString(2).refine(moneyFits, 'too large');
@@ -78,7 +83,7 @@ export const zGstRate = z.union([z.string(), z.number()]).transform((v, c) => {
   return n.toFixed(2);
 });
 /** A currency code (ISO 4217, three letters), rupees unless given. */
-export const zCurrency = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, 'must be a 3-letter currency code like USD').default('INR');
+export const zCurrency = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, 'must be a 3-letter currency code like USD').prefault('INR');
 /** Rupees for one unit of a foreign currency, up to 6 decimals. */
 export const zFxRate = decimalString(6).refine(sized((d) => d.gt(0) && d.lt(1000000)), 'must be more than 0');
 
@@ -122,12 +127,31 @@ export const zGstin = z.string().transform((v, c) => {
 });
 export const zStateCode = z.string().regex(/^\d{2}$/, 'must be a 2-digit state code');
 export const zAddress = z.object({
-  line1: z.string().max(200).optional().default(''),
-  line2: z.string().max(200).optional().default(''),
-  city: z.string().max(100).optional().default(''),
-  state: z.string().max(100).optional().default(''),
-  pincode: z.string().max(10).optional().default(''),
+  line1: z.string().max(200).optional().prefault(''),
+  line2: z.string().max(200).optional().prefault(''),
+  city: z.string().max(100).optional().prefault(''),
+  state: z.string().max(100).optional().prefault(''),
+  pincode: z.string().max(10).optional().prefault(''),
 });
+/** A field without the value it takes when left out (see zPatch). */
+function withoutDefault(t: z.ZodType): z.ZodType {
+  if (t instanceof z.ZodDefault || t instanceof z.ZodPrefault) return withoutDefault(t.unwrap() as z.ZodType);
+  if (t instanceof z.ZodOptional) return withoutDefault(t.unwrap() as z.ZodType).optional();
+  if (t instanceof z.ZodNullable) return withoutDefault(t.unwrap() as z.ZodType).nullable();
+  return t;
+}
+
+/**
+ * The body of an edit: every field optional, and a field left out is left as it is. zod 4 fills a field's default
+ * in even under .partial(), so an edit that sent only the reorder level would put an item's prices back to their
+ * defaults; the defaults are taken off first.
+ */
+export function zPatch<S extends z.ZodRawShape>(schema: z.ZodObject<S>) {
+  const partial = schema.partial();
+  const shape = Object.fromEntries(Object.entries(schema.shape).map(([k, t]) => [k, withoutDefault(t as z.ZodType)]));
+  return schema.extend(shape).partial() as unknown as typeof partial;
+}
+
 /** Treat "" as "not provided" so simple HTML forms can post empty fields. */
 export const emptyToNull = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => (v === '' || v === undefined ? null : v), schema.nullable());
@@ -143,9 +167,9 @@ export const zLink = z.string().trim().max(1000).refine(
 
 export const zListQuery = z.object({
   q: z.string().trim().max(100).optional(),
-  limit: z.coerce.number().int().min(1).max(5000).default(100),
-  offset: z.coerce.number().int().min(0).default(0),
-  format: z.enum(['json', 'csv', 'xlsx']).default('json'),
+  limit: z.coerce.number().int().min(1).max(5000).prefault(100),
+  offset: z.coerce.number().int().min(0).prefault(0),
+  format: z.enum(['json', 'csv', 'xlsx']).prefault('json'),
 });
 
 // ---- responses --------------------------------------------------------------

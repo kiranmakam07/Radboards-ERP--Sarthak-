@@ -463,7 +463,7 @@ async function compare(tx: DB, kind: Kind, csv: string, asOf: string) {
 const zBody = z.object({
   csv: z.string().min(1, 'Choose the file').max(900_000, 'The file is too large: split it, or leave out columns that are not needed'),
   as_of: zDate,
-  dry_run: z.boolean().default(true),
+  dry_run: z.boolean().prefault(true),
   location_id: zId.optional(),
 });
 

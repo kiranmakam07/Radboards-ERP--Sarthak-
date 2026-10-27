@@ -381,7 +381,7 @@ export function jobWorkRouter(db: DB) {
    */
   r.get('/register', requirePerm('jobwork:read'), async (req, res) => {
     const today = istDate();
-    const q = z.object({ kind: z.enum(['sent', 'received']).default('sent'), from: zDate.default(() => fyRange(fyOf(today)).from), to: zDate.default(() => today) }).parse(req.query);
+    const q = z.object({ kind: z.enum(['sent', 'received']).prefault('sent'), from: zDate.prefault(() => fyRange(fyOf(today)).from), to: zDate.prefault(() => today) }).parse(req.query);
     const data = q.kind === 'sent'
       ? await rows(db, sql`
           select j.challan_no, j.challan_date, p.name as job_worker, p.gstin as job_worker_gstin, p.state_code as job_worker_state,
@@ -447,7 +447,7 @@ export function jobWorkRouter(db: DB) {
 
   r.post('/', requirePerm('jobwork:write'), async (req, res) => {
     const b = z.object({
-      job_worker_id: zId, from_location_id: zId, challan_date: zDate.default(() => istDate()), process: zText(200),
+      job_worker_id: zId, from_location_id: zId, challan_date: zDate.prefault(() => istDate()), process: zText(200),
       expected_back_on: emptyToNull(zDate).optional(), transport: emptyToNull(z.string().trim().max(200)).optional(),
       notes: emptyToNull(z.string().trim().max(1000)).optional(),
       lines: z.array(z.object({ item_id: zId, qty: zQty })).min(1).max(200),
@@ -468,9 +468,9 @@ export function jobWorkRouter(db: DB) {
   r.post('/:id/receipts', requirePerm('jobwork:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
     const b = z.object({
-      received_on: zDate.default(() => istDate()), to_location_id: zId, worker_challan_no: emptyToNull(z.string().trim().max(60)).optional(),
+      received_on: zDate.prefault(() => istDate()), to_location_id: zId, worker_challan_no: emptyToNull(z.string().trim().max(60)).optional(),
       charge: emptyToNull(zMoney).optional(), notes: emptyToNull(z.string().trim().max(1000)).optional(),
-      lines: z.array(z.object({ line_id: zId, returned: zQtyOrBlank, consumed: zQtyOrBlank, lost: zQtyOrBlank })).max(200).default([]),
+      lines: z.array(z.object({ line_id: zId, returned: zQtyOrBlank, consumed: zQtyOrBlank, lost: zQtyOrBlank })).max(200).prefault([]),
       produced: z.object({ item_id: emptyToNull(zId).optional(), qty: zQtyOrBlank }).nullish(),
     }).parse(req.body);
     const produced = b.produced?.item_id && b.produced.qty ? { itemId: b.produced.item_id, qty: b.produced.qty } : null;

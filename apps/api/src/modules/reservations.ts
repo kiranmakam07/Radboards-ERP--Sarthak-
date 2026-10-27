@@ -180,7 +180,7 @@ export function reservationsRouter(db: DB) {
 
   r.post('/reservations/:id/release', requirePerm('sales:write'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const b = z.object({ reason: zText(300).default('Let go') }).parse(req.body ?? {});
+    const b = z.object({ reason: zText(300).prefault('Let go') }).parse(req.body ?? {});
     const closed = await inTx(db, req, (ctx) => release(ctx, { id }, b.reason));
     if (closed.length === 0) throw conflict('This reservation is not open');
     res.json({ data: closed[0] });

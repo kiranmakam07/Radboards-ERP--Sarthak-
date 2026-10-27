@@ -10,7 +10,7 @@ import { parties } from '../db/schema';
 import { badRequest, forbidden, must } from '../lib/errors';
 import { logAccess } from '../core/access';
 import {
-  emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zMoney, zPhone, zStateCode, zText, wantsFile, type Ctx,
+  emptyToNull, inTx, sendList, zAddress, zDate, zGstin, zId, zListQuery, zMoney, zPhone, zStateCode, zText, wantsFile, type Ctx, zPatch,
 } from '../lib/http';
 
 /**
@@ -100,7 +100,7 @@ export function partiesRouter(db: DB) {
       type: z.enum(PARTY_TYPES).optional(),
       // Who we sell to (customers and dealers together) or who we buy from.
       side: emptyToNull(z.enum(['customers', 'suppliers'])).optional(),
-      active: z.enum(['true', 'false', 'all']).default('true'),
+      active: z.enum(['true', 'false', 'all']).prefault('true'),
     }).parse(req.query);
     const like = q.q ? `%${q.q}%` : null;
     const digits = q.q ? q.q.replace(/\D/g, '') : '';
@@ -154,7 +154,7 @@ export function partiesRouter(db: DB) {
 
   r.patch('/:id', requirePerm('parties:manage'), async (req, res) => {
     const id = zId.parse(req.params.id);
-    const body = zParty.omit({ party_type: true }).partial().parse(req.body);
+    const body = zPatch(zParty.omit({ party_type: true })).parse(req.body);
     const consent = z.object({ consent: z.boolean().optional() }).parse(req.body);
     const updated = await inTx(db, req, async (ctx) => {
       const [before] = await ctx.tx.select().from(parties).where(eq(parties.id, id)).for('update');
