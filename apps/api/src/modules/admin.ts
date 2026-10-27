@@ -96,8 +96,9 @@ const publicUser = {
 export function usersRouter(db: DB) {
   const r = Router();
 
-  // Anyone signed in can see the staff list (needed for lead owners); only admin can change it.
-  r.get('/', requireAuth, async (req, res) => {
+  // The staff list with phones and emails is for whoever manages sign-ins (code review, 27 Oct 2026); the other
+  // screens pick people from /api/masters/users-lite, which has names and roles only.
+  r.get('/', requirePerm('users:manage'), async (req, res) => {
     sendList(req, res, await db.select(publicUser).from(users).orderBy(asc(users.name)), 'users');
   });
 

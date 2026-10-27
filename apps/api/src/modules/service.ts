@@ -130,7 +130,8 @@ async function lockJob(tx: DB, id: string): Promise<JobCard> {
 }
 
 async function unitBySerial(tx: DB, serial: string, itemId?: string | null) {
-  const found = await tx.select().from(units).where(and(eq(units.serialNo, serial.trim().toUpperCase()), itemId ? eq(units.itemId, itemId) : undefined));
+  // Locked, so two people taking the same unit in at once cannot open two job cards on it.
+  const found = await tx.select().from(units).where(and(eq(units.serialNo, serial.trim().toUpperCase()), itemId ? eq(units.itemId, itemId) : undefined)).for('update');
   if (found.length === 0) throw badRequest(`There is no unit with serial ${serial}`);
   if (found.length > 1) throw badRequest(`More than one item has a unit with serial ${serial}: pick the item`);
   return found[0]!;

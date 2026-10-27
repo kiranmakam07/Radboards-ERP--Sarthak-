@@ -51,6 +51,8 @@ export default function ReportsPage() {
     <Table rows={data?.data} empty="Nothing outstanding." rowHref={(r) => (r.party_id && r.party_id !== 'cash' ? `/parties/${r.party_id}` : null)}
       chart={{ kind: 'bar', name: 'Outstanding', label: (r) => r.party_name, value: (r) => Number(r.total), format: rupees }} columns={[
       { key: 'party_name', title: 'Party' }, { key: 'phone', title: 'Phone' },
+      // Owed with no bill behind it: a balance brought in from Vyapar, or (negative) money taken and not yet set against a bill.
+      { key: 'not_on_bills', title: 'Not on a bill', align: 'right', render: (r) => (Number(r.not_on_bills) ? inr(r.not_on_bills) : '') },
       { key: 'not_due', title: 'Not due', align: 'right', render: (r) => inr(r.not_due) },
       { key: 'd0_30', title: '1–30 days', align: 'right', render: (r) => inr(r.d0_30) },
       { key: 'd31_60', title: '31–60', align: 'right', render: (r) => inr(r.d31_60) },

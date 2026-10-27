@@ -3,7 +3,7 @@
 import { istDate } from '@radcore/shared';
 import { useState } from 'react';
 import { CsvLink, ErrorBox, Loading, Page, Table, Toggle, date, inr, label } from '@/components/ui';
-import { post, qs, useGet } from '@/lib/api';
+import { post, qs, useGet, useSaving } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
 type JLine = { account_id: string; party_id: string; debit: string; credit: string };
@@ -36,6 +36,7 @@ export default function JournalPage() {
 }
 
 function ManualJournal({ onDone }: { onDone: () => void }) {
+  const saving = useSaving();
   const accounts = useGet<{ data: any[] }>('/accounting/accounts');
   const parties = useGet<{ data: any[] }>('/parties?limit=2000');
   const [entryDate, setEntryDate] = useState(istDate());
@@ -69,7 +70,7 @@ function ManualJournal({ onDone }: { onDone: () => void }) {
         <tfoot><tr><td colSpan={2}><button type="button" onClick={() => setLines([...lines, blank()])}>+ Add line</button></td><td className="right">{inr(dr)}</td><td className="right">{inr(cr)}</td><td>{dr !== cr ? <span className="error small">Out by {inr(Math.abs(dr - cr))}</span> : null}</td></tr></tfoot>
       </table>
       <div className="form-foot" style={{ marginTop: 10 }}>
-        <button type="button" className="primary" onClick={async () => {
+        <button type="button" className="primary" disabled={saving.busy} onClick={() => saving.run(async () => {
           setError(null);
           try {
             await post('/accounting/journals', {
@@ -81,7 +82,7 @@ function ManualJournal({ onDone }: { onDone: () => void }) {
           } catch (e) {
             setError((e as Error).message);
           }
-        }}>Post entry</button>
+        })}>{saving.busy ? 'Saving…' : 'Post entry'}</button>
         <ErrorBox error={error} />
       </div>
     </div>

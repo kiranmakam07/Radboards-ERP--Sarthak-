@@ -59,6 +59,13 @@ export async function gstSummary(db: DB, from: string, to: string) {
            coalesce(sum(cgst), 0)::numeric(16,2)::text as cgst, coalesce(sum(sgst), 0)::numeric(16,2)::text as sgst, '0.00' as cess
       from expenses where status = 'posted' and expense_date between ${from}::date and ${to}::date`);
 
+  // IGST paid at customs on imported goods (an import shipment's IGST line), on the day it was paid: GSTR-3B 4(A)(1).
+  const [imp] = await rows<{ igst: string }>(db, sql`
+    select coalesce(sum(c.amount), 0)::numeric(16,2)::text as igst from landed_cost_lines c
+      join journal_entries e on e.ref_type = 'landed_cost_line' and e.ref_id = c.id and e.reverses_entry_id is null
+     where c.kind = 'igst' and e.entry_date between ${from}::date and ${to}::date
+       and not exists (select 1 from journal_entries r where r.reverses_entry_id = e.id)`);
+  const imports: Tax = { ...zero(), igst: money(imp?.igst ?? 0) };
   const sales = await outward('tax_invoice');
   const salesReturns = await outward('credit_note');
   const purchases = await inward('bill');
@@ -66,7 +73,7 @@ export async function gstSummary(db: DB, from: string, to: string) {
   const output = net(sales, salesReturns);
   const purchaseNet = net(purchases, purchaseReturns);
   const itc: Tax = {
-    taxable: money(D(purchaseNet.taxable).plus(exp?.taxable ?? 0)), igst: money(D(purchaseNet.igst).plus(exp?.igst ?? 0)),
+    taxable: money(D(purchaseNet.taxable).plus(exp?.taxable ?? 0)), igst: money(D(purchaseNet.igst).plus(exp?.igst ?? 0).plus(imports.igst)),
     cgst: money(D(purchaseNet.cgst).plus(exp?.cgst ?? 0)), sgst: money(D(purchaseNet.sgst).plus(exp?.sgst ?? 0)),
     cess: money(D(purchaseNet.cess).plus(exp?.cess ?? 0)),
   };
@@ -75,7 +82,7 @@ export async function gstSummary(db: DB, from: string, to: string) {
   return {
     from, to,
     outward: { sales, sales_returns: salesReturns, net: output, total_tax: money(outputTax) },
-    itc: { purchases, purchase_returns: purchaseReturns, expenses: exp ?? zero(), net: itc, total_tax: money(itcTax) },
+    itc: { purchases, purchase_returns: purchaseReturns, expenses: exp ?? zero(), imports, net: itc, total_tax: money(itcTax) },
     // Estimate only: the real set-off order (IGST credit first, etc.) is applied on the portal.
     net_payable: {
       igst: money(D(output.igst).minus(itc.igst)), cgst: money(D(output.cgst).minus(itc.cgst)), sgst: money(D(output.sgst).minus(itc.sgst)),

@@ -125,7 +125,7 @@ export async function bookVehicle(ctx: Ctx, leadId: string, input: BookingInput)
   await reserve(ctx, order.id, { lines: [{ orderLineId: line!.id, qty: '1', locationId: input.locationId ?? null, serials: [input.serial] }] });
   const payment = await createPayment(ctx, {
     direction: 'in', partyId, mode: input.advance.mode, accountId: input.advance.accountId, amount: input.advance.amount,
-    reference: input.advance.reference ?? null, paidOn: istDate(), notes: `Advance for ${order.orderNo}`,
+    reference: input.advance.reference ?? null, paidOn: istDate(), notes: `Advance for ${order.orderNo}`, salesOrderId: order.id,
   });
   await stageTo(ctx, lead, 'booked', `${order.orderNo}, ${input.serial.trim().toUpperCase()}`);
   return { order: confirmed, payment };

@@ -10,7 +10,7 @@ import {
 import { EditLines, linesKey } from '@/components/edit-lines';
 import { SerialPicker } from '@/components/serials';
 import { DeliveryChecksCard } from '@/components/delivery-checks';
-import { post, useGet } from '@/lib/api';
+import { post, useGet, useSaving } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
 /** Draft (quote) -> Confirmed -> Delivered (partial allowed) -> Invoiced, or Cancelled before delivery. */
@@ -158,6 +158,7 @@ export default function OrderPage() {
 }
 
 function PartialDelivery({ order, onDone }: { order: any; onDone: () => void }) {
+  const saving = useSaving();
   const [qty, setQty] = useState<Record<string, string>>({});
   const [serials, setSerials] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
@@ -192,7 +193,7 @@ function PartialDelivery({ order, onDone }: { order: any; onDone: () => void }) 
         ) },
       ]} />
       <div className="form-foot" style={{ marginTop: 10 }}>
-        <button type="button" className="primary" onClick={async () => {
+        <button type="button" className="primary" disabled={saving.busy} onClick={() => saving.run(async () => {
           setError(null);
           try {
             const lines = Object.entries(qty).filter(([, q]) => Number(q) > 0)
@@ -203,7 +204,7 @@ function PartialDelivery({ order, onDone }: { order: any; onDone: () => void }) 
           } catch (e) {
             setError((e as Error).message);
           }
-        }}>Deliver</button>
+        })}>{saving.busy ? 'Saving…' : 'Deliver'}</button>
         <ErrorBox error={error} />
       </div>
     </div>
@@ -212,6 +213,7 @@ function PartialDelivery({ order, onDone }: { order: any; onDone: () => void }) 
 
 /** Hold stock for the order (a booking): how much of each line, where, until when; serials for items kept by serial. */
 function HoldStock({ order, onDone }: { order: any; onDone: () => void }) {
+  const saving = useSaving();
   const places = useGet<{ data: { id: string; name: string; type: string; active: boolean }[] }>('/masters/locations');
   const sellFrom = (places.data?.data ?? []).filter((l) => l.active && ['stores', 'showroom', 'demo', 'franchise'].includes(l.type));
   const fallback = sellFrom.find((l) => l.type === (order.channel === 'store' ? 'showroom' : 'stores'))?.id ?? '';
@@ -242,7 +244,7 @@ function HoldStock({ order, onDone }: { order: any; onDone: () => void }) {
         ) },
       ]} />
       <div className="form-foot" style={{ marginTop: 10 }}>
-        <button type="button" className="primary" onClick={async () => {
+        <button type="button" className="primary" disabled={saving.busy} onClick={() => saving.run(async () => {
           setError(null);
           try {
             const lines = Object.entries(qty).filter(([, q]) => Number(q) > 0)
@@ -253,7 +255,7 @@ function HoldStock({ order, onDone }: { order: any; onDone: () => void }) {
           } catch (e) {
             setError((e as Error).message);
           }
-        }}>Hold</button>
+        })}>{saving.busy ? 'Saving…' : 'Hold'}</button>
         <ErrorBox error={error} />
       </div>
     </div>

@@ -1012,6 +1012,8 @@ export const payments = pgTable('payments', {
   paidOn: date('paid_on').notNull(),
   status: postedStatusEnum('status').notNull().default('posted'),
   notes: text('notes'),
+  /** Money taken for an order before it is billed (a booking advance): set against the order's invoice when it is made. */
+  salesOrderId: uuid('sales_order_id').references((): AnyPgColumn => salesOrders.id),
   ...stamps,
 }, (t) => [
   index('payments_party_idx').on(t.partyId),
@@ -1109,7 +1111,8 @@ export const journalEntries = pgTable('journal_entries', {
   index('journal_entries_date_idx').on(t.entryDate),
   index('journal_entries_ref_idx').on(t.refType, t.refId),
   // "Has this entry been reversed?" is asked of every entry by the reports, the day book and the bank screen.
-  index('journal_entries_reverses_idx').on(t.reversesEntryId),
+  // An entry is reversed at most once (code review, 27 Oct 2026).
+  uniqueIndex('journal_entries_reverses_uq').on(t.reversesEntryId).where(sql`${t.reversesEntryId} is not null`),
 ]);
 
 export const journalLines = pgTable('journal_lines', {

@@ -44,6 +44,8 @@ export type PaymentInput = {
   /** Paid in a foreign currency (to a supplier): which, and its rate in rupees today. */
   currency?: string;
   fxRate?: string | null;
+  /** Taken for an order before it is billed (a vehicle's booking advance): set against that order's invoice when it is made. */
+  salesOrderId?: string | null;
 };
 
 /** What a payment settles on the party's account: the money that moved plus any tax held back. */
@@ -174,6 +176,7 @@ export async function createPayment(ctx: Ctx, input: PaymentInput): Promise<Paym
       reference: input.reference ?? null,
       paidOn: input.paidOn,
       notes: input.notes ?? null,
+      salesOrderId: input.salesOrderId ?? null,
       createdBy: ctx.user?.id ?? null,
     })
     .returning();
@@ -192,6 +195,15 @@ export async function createPayment(ctx: Ctx, input: PaymentInput): Promise<Paym
   });
   await audit(ctx, 'payment', payment!.id, 'create', null, { ...payment, allocations: input.allocations ?? [] });
   return payment!;
+}
+
+/** Set part of a posted receipt against an invoice of its party (an advance meeting its order's bill). */
+export async function allocateToInvoice(ctx: Ctx, paymentId: string, invoiceId: string, amount: string): Promise<void> {
+  const [payment] = await ctx.tx.select().from(payments).where(eq(payments.id, paymentId)).for('update');
+  must(payment, 'Payment');
+  if (payment!.status !== 'posted') throw conflict('Payment is cancelled');
+  await allocate(ctx, payment!, [{ invoiceId, amount }]);
+  await audit(ctx, 'payment', paymentId, 'allocate', null, [{ invoiceId, amount }]);
 }
 
 /** Cancel a payment: its entry is reversed and its allocations stop counting, so the invoices or bills it paid are owed again. */

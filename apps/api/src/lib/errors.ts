@@ -102,6 +102,8 @@ export const setProblemReporter = (r: typeof reporter) => {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
   if (err instanceof AppError) {
+    // A 500 raised on purpose is still a fault in the system (an entry that does not balance): it is reported too.
+    if (err.status >= 500) reporter?.(err, req);
     res.status(err.status).json({ error: { code: err.code, message: err.message, details: err.details } });
     return;
   }
@@ -121,6 +123,7 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   const hit = pg && PG_ANSWERS[pg.code ?? ''];
   if (pg && hit) {
     const [status, code, say] = hit;
+    if (status >= 500) reporter?.(err, req);
     res.status(status).json({ error: { code, message: say ? say(pg) : (pg.message ?? 'Database rule violated') } });
     return;
   }

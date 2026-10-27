@@ -4,9 +4,10 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { LineEditor, toApiLines, type ItemLite, type Line } from '@/components/lines';
 import { Card, CurrencyFields, ErrorBox, Page, currencyBody } from '@/components/ui';
-import { post, useGet } from '@/lib/api';
+import { post, useGet, useSaving } from '@/lib/api';
 
 export default function NewPurchaseOrderPage() {
+  const saving = useSaving();
   const router = useRouter();
   const suppliers = useGet<{ data: any[] }>('/parties?type=supplier&limit=2000');
   const items = useGet<{ data: ItemLite[] }>('/items?limit=2000');
@@ -47,7 +48,7 @@ export default function NewPurchaseOrderPage() {
           filter={(i) => i.is_stock_item} />
       </Card>
       <ErrorBox error={error} />
-      <p style={{ marginTop: 12 }}><button type="button" className="primary" disabled={!supplierId || lines.length === 0} onClick={save}>Save PO</button></p>
+      <p style={{ marginTop: 12 }}><button type="button" className="primary" disabled={saving.busy || !supplierId || lines.length === 0} onClick={() => saving.run(save)}>{saving.busy ? 'Saving…' : 'Save PO'}</button></p>
     </Page>
   );
 }

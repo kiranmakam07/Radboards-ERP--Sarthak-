@@ -95,6 +95,12 @@ describe('a booking, and the delivery checklist', () => {
     await deliver().expect(201);
     expect(await unitStatus('SC-10')).toBe('sold');
     expect(await leadStage(id.asha)).toBe('delivered');
+    // Billed: the booking advance pays the bill as far as it goes, so only the rest is owed (code review, 27 Oct 2026).
+    const inv = (await sales.post(`/api/sales/orders/${id.order}/invoice`).send({}).expect(201)).body.data;
+    const bill = (await sales.get(`/api/sales/invoices/${inv.id}`).expect(200)).body.data;
+    expect(bill.payment).toMatchObject({ allocated: '10000.00', payment_status: 'partly_paid' });
+    expect(Number(bill.payment.outstanding)).toBe(Number(inv.grand_total) - 10000);
+    expect(bill.payments.map((p: any) => p.amount)).toEqual(['10000.00']);
   });
 
   it('asks the counter for the checklist when it sells a vehicle in a quick bill', async () => {

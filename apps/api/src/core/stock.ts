@@ -160,7 +160,9 @@ export async function stockOut(
     value = round2(q.times(unitCost));
   } else {
     const v = await valuation(tx, m.itemId);
-    if (v.qty.gt(0) && v.value.gt(0)) {
+    // Stock on hand goes out at its average, even when that is nothing (stock brought in at no cost): taking
+    // the purchase price instead would leave the stock's value below zero (code review, 27 Oct 2026).
+    if (v.qty.gt(0)) {
       unitCost = round2(v.value.div(v.qty));
       // Selling the last units takes ALL remaining value, so rounding paise never get stranded.
       value = q.eq(v.qty) ? v.value : round2(q.times(v.value).div(v.qty));

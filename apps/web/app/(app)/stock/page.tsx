@@ -3,7 +3,7 @@
 import { Fragment, useState } from 'react';
 import { SerialEntry, SerialPicker } from '@/components/serials';
 import { ActionButton, Badge, CsvLink, ErrorBox, Loading, Page, Table, Toggle, dateTime, inr, label, num } from '@/components/ui';
-import { post, qs, useGet } from '@/lib/api';
+import { post, qs, useGet, useSaving } from '@/lib/api';
 import { useCan } from '@/lib/session';
 import { rupees } from '@/components/charts';
 
@@ -126,6 +126,7 @@ type Row = { item_id: string; qty: string; unit_cost: string; serials: string[] 
 
 /** One small form for the four stock actions; they differ only in which numbers they need. */
 function MoveForm({ kind, items, locations, onDone }: { kind: 'transfer' | 'adjustment' | 'count' | 'opening'; items: any[]; locations: any[]; onDone: () => void }) {
+  const saving = useSaving();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [reason, setReason] = useState(kind === 'opening' ? 'Opening stock' : '');
@@ -209,7 +210,7 @@ function MoveForm({ kind, items, locations, onDone }: { kind: 'transfer' | 'adju
         </table>
       )}
       <div className="form-foot" style={{ marginTop: 10 }}>
-        <button type="button" className="primary" onClick={save}>{kind === 'transfer' ? 'Transfer now' : 'Submit for approval'}</button>
+        <button type="button" className="primary" disabled={saving.busy} onClick={() => saving.run(save)}>{saving.busy ? 'Saving…' : kind === 'transfer' ? 'Transfer now' : 'Submit for approval'}</button>
         <ErrorBox error={error} />
       </div>
     </div>

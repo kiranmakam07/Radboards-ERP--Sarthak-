@@ -228,11 +228,11 @@ export function maskPii(req: Request, rowsIn: Record<string, unknown>[]): Record
   });
 }
 
-/** Every list/report can be exported with ?format=csv or ?format=xlsx (PRD 7.11). */
 /** Keys that make a row someone's contact or bank details. */
 const PERSONAL_KEYS = new Set([...PHONE_KEYS, ...ADDRESS_KEYS, 'email', 'bank_account_no', 'pan']);
 
 /**
+ * Every list and report goes out through here: as JSON, or as a file with ?format=csv or ?format=xlsx (PRD 7.11).
  * `paged`: the list was asked for at most `limit` rows. When it comes back full, the answer says so (more: true),
  * and the screen offers the rest instead of stopping there without a word (technical review, 26 Oct 2026).
  */

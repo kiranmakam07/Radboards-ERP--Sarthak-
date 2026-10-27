@@ -126,7 +126,6 @@ export async function loadPermissionOverrides(tx: DB): Promise<void> {
   setPermissionOverrides(valid);
 }
 
-/** The company profile, for anything that prints it or works out tax from its state. */
 /**
  * The company a document is issued by: the profile on the Setup screen, or for a document of another
  * legal entity, that entity's name, GSTIN, state and address (bank details and terms stay the profile's).

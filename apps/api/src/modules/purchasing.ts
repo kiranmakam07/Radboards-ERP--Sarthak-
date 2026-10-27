@@ -155,12 +155,9 @@ export async function createGoodsReceipt(
     .insert(goodsReceipts)
     .values({ grnNo: number, supplierId: po!.supplierId, purchaseOrderId: po!.id, notes: input.notes ?? null, createdBy: ctx.user?.id ?? null })
     .returning();
-  const seen = new Set<string>();
   for (const l of input.lines) {
     const pol = poLines.find((p) => p.id === l.poLineId);
     if (!pol) throw badRequest('Line does not belong to this purchase order');
-    if (seen.has(pol.id)) throw badRequest('The same PO line is listed twice');
-    seen.add(pol.id);
     const total = D(pol.receivedQty).plus(l.receivedQty);
     if (total.gt(pol.qty)) {
       throw conflict(`Receiving ${fmtQty(l.receivedQty)} would exceed the ordered quantity (${fmtQty(D(pol.qty).minus(pol.receivedQty))} still pending). Raise the PO quantity first.`);
@@ -626,7 +623,8 @@ export function purchasingRouter(db: DB) {
       const [po] = await ctx.tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).for('update');
       must(po, 'Purchase order');
       if (po!.status !== 'draft') throw conflict('Only a draft PO can be edited');
-      const lines = await buildPoLines(ctx.tx, b.lines.map(toPoLine), po!.orderDate, po!.fxRate);
+      const supplier = await loadSupplier(ctx.tx, po!.supplierId);
+      const lines = await buildPoLines(ctx.tx, b.lines.map(toPoLine), po!.orderDate, po!.fxRate, isImport(supplier, po!.currency));
       await ctx.tx.delete(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, id));
       await ctx.tx.insert(purchaseOrderLines).values(lines.map((l) => ({ ...l, purchaseOrderId: id })));
       await audit(ctx, 'purchase_order', id, 'update_lines', null, lines);
@@ -634,7 +632,6 @@ export function purchasingRouter(db: DB) {
     res.json({ ok: true });
   });
 
-  /** draft -> sent (placed with the supplier) | sent -> closed (short-close) | cancel before any receipt. */
   /** Approve a PO waiting above its sender's limit: it is sent. Or send it back to draft, with the reason. */
   r.post('/orders/:id/approve', requirePerm('po:approve'), async (req, res) => {
     const id = zId.parse(req.params.id);
@@ -676,6 +673,7 @@ export function purchasingRouter(db: DB) {
     res.json({ data: await db.select().from(poApprovalLimits).orderBy(asc(poApprovalLimits.role)) });
   });
 
+  /** draft -> sent (placed with the supplier) | sent -> closed (short-close) | cancel before any receipt. */
   r.post('/orders/:id/:action', requirePerm('po:write'), async (req, res, next) => {
     const action = req.params.action;
     if (!['send', 'close', 'cancel'].includes(String(action))) return next();

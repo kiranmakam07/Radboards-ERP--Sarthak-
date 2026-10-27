@@ -28,7 +28,7 @@ import {
 import { priceFor, priceListFor } from './items';
 import { captureLead, convertLead, sourceIdByName } from './leads';
 import { applyCredit, assertCreditsCovered, creditsFor, unapplyAllOn, unapplyCredit } from './credits';
-import { cancelPayment, createPayment } from './payments';
+import { allocateToInvoice, cancelPayment, createPayment } from './payments';
 import { partyBalance, type Party } from './parties';
 import { assertFree, expireReservations, fulfil, release, reservationsOf } from './reservations';
 
@@ -622,6 +622,18 @@ export async function invoiceOrder(ctx: Ctx, orderId: string, input: { invoiceDa
     ],
   });
   await audit(ctx, 'invoice', issued!.id, 'issue', null, issued);
+  // Money already taken for this order (a vehicle's booking advance) pays this bill, as far as it goes, so the
+  // bill is not shown as owed and chased (code review, 27 Oct 2026).
+  const advances = await rows<{ id: string; unallocated: string }>(tx, sql`
+    select p.id, (p.amount + p.tds_amount - coalesce((select sum(a.amount) from payment_allocations a where a.payment_id = p.id), 0))::text as unallocated
+      from payments p where p.sales_order_id = ${orderId} and p.status = 'posted' and p.direction = 'in' order by p.paid_on, p.created_at for update`);
+  let owed = D(issued!.grandTotal);
+  for (const a of advances) {
+    const take = Decimal.min(owed, D(a.unallocated));
+    if (take.lte(0)) continue;
+    await allocateToInvoice(ctx, a.id, issued!.id, money(take));
+    owed = owed.minus(take);
+  }
   await refreshOrderStatus(ctx, orderId);
   return issued!;
 }
@@ -750,12 +762,9 @@ export async function createCreditNote(
   let taxable = D(0), cgst = D(0), sgst = D(0), igst = D(0), cess = D(0);
   const restockLines: { itemId: string; qty: Decimal; unitCost: string; serials: string[] | null }[] = [];
   const serialised = new Map((await tx.select().from(items).where(inArray(items.id, origLines.map((o) => o.itemId)))).map((i) => [i.id, i]));
-  const seen = new Set<string>();
   for (const [idx, l] of input.lines.entries()) {
     const orig = origLines.find((o) => o.id === l.invoiceLineId);
     if (!orig) throw badRequest('Line does not belong to this invoice');
-    if (seen.has(orig.id)) throw badRequest('The same line is listed twice');
-    seen.add(orig.id);
     const p = priorByLine.get(orig.id);
     const q = D(l.qty);
     const remaining = D(orig.qty).minus(p?.qty ?? 0);
@@ -943,12 +952,18 @@ export async function cancelInvoice(
   } else if (inv!.orderId) {
     const stockItems = input.restock ? await lockItems(tx, lines.map((l) => l.itemId)) : [];
     const isStock = new Set(stockItems.filter((i) => i.isStockItem).map((i) => i.id));
-    const locationId = input.restock ? await locationByType(tx, 'showroom') : null;
+    const showroom = input.restock ? await locationByType(tx, 'showroom') : null;
     let value = D(0);
     for (const l of lines) {
       if (!l.orderLineId) continue;
       const [ol] = await tx.select().from(salesOrderLines).where(eq(salesOrderLines.id, l.orderLineId)).for('update');
       if (!ol) continue;
+      // The goods go back to the place they were delivered from (the last delivery of the line), not always the
+      // Showroom (code review, 27 Oct 2026).
+      const [from] = input.restock ? await rows<{ location_id: string }>(tx, sql`
+        select d.location_id from delivery_lines dl join deliveries d on d.id = dl.delivery_id
+         where dl.order_line_id = ${ol.id} order by d.delivered_at desc limit 1`) : [];
+      const locationId = from?.location_id ?? showroom;
       const patch: Partial<typeof salesOrderLines.$inferInsert> = { invoicedQty: fmtQty(D(ol.invoicedQty).minus(l.qty)) };
       if (input.restock) {
         // The sale is void: the goods never really left, so put them back at the cost they went out at.
@@ -1240,14 +1255,14 @@ export function salesRouter(db: DB) {
     res.json({ data: { ...delivery, lines, company: await getCompany(db, (delivery as any).entity_id) } });
   });
 
-  // ---- quick bill ----
-  /** Store quick bill - the whole sale in one request and one transaction (PRD 7.4). */
   /** The delivery checklist of an order with a vehicle on it: ticks, and the photo and signed note as files. */
   r.put('/orders/:id/delivery-checks', requirePerm('sales:write'), async (req, res) => {
     const b = zDeliveryChecks.parse(req.body);
     res.json({ data: await inTx(db, req, (ctx) => saveDeliveryChecks(ctx, zId.parse(req.params.id), deliveryChecksIn(b))) });
   });
 
+  // ---- quick bill ----
+  /** Store quick bill - the whole sale in one request and one transaction (PRD 7.4). */
   r.post('/quick-bill', requirePerm('quickbill:create'), async (req, res) => {
     const b = z.object({
       party_id: emptyToNull(zId).optional(),

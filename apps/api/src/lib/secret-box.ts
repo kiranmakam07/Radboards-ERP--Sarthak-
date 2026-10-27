@@ -9,7 +9,15 @@ import { AppError } from './errors';
  * open it. (Sign-in passwords are different: they are never read back, so they are only hashed.)
  */
 
-const key = () => crypto.scryptSync(config.appSecret, 'radcore-secret-box-v1', 32);
+/**
+ * The key, made from APP_SECRET. scrypt is slow on purpose and blocks while it works, so the key is made once and
+ * kept, and made again only if APP_SECRET changes (code review, 27 Oct 2026).
+ */
+let made: { secret: string; key: Buffer } | null = null;
+const key = (): Buffer => {
+  if (made?.secret !== config.appSecret) made = { secret: config.appSecret, key: crypto.scryptSync(config.appSecret, 'radcore-secret-box-v1', 32) };
+  return made.key;
+};
 
 /** True when the server has been given a key to lock secrets with. */
 export const canSeal = (): boolean => config.appSecret.length >= 24;

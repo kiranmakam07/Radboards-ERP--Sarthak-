@@ -7,6 +7,7 @@ import {
 } from '@radcore/shared';
 import { audit } from '../core/audit';
 import { requirePerm } from '../core/auth';
+import { assertGstOpen } from '../core/gst-lock';
 import { assertMoneyAccount, postJournal, reverseJournals } from '../core/journal';
 import { nextNumber } from '../core/numbering';
 import { lockItems, revalue } from '../core/stock';
@@ -102,6 +103,8 @@ export async function addPaidCost(ctx: Ctx, id: string, input: {
   const { tx } = ctx;
   const s = await lockShipment(tx, id);
   await assertMoneyAccount(tx, input.paidFromAccountId);
+  // IGST paid at customs is input credit in that month's GSTR-3B: not once that return is filed.
+  if (input.kind === 'igst') await assertGstOpen(tx, input.paidOn ?? istDate(), 'purchases', 'no IGST paid at customs can be dated in it');
   const [line] = await tx.insert(landedCostLines).values({
     shipmentId: s.id, kind: input.kind, amount: money(input.amount), basis: input.basis ?? 'value', description: input.description ?? null,
     paidFromAccountId: input.paidFromAccountId, createdBy: ctx.user?.id ?? null,
@@ -137,6 +140,10 @@ export async function changeCost(ctx: Ctx, shipmentId: string, lineId: string, i
 export async function removeCost(ctx: Ctx, shipmentId: string, lineId: string) {
   const line = await openLine(ctx.tx, shipmentId, lineId);
   if (line.purchaseBillId) throw conflict('This cost came from a supplier\'s bill: cancel the bill to take it off');
+  if (line.kind === 'igst') {
+    const [paid] = await rows<{ d: string }>(ctx.tx, sql`select entry_date::text as d from journal_entries where ref_type = 'landed_cost_line' and ref_id = ${line.id} and reverses_entry_id is null limit 1`);
+    if (paid) await assertGstOpen(ctx.tx, paid.d, 'purchases', 'the IGST paid at customs in it cannot be taken off');
+  }
   await reverseJournals(ctx, 'landed_cost_line', line.id, istDate(), 'Cost line removed from the shipment');
   await ctx.tx.delete(landedCostLines).where(eq(landedCostLines.id, lineId));
   await audit(ctx, 'import_shipment', shipmentId, 'remove_cost', line, null);

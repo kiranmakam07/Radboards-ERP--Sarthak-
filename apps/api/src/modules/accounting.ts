@@ -8,6 +8,7 @@ import { audit, auditRead } from '../core/audit';
 import { requireAuth, requirePerm } from '../core/auth';
 import { assertMoneyAccount, postJournal, reverseJournals, type JLine } from '../core/journal';
 import { nextNumber } from '../core/numbering';
+import { assertGstOpen } from '../core/gst-lock';
 import { getSetting, setSetting } from '../core/settings';
 import { rows, type DB } from '../db/client';
 import { accounts, expenseCategories, expenses, fiscalCloses, journalEntries, tdsRates } from '../db/schema';
@@ -22,6 +23,9 @@ import { emptyToNull, inTx, sendList, zDate, zLink, zId, zListQuery, zMoney, zMo
  * the entries behind it. Sales, purchases, payments and payroll post their own entries from their
  * own modules; this one posts only expenses, manual entries, transfers and the year-end close.
  */
+
+/** Today in India, for working out how many days a bill is overdue. */
+const TODAY_IST = sql.raw("(now() at time zone 'Asia/Kolkata')::date");
 
 // ---------------------------------------------------------------------------
 // Expenses
@@ -52,6 +56,8 @@ export async function createExpense(
   const sgst = input.gstType === 'intra' ? gst.minus(cgst) : D(0);
   const igst = input.gstType === 'inter' ? gst : D(0);
   const total = D(input.amount).plus(gst);
+  // Input tax claimed in a month whose GSTR-3B is filed would change that return (code review, 27 Oct 2026).
+  if (gst.gt(0)) await assertGstOpen(tx, input.expenseDate, 'purchases', 'no expense with GST can be dated in it');
   const tds = D(input.tdsAmount ?? 0);
   let vendorPan = input.vendorPan ? normalisePan(input.vendorPan) : null;
   if (vendorPan && !isValidPan(vendorPan)) throw badRequest('The PAN must look like ABCDE1234F');
@@ -363,6 +369,7 @@ export function accountingRouter(db: DB) {
       const [row] = await ctx.tx.select().from(expenses).where(eq(expenses.id, id)).for('update');
       must(row, 'Expense');
       if (row!.status !== 'posted') throw conflict('Expense is already cancelled');
+      if (D(row!.gstAmount).gt(0)) await assertGstOpen(ctx.tx, row!.expenseDate, 'purchases', `${row!.expenseNo} cannot be cancelled`);
       const [updated] = await ctx.tx.update(expenses).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(expenses.id, id)).returning();
       await reverseJournals(ctx, 'expense', id, istDate(), `Cancelled ${row!.expenseNo}: ${b.reason}`);
       await audit(ctx, 'expense', id, 'cancel', { status: 'posted' }, { status: 'cancelled', reason: b.reason });
@@ -434,10 +441,14 @@ export function accountingRouter(db: DB) {
     const id = zId.parse(req.params.id);
     const b = z.object({ reason: zText(500), date: zDate.default(() => istDate()) }).parse(req.body);
     await inTx(db, req, async (ctx) => {
-      const [entry] = await ctx.tx.select().from(journalEntries).where(eq(journalEntries.id, id));
+      // Locked, so two people reversing the same entry at once cannot both do it (a unique index backs this up).
+      const [entry] = await ctx.tx.select().from(journalEntries).where(eq(journalEntries.id, id)).for('update');
       must(entry, 'Journal entry');
-      // Document entries are reversed by cancelling the document, so the document and books stay in step.
-      if (entry!.refType !== 'manual' && entry!.refType !== 'transfer') throw conflict('This entry belongs to a document. Cancel the document instead.');
+      // Document entries are reversed by cancelling the document, so the document and books stay in step. Balances
+      // brought in from Vyapar have no document: they are reversed here, to bring them in again.
+      if (!['manual', 'transfer', 'opening_accounts', 'opening_balance'].includes(entry!.refType)) {
+        throw conflict('This entry belongs to a document. Cancel the document instead.');
+      }
       if (entry!.reversesEntryId) throw conflict('A reversal entry cannot itself be reversed');
       const [already] = await rows(ctx.tx, sql`select 1 as x from journal_entries where reverses_entry_id = ${id} limit 1`);
       if (already) throw conflict('This entry has already been reversed');
@@ -666,32 +677,58 @@ export function accountingRouter(db: DB) {
     });
   });
 
-  /** Receivables ageing by days overdue: 0-30, 31-60, 61-90, 90+ (PRD 7.10). */
+  /**
+   * Receivables ageing by days overdue: 0-30, 31-60, 61-90, 90+ (PRD 7.10), from the open bills. `not_on_bills` is
+   * the rest of what the party's account says: a balance brought in from Vyapar (no bill behind it), or a receipt
+   * not yet set against a bill (negative). `total` is the account's balance, so a party owing only an opening
+   * balance is listed too (code review, 27 Oct 2026: those balances were not on the ageing at all).
+   */
   r.get('/reports/receivables-ageing', requirePerm('accounts:read'), async (req, res) => {
     const data = await rows(db, sql`
-      select coalesce(o.party_id::text, 'cash') as party_id, coalesce(p.name, 'Cash Sale') as party_name, p.phone, p.credit_limit,
-             sum(o.outstanding) as total,
-             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.invoice_date) <= 0) as not_due,
-             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.invoice_date) between 1 and 30) as d0_30,
-             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.invoice_date) between 31 and 60) as d31_60,
-             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.invoice_date) between 61 and 90) as d61_90,
-             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.invoice_date) > 90) as d90_plus
-        from v_invoice_outstanding o left join parties p on p.id = o.party_id
-       where o.outstanding > 0 group by o.party_id, p.name, p.phone, p.credit_limit order by sum(o.outstanding) desc`);
-    sendList(req, res, data, 'receivables-ageing');
+      with bills as (
+        select o.party_id, sum(o.outstanding) as on_bills,
+               sum(o.outstanding) filter (where ${TODAY_IST} - coalesce(o.due_date, o.invoice_date) <= 0) as not_due,
+               sum(o.outstanding) filter (where ${TODAY_IST} - coalesce(o.due_date, o.invoice_date) between 1 and 30) as d0_30,
+               sum(o.outstanding) filter (where ${TODAY_IST} - coalesce(o.due_date, o.invoice_date) between 31 and 60) as d31_60,
+               sum(o.outstanding) filter (where ${TODAY_IST} - coalesce(o.due_date, o.invoice_date) between 61 and 90) as d61_90,
+               sum(o.outstanding) filter (where ${TODAY_IST} - coalesce(o.due_date, o.invoice_date) > 90) as d90_plus
+          from v_invoice_outstanding o where o.outstanding > 0 group by o.party_id
+      ), ledger as (
+        select l.party_id, sum(l.debit - l.credit) as balance from journal_lines l join accounts a on a.id = l.account_id
+         where a.system_key = 'debtors' and l.party_id is not null group by l.party_id
+      )
+      select coalesce(b.party_id, g.party_id)::text as party_id, coalesce(p.name, 'Cash Sale') as party_name, p.phone, p.credit_limit,
+             case when b.party_id is null and g.party_id is null then b.on_bills else coalesce(g.balance, 0) end as total,
+             coalesce(b.on_bills, 0) as on_bills,
+             case when coalesce(b.party_id, g.party_id) is null then 0 else coalesce(g.balance, 0) - coalesce(b.on_bills, 0) end as not_on_bills,
+             b.not_due, b.d0_30, b.d31_60, b.d61_90, b.d90_plus
+        from bills b full join ledger g on g.party_id = b.party_id left join parties p on p.id = coalesce(b.party_id, g.party_id)
+       where coalesce(b.on_bills, 0) > 0 or coalesce(g.balance, 0) <> 0
+       order by 5 desc`);
+    sendList(req, res, data.map((r: Record<string, unknown>) => ({ ...r, party_id: r.party_id ?? 'cash' })), 'receivables-ageing');
   });
 
+  /** Payables ageing, the same way round: `total` is what the supplier's account says we owe, `not_on_bills` the part with no bill behind it. */
   r.get('/reports/payables-ageing', requirePerm('accounts:read'), async (req, res) => {
     const data = await rows(db, sql`
-      select o.supplier_id as party_id, p.name as party_name, p.phone,
-             sum(o.outstanding) as total,
-             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.bill_date) <= 0) as not_due,
-             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.bill_date) between 1 and 30) as d0_30,
-             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.bill_date) between 31 and 60) as d31_60,
-             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.bill_date) between 61 and 90) as d61_90,
-             sum(o.outstanding) filter (where (now() at time zone 'Asia/Kolkata')::date - coalesce(o.due_date, o.bill_date) > 90) as d90_plus
-        from v_bill_outstanding o join parties p on p.id = o.supplier_id
-       where o.outstanding > 0 group by o.supplier_id, p.name, p.phone order by sum(o.outstanding) desc`);
+      with bills as (
+        select o.supplier_id as party_id, sum(o.outstanding) as on_bills,
+               sum(o.outstanding) filter (where ${TODAY_IST} - coalesce(o.due_date, o.bill_date) <= 0) as not_due,
+               sum(o.outstanding) filter (where ${TODAY_IST} - coalesce(o.due_date, o.bill_date) between 1 and 30) as d0_30,
+               sum(o.outstanding) filter (where ${TODAY_IST} - coalesce(o.due_date, o.bill_date) between 31 and 60) as d31_60,
+               sum(o.outstanding) filter (where ${TODAY_IST} - coalesce(o.due_date, o.bill_date) between 61 and 90) as d61_90,
+               sum(o.outstanding) filter (where ${TODAY_IST} - coalesce(o.due_date, o.bill_date) > 90) as d90_plus
+          from v_bill_outstanding o where o.outstanding > 0 group by o.supplier_id
+      ), ledger as (
+        select l.party_id, sum(l.credit - l.debit) as balance from journal_lines l join accounts a on a.id = l.account_id
+         where a.system_key = 'creditors' and l.party_id is not null group by l.party_id
+      )
+      select coalesce(b.party_id, g.party_id) as party_id, p.name as party_name, p.phone,
+             coalesce(g.balance, 0) as total, coalesce(b.on_bills, 0) as on_bills, coalesce(g.balance, 0) - coalesce(b.on_bills, 0) as not_on_bills,
+             b.not_due, b.d0_30, b.d31_60, b.d61_90, b.d90_plus
+        from bills b full join ledger g on g.party_id = b.party_id join parties p on p.id = coalesce(b.party_id, g.party_id)
+       where coalesce(b.on_bills, 0) > 0 or coalesce(g.balance, 0) <> 0
+       order by 4 desc`);
     sendList(req, res, data, 'payables-ageing');
   });
 

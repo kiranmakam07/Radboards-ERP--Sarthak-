@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { ActionButton, Badge, Card, ErrorBox, KV, Loading, Page, Table, dateTime, inr, num, sub } from '@/components/ui';
 import { Steps } from '@/components/charts';
 import { SerialEntry } from '@/components/serials';
-import { post, useGet } from '@/lib/api';
+import { post, useGet, useSaving } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
 /** Goods received -> QC check -> inwarded to Stores / moved to Rejected -> returned to supplier (PRD 6.2). */
@@ -82,6 +82,7 @@ export default function ReceiptPage() {
 type QcRow = { rejected: string; reason: string; serials: string[]; batch: string };
 
 function QcForm({ grn, onDone }: { grn: any; onDone: () => void }) {
+  const saving = useSaving();
   const [rows, setRows] = useState<Record<string, QcRow>>(() =>
     Object.fromEntries(grn.lines.map((l: any) => [l.id, { rejected: '0', reason: '', serials: [], batch: '' }])));
   const [error, setError] = useState<string | null>(null);
@@ -109,7 +110,7 @@ function QcForm({ grn, onDone }: { grn: any; onDone: () => void }) {
         ) },
       ]} />
       <div className="form-foot" style={{ marginTop: 10 }}>
-        <button type="button" className="primary" onClick={async () => {
+        <button type="button" className="primary" disabled={saving.busy} onClick={() => saving.run(async () => {
           setError(null);
           try {
             await post(`/purchasing/receipts/${grn.id}/qc`, {
@@ -126,7 +127,7 @@ function QcForm({ grn, onDone }: { grn: any; onDone: () => void }) {
           } catch (e) {
             setError((e as Error).message);
           }
-        }}>Save QC & inward to stock</button>
+        })}>{saving.busy ? 'Saving…' : 'Save QC & inward to stock'}</button>
         <ErrorBox error={error} />
       </div>
     </div>

@@ -5,9 +5,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { LineEditor, toApiLines, type ItemLite, type Line } from '@/components/lines';
 import { Card, ErrorBox, Page } from '@/components/ui';
-import { post, useGet } from '@/lib/api';
+import { post, useGet, useSaving } from '@/lib/api';
 
 function NewOrder() {
+  const saving = useSaving();
   const router = useRouter();
   const params = useSearchParams();
   const parties = useGet<{ data: any[] }>('/parties?limit=2000');
@@ -63,7 +64,7 @@ function NewOrder() {
           priceKey={isTradeParty(party?.party_type) ? 'dealer_price' : 'retail_price'} filter={(i) => i.item_type !== 'raw_material'} />
       </Card>
       <ErrorBox error={error} />
-      <p style={{ marginTop: 12 }}><button type="button" className="primary" disabled={!partyId || lines.length === 0} onClick={save}>Save quote</button></p>
+      <p style={{ marginTop: 12 }}><button type="button" className="primary" disabled={saving.busy || !partyId || lines.length === 0} onClick={() => saving.run(save)}>{saving.busy ? 'Saving…' : 'Save quote'}</button></p>
     </Page>
   );
 }

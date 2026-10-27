@@ -8,7 +8,7 @@ import {
 } from '@/components/ui';
 import { SerialPicker } from '@/components/serials';
 import { JOB_STEPS, JOB_STEP_LABELS } from '@/components/service';
-import { api, post, useGet } from '@/lib/api';
+import { api, post, useGet, useSaving } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
 type Open = 'diagnose' | 'line' | 'fault' | 'cancel' | 'claim' | { fit: any } | null;
@@ -216,6 +216,7 @@ function NewClaim({ job, onClose, onDone }: { job: any; onClose: () => void; onD
 
 /** Fit a part from the workshop shelf; a part kept by serial is picked from what is there. */
 function FitPart({ job, line, onClose, onDone }: { job: any; line: any; onClose: () => void; onDone: () => void }) {
+  const saving = useSaving();
   const left = Number(line.qty) - Number(line.issued_qty);
   const [qty, setQty] = useState(String(left));
   const [serials, setSerials] = useState<string[]>([]);
@@ -229,13 +230,13 @@ function FitPart({ job, line, onClose, onDone }: { job: any; line: any; onClose:
       <p className="muted small">{line.is_warranty ? 'Under warranty: its cost goes to warranty expense.' : 'Chargeable: it is billed when the unit is delivered.'}</p>
       <ErrorBox error={error} />
       <div className="form-foot">
-        <button type="button" className="primary" onClick={async () => {
+        <button type="button" className="primary" disabled={saving.busy} onClick={() => saving.run(async () => {
           setError(null);
           try {
             await post(`/service/jobs/${job.id}/lines/${line.id}/issue`, { qty, ...(serials.length ? { serials } : {}) });
             onDone(); onClose();
           } catch (e) { setError((e as Error).message); }
-        }}>Fit</button>
+        })}>{saving.busy ? 'Saving…' : 'Fit'}</button>
       </div>
     </Modal>
   );

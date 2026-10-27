@@ -193,7 +193,11 @@ describe('0027 unit serials and batches', () => {
   it('cancelling a bill with restock brings its units back too', async () => {
     const cancelled = await (await w.as('accounts')).post(`/api/sales/invoices/${id.dealerInvoice}/cancel`).send({ reason: 'Wrong dealer', restock: true });
     expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
-    expect((await units(id.ev!))[1]).toMatchObject({ serial_no: 'EV002', status: 'available', location: 'Showroom' });
+    // Back where it was delivered from (code review, 27 Oct 2026): the dealer's vehicle went out of Stores.
+    expect((await units(id.ev!))[1]).toMatchObject({ serial_no: 'EV002', status: 'available', location: 'Stores' });
+    expect([await stockAt(id.ev!, 'stores'), await unitsAt(id.ev!, 'stores')]).toEqual([1, 1]);
+    // Put on the showroom floor for what follows.
+    await (await w.as('stores')).post('/api/stock/transfers').send({ from_location_id: id.stores, to_location_id: id.showroom, reason: 'To the floor', lines: [{ item_id: id.ev, qty: 1, serials: ['EV002'] }] }).expect(201);
     expect([await stockAt(id.ev!, 'showroom'), await unitsAt(id.ev!, 'showroom')]).toEqual([2, 2]);
   });
 

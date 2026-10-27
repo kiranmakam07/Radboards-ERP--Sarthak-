@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * The one way a screen talks to the API.
@@ -56,6 +56,33 @@ export function withSaveKey<T>(key: string, run: () => T): T {
   } finally {
     ambient = before;
   }
+}
+
+/**
+ * For a save button that calls the API itself rather than through Form or ActionButton: one save at a time, sent
+ * with its key, so a double click does not save twice (code review, 27 Oct 2026: credit notes, manual journals,
+ * deliveries, stock transfers and fitted parts could each be saved twice by a quick second click).
+ *   const saving = useSaving();
+ *   <button disabled={saving.busy} onClick={() => saving.run(save)}>
+ * The handler keeps catching and showing its own errors. A new key is taken after each save, so the next one is new.
+ */
+export function useSaving() {
+  const [busy, setBusy] = useState(false);
+  const running = useRef(false);
+  const key = useRef(newSaveKey());
+  const run = useCallback(async (fn: () => Promise<unknown>) => {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    try {
+      await withSaveKey(key.current, fn);
+    } finally {
+      key.current = newSaveKey();
+      running.current = false;
+      setBusy(false);
+    }
+  }, []);
+  return { busy, run };
 }
 
 /** Call the API (proxied under /api by Next). Throws ApiError with the server's message. */

@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { InvoiceDocument } from '@/components/invoice';
 import { ActionButton, Card, ErrorBox, Loading, Page, SmartButton, StatusBar, Table, Toggle, date, inr, num } from '@/components/ui';
-import { post, useGet } from '@/lib/api';
+import { post, useGet, useSaving } from '@/lib/api';
 import { useCan } from '@/lib/session';
 
 /** Send the bill to the customer: a link that opens it, by WhatsApp to their number when we have one, or copied. */
@@ -165,6 +165,7 @@ export default function InvoicePage() {
 }
 
 function CreditNoteForm({ invoice, onDone }: { invoice: any; onDone: (cn: any) => void }) {
+  const saving = useSaving();
   const [qty, setQty] = useState<Record<string, string>>({});
   const [reason, setReason] = useState('');
   const [restock, setRestock] = useState(true);
@@ -191,13 +192,14 @@ function CreditNoteForm({ invoice, onDone }: { invoice: any; onDone: (cn: any) =
       <div className="form" style={{ marginTop: 10 }}>
         <label className="wide"><span>Reason *</span><input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
         <label className="check"><input type="checkbox" checked={restock} onChange={(e) => setRestock(e.target.checked)} /><span>Put the goods back into stock (Showroom)</span></label>
-        <div className="form-foot"><button type="button" className="primary" onClick={save}>Issue credit note</button><ErrorBox error={error} /></div>
+        <div className="form-foot"><button type="button" className="primary" disabled={saving.busy} onClick={() => saving.run(save)}>{saving.busy ? 'Saving…' : 'Issue credit note'}</button><ErrorBox error={error} /></div>
       </div>
     </div>
   );
 }
 
 function CancelForm({ id, hasPayments, onDone }: { id: string; hasPayments: boolean; onDone: () => void }) {
+  const saving = useSaving();
   const [reason, setReason] = useState('');
   const [restock, setRestock] = useState(true);
   const [cancelPayments, setCancelPayments] = useState(hasPayments);
@@ -211,7 +213,7 @@ function CancelForm({ id, hasPayments, onDone }: { id: string; hasPayments: bool
       <label className="check"><input type="checkbox" checked={restock} onChange={(e) => setRestock(e.target.checked)} /><span>The goods never left: put them back in stock</span></label>
       {hasPayments && <label className="check"><input type="checkbox" checked={cancelPayments} onChange={(e) => setCancelPayments(e.target.checked)} /><span>Also cancel the receipts taken for it</span></label>}
       <div className="form-foot">
-        <button type="button" className="danger" onClick={async () => {
+        <button type="button" className="danger" disabled={saving.busy} onClick={() => saving.run(async () => {
           setError(null);
           try {
             await post(`/sales/invoices/${id}/cancel`, { reason, restock, cancel_payments: cancelPayments });
@@ -219,7 +221,7 @@ function CancelForm({ id, hasPayments, onDone }: { id: string; hasPayments: bool
           } catch (e) {
             setError((e as Error).message);
           }
-        }}>Cancel invoice</button>
+        })}>{saving.busy ? 'Saving…' : 'Cancel invoice'}</button>
         <ErrorBox error={error} />
       </div>
     </div>

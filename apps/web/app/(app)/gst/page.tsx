@@ -46,13 +46,14 @@ export default function GstPage() {
         <>
           <div className="stats">
             <Stat label="Output tax" value={`₹${inr(s.outward.total_tax)}`} hint={`on ₹${inr(s.outward.net.taxable)} taxable`} />
-            <Stat label="Input tax credit" value={`₹${inr(s.itc.total_tax)}`} hint="purchases + expenses − debit notes" />
+            <Stat label="Input tax credit" value={`₹${inr(s.itc.total_tax)}`} hint="purchases + expenses + IGST at customs − debit notes" />
             <Stat label="Estimated net payable" value={`₹${inr(s.net_payable.total)}`} hint="before portal set-off rules" />
           </div>
           <Card title="GSTR-3B summary">
             <Table rows={[
               { row: '3.1(a) Outward taxable supplies (net of credit notes)', ...s.outward.net },
               { row: '4(A) Input tax credit (net of debit notes)', ...s.itc.net },
+              ...(Number(s.itc.imports?.igst) ? [{ row: '   of which 4(A)(1): IGST paid at customs on imports', taxable: '', ...s.itc.imports }] : []),
               { row: 'Net payable (output − ITC)', taxable: '', ...s.net_payable },
             ]} columns={[
               { key: 'row', title: '' },
